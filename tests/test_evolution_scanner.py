@@ -10343,7 +10343,7 @@ def test_evolution_self_audit_main_accepts_help_flag(capsys):
         main(["--help"])
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
-    assert "memory-evolution-audit" in captured.out
+    assert "infra-self-audit" in captured.out
     assert "usage:" in captured.out
 
 

@@ -38,9 +38,15 @@ dev = [
 
 [project.scripts]
 infra-cli = "infra_core.cli:main"
+infra-self-audit = "infra_core.engine.evolution_self_audit:main"
+infra-hygiene-audit = "infra_core.packs.memory.hygiene:main"
+infra-error-patterns = "infra_core.packs.memory.error_patterns:main"
+infra-daily-audit = "infra_core.packs.memory.daily_audit:main"
+infra-layout-audit = "infra_core.packs.memory.layout_audit:main"
 
 [project.entry-points."infra_core.packs"]
 # Pack discovery mechanism - packs register themselves here
+memory = "infra_core.packs.memory"
 # Example: memory = "infra_core.packs.memory:MemoryPack"
 
 [tool.setuptools.packages.find]
@@ -61,6 +67,8 @@ select = ["E", "F", "I", "W"]
 [tool.ruff.lint.per-file-ignores]
 # Transplanted engine code preserves original line lengths and import order from memory-core
 "src/infra_core/engine/**/*.py" = ["E501", "E402"]
+# Transplanted memory pack tools preserve original line lengths from memory-core
+"src/infra_core/packs/memory/*.py" = ["E501"]
 "tests/**/*.py" = ["E501", "E402"]
 
 [tool.mypy]

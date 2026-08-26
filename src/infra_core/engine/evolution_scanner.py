@@ -160,12 +160,22 @@ def run_audit_tool(
         # P2-B: Strip GitHub tokens from audit subprocess environment.
         # Audit tools do not need gh access; leaking DISPATCH_TOKEN expands trust boundary.
         safe_env = {k: v for k, v in os.environ.items() if k not in ("GH_TOKEN", "GITHUB_TOKEN")}
+        # M3: Substitute {repo_root} template placeholder in command strings.
+        # This allows pack-defined ToolSpecs to reference the scan target dynamically.
+        effective_cmd = tool["command"]
+        if repo_root is not None:
+            effective_cmd = effective_cmd.replace("{repo_root}", str(repo_root))
+        # cwd semantics (M2 finding e): subprocess runs with cwd=repo_root so that
+        # any relative paths in the tool output resolve against the scan target,
+        # not the scanner's own cwd. If repo_root is None, subprocess inherits
+        # the parent's cwd (backward compat for inline commands without templates).
         result = subprocess.run(
-            shlex.split(tool["command"]),
+            shlex.split(effective_cmd),
             capture_output=True,
             text=True,
             timeout=timeout,
             env=safe_env,
+            cwd=str(repo_root) if repo_root else None,
         )
         # Log stderr as warning when exit code is non-zero (audit tools exit non-zero on findings)
         if result.returncode != 0:
@@ -1233,11 +1243,37 @@ def _handle_audit_failures(raw_results: list[tuple[str, Any]]) -> None:
         )
 
 
-# Known rule packs. M2: "memory" exists but defines no tools yet (M3 migrates
-# pack contents). Listing it in config `rule_packs` is valid but a no-op.
+def _load_pack_tools(pack_name: str) -> list[dict[str, Any]]:
+    """Load tool specs from a rule pack via entry points.
+
+    Args:
+        pack_name: Name of the pack (e.g., "memory")
+
+    Returns:
+        List of tool spec dicts from the pack, or empty list if not found
+    """
+    try:
+        from importlib.metadata import entry_points
+
+        eps = entry_points(group="infra_core.packs")
+        for ep in eps:
+            if ep.name == pack_name:
+                pack_module = ep.load()
+                # Pack modules must expose get_tool_specs() function
+                if hasattr(pack_module, "get_tool_specs"):
+                    return pack_module.get_tool_specs()  # type: ignore[no-any-return]
+        return []
+    except Exception as e:
+        print(f"[evolution] Warning: failed to load pack '{pack_name}': {e}")
+        return []
+
+
+# Known rule packs. M3: "memory" pack is loaded dynamically via entry points.
+# Listing a pack in config `rule_packs` triggers entry point discovery.
 KNOWN_RULE_PACKS: dict[str, list[dict[str, Any]]] = {
-    "memory": [],
+    "memory": [],  # Populated on first resolve_rule_packs call
 }
+_PACKS_LOADED: dict[str, bool] = {}  # Track which packs have been loaded
 
 
 def resolve_rule_packs(config: dict[str, Any]) -> None:
