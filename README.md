@@ -88,6 +88,21 @@ ruff format --check .
 actionlint
 ```
 
+## 治理自检 dry-run
+
+governance 门禁（workflow `Evolution Governance` + composite action `actions/governance-check`）的判定核心可本地模拟验证（fail-closed、路径感知）：
+
+```bash
+# 非 owner 修改受保护路径 → 退出码 1（拒绝）
+python -m infra_core.governance --author someone-else --files .evolution/config.yml
+
+# 非 owner 修改普通文件 → 退出码 0（放行）
+python -m infra_core.governance --author someone-else --files README.md
+
+# owner 修改受保护路径 → 退出码 0（放行）
+python -m infra_core.governance --author hdot123 --files .evolution/config.yml
+```
+
 ## 命名契约
 
 以下字符串构成隐式契约网络，任何一处改动会静默杀死 auto-merge/watchdog：
