@@ -34,15 +34,13 @@
 # 间隔最多 4 次探测窗口后由人工介入。
 name: Droid Review Watchdog
 
-# 触发源：
-# - workflow_run "Droid Auto Review"/"CI" completed → 职责 1/2（见各 job）
-# - schedule 每 30 分钟 → 职责 3 quota-sweep（配额自愈）
+# HOTFIX (M2): Triggers disabled — workflow_dispatch only.
+# M2 scrutiny: workflow_run and schedule triggers cause persistent red ticks
+# due to missing scripts/ paths (engine in src/infra_core/engine).
+# M4 will rewrite as formal reusable/caller form.
+
 on:
-  workflow_run:
-    workflows: ["Droid Auto Review", "CI"]
-    types: [completed]
-  schedule:
-    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 permissions:
   actions: write

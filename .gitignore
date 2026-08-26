@@ -56,3 +56,7 @@ tests/.memory-anchor.md
 droid-wiki/
 AGENTS.md
 tools/
+
+# .evolution runtime state (live write targets, not for git tracking)
+.evolution/heartbeat.json
+.evolution/findings_over_time.json

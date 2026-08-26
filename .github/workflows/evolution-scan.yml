@@ -15,11 +15,15 @@
 # 2. Use workflow_dispatch chain: scanner creates Issue with GITHUB_TOKEN, then
 #    a second workflow with a PAT comments on the Issue (workaround)
 
+# HOTFIX (M2): Triggers disabled — workflow_dispatch only.
+# M2 scrutiny: scripts/ paths referenced by this workflow do not exist
+# (engine lives in src/infra_core/engine, shell in src/infra_core/shell).
+# Scheduled cron */30 caused persistent red ticks (exit 127).
+# M4 will rewrite as formal reusable/caller form.
+
 name: Evolution Scan
 
 on:
-  schedule:
-    - cron: '*/30 * * * *'
   workflow_dispatch: {}
 
 concurrency:

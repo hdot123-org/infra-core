@@ -1,8 +1,11 @@
+# HOTFIX (M2): Triggers disabled — workflow_dispatch only.
+# M2 scrutiny: scripts/ paths do not exist (engine in src/infra_core/engine).
+# Scheduled cron 0 */2 caused persistent red ticks.
+# M4 will rewrite as formal reusable/caller form.
+
 name: Evolution Heartbeat
 
 on:
-  schedule:
-    - cron: '0 */2 * * *'  # Every 2 hours
   workflow_dispatch: {}
 
 concurrency:

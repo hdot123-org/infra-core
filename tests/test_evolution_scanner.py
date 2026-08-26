@@ -6316,7 +6316,9 @@ def test_heartbeat_workflow_yaml_exists():
 
 
 def test_heartbeat_workflow_has_independent_cron():
-    """VAL-HB-002: Heartbeat has independent cron schedule (every 2 hours)."""
+    """M2 HOTFIX: 触发器已禁用为 workflow_dispatch-only 桩。
+    原 cron 调度待 M4 reusable/caller 重写时恢复。
+    """
     import yaml
 
     workflow_path = (
@@ -6326,21 +6328,12 @@ def test_heartbeat_workflow_has_independent_cron():
     with workflow_path.open() as f:
         data = yaml.safe_load(f)
 
-    # Must have on.schedule.cron trigger
+    # Must have on triggers
     # YAML 1.1 parses bare 'on' as boolean True
     on_triggers = data.get("on") or data.get(True)
     assert on_triggers is not None, "Workflow must have 'on' triggers"
-    assert "schedule" in on_triggers, "Workflow must have schedule trigger"
-    assert isinstance(on_triggers["schedule"], list), "schedule must be a list"
-    assert len(on_triggers["schedule"]) > 0, "schedule must have at least one entry"
-
-    # Verify cron pattern (every 2 hours)
-    cron_entry = on_triggers["schedule"][0].get("cron", "")
-    assert cron_entry, "schedule must have 'cron' field"
-    # Expected: '0 */2 * * *' (every 2 hours at minute 0)
-    assert "*/2" in cron_entry or "0 */2" in cron_entry, (
-        f"Cron should run every 2 hours, got: {cron_entry}"
-    )
+    # M2 HOTFIX: 只有 workflow_dispatch，不再触发自动运行
+    assert "workflow_dispatch" in on_triggers, "Workflow must have workflow_dispatch trigger"
 
 
 def test_heartbeat_freshness_check_stale():
@@ -10361,3 +10354,158 @@ def test_evolution_self_audit_main_rejects_unknown_flag():
     with pytest.raises(SystemExit) as exc_info:
         main(["--definitely-not-a-real-flag"])
     assert exc_info.value.code != 0
+
+
+# ============================================================================
+# M2 Hotfix: report-only, rule_packs, and pack_tool tests
+# ============================================================================
+
+# Complete minimal config template for scanner tests.
+# REQUIRED_CONFIG_KEYS requires all these fields in .evolution/config.yml.
+_M2_HOTFIX_CONFIG_TEMPLATE = """
+dedup_label: evolution-found
+failure_label: evolution-isolated
+severity_order: [critical, warning, info]
+max_issues_per_tick: 5
+isolation_threshold: 3
+max_self_audit_issues_per_tick: 1
+max_code_hygiene_issues_per_tick: 1
+snapshot_limit: 100
+"""
+
+
+def _write_hotfix_config(tmp_path, extra_yaml: str = "") -> Path:
+    """Write a complete config.yml for M2 hotfix tests."""
+    evolution_dir = tmp_path / ".evolution"
+    evolution_dir.mkdir(exist_ok=True)
+    config_file = evolution_dir / "config.yml"
+    config_file.write_text(_M2_HOTFIX_CONFIG_TEMPLATE + extra_yaml)
+    return config_file
+
+
+def test_report_only_early_exit(tmp_path, capsys):
+    """report-only 模式在扫描后立即退出（exit 0），输出 JSON，不创建 label。"""
+    _write_hotfix_config(tmp_path, "audit_tools: []\n")
+
+    # Mock run_audit_tool 返回空列表（无 finding）
+    with patch("evolution_scanner.run_audit_tool", return_value=[]):
+        with pytest.raises(SystemExit) as exc_info:
+            evolution_scanner.main(["--report-only", "--repo-root", str(tmp_path)])
+
+    # 必须退出码 0
+    assert exc_info.value.code == 0
+
+    # 检查输出包含 JSON 报告内容
+    captured = capsys.readouterr()
+    assert "findings" in captured.out
+    assert "tool_status" in captured.out
+
+
+def test_report_only_no_history_write(tmp_path, capsys):
+    """report-only 模式不写 findings_over_time.json。"""
+    _write_hotfix_config(tmp_path, "audit_tools: []\n")
+
+    history_file = tmp_path / ".evolution" / "findings_over_time.json"
+
+    # 运行 report-only
+    with patch("evolution_scanner.run_audit_tool", return_value=[]):
+        with pytest.raises(SystemExit):
+            evolution_scanner.main(["--report-only", "--repo-root", str(tmp_path)])
+
+    # history 文件不应该被创建
+    assert not history_file.exists(), "report-only 模式不应写 history 文件"
+
+
+def test_rule_packs_parsing_known_pack(tmp_path):
+    """rule_packs 配置解析已知 pack（memory）成功，不报错。"""
+    _write_hotfix_config(tmp_path, "rule_packs:\n  - pack: memory\naudit_tools: []\n")
+
+    config = evolution_scanner.load_config(tmp_path)
+
+    # 验证 rule_packs 存在且包含 dict 形式
+    assert "rule_packs" in config
+    assert config["rule_packs"] == [{"pack": "memory"}]
+
+    # resolve_rule_packs 不应抛出异常（memory 是已知的空 pack）
+    evolution_scanner.resolve_rule_packs(config)
+
+    # memory pack 当前为空，audit_tools 保持空
+    assert config["audit_tools"] == []
+
+
+def test_rule_packs_unknown_pack_error(tmp_path, capsys):
+    """rule_packs 配置包含未知 pack 时 sys.exit(1) 并打印可用 pack 列表。"""
+    _write_hotfix_config(tmp_path, "rule_packs:\n  - pack: nonexistent_pack\naudit_tools: []\n")
+
+    config = evolution_scanner.load_config(tmp_path)
+
+    # 解析 rule_packs 应该抛出 SystemExit
+    with pytest.raises(SystemExit) as exc_info:
+        evolution_scanner.resolve_rule_packs(config)
+
+    assert exc_info.value.code == 1
+
+    # 错误消息通过 print() 写到 stdout
+    captured = capsys.readouterr()
+    assert "nonexistent_pack" in captured.out
+    assert "Available packs" in captured.out or "available" in captured.out.lower()
+
+
+def test_rule_packs_with_inline_override(tmp_path):
+    """rule_packs + audit_tools 同名条目时，inline 覆盖 pack 定义。"""
+    _write_hotfix_config(
+        tmp_path,
+        "rule_packs:\n  - pack: memory\n"
+        "audit_tools:\n  - name: test_tool\n    command: echo test\n",
+    )
+
+    config = evolution_scanner.load_config(tmp_path)
+    evolution_scanner.resolve_rule_packs(config)
+
+    # inline 的 test_tool 保留（memory pack 为空，无覆盖）
+    assert len(config["audit_tools"]) == 1
+    assert config["audit_tools"][0]["name"] == "test_tool"
+
+
+def test_rule_packs_enabled_false_disables_tool(tmp_path):
+    """audit_tools 中 enabled: false 的条目被 resolve_rule_packs 移除。"""
+    _write_hotfix_config(
+        tmp_path,
+        "rule_packs:\n  - pack: memory\n"
+        "audit_tools:\n"
+        "  - name: enabled_tool\n    command: echo enabled\n"
+        "  - name: disabled_tool\n    command: echo disabled\n    enabled: false\n",
+    )
+
+    config = evolution_scanner.load_config(tmp_path)
+    evolution_scanner.resolve_rule_packs(config)
+
+    # 验证只有 enabled 的 tool 保留
+    assert len(config["audit_tools"]) == 1
+    assert config["audit_tools"][0]["name"] == "enabled_tool"
+
+
+def test_pack_tool_reference_form(tmp_path):
+    """audit_tools 中的 pack_tool 引用形式被解析为 pack 内工具定义。
+
+    M2 memory pack 为空（KNOWN_RULE_PACKS["memory"] == []），所以
+    pack_tool 引用一个不存在的 pack 工具名时，entry 作为 standalone 保留
+    （剥离 pack_tool key 后保留其他字段）。
+    """
+    _write_hotfix_config(
+        tmp_path,
+        "audit_tools:\n  - name: ref_tool\n    pack_tool: hygiene\n    command: echo standalone\n",
+    )
+
+    config = evolution_scanner.load_config(tmp_path)
+    # 有 pack_tool 引用但没有 rule_packs 时 resolve_rule_packs 提前返回，
+    # 需要提供 rule_packs 才能进入 merge 路径
+    config["rule_packs"] = [{"pack": "memory"}]
+    evolution_scanner.resolve_rule_packs(config)
+
+    # pack_tool: hygiene 在 memory pack 里找不到对应工具（memory 为空），
+    # 所以 entry 降级为 standalone（剥离 pack_tool key，保留其余字段）
+    assert len(config["audit_tools"]) == 1
+    tool = config["audit_tools"][0]
+    assert tool["name"] == "ref_tool"
+    assert "pack_tool" not in tool, "pack_tool key should be stripped after resolution"

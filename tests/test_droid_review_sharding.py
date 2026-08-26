@@ -62,9 +62,13 @@ class TestWorkflowStructure:
         assert "droid-review-debug-" in workflow_raw
 
     def test_04_pull_request_target_trigger(self, workflow_data):
-        """安全：必须用 pull_request_target（BASE checkout 安全模型）。"""
+        """M2 HOTFIX: 触发器已禁用为 workflow_dispatch-only 桩。
+        原契约（pull_request_target + BASE checkout 安全模型）保留在 workflow body，
+        触发器待 M4 reusable/caller 重写时恢复。
+        """
         triggers = workflow_data.get(True, {})  # YAML parses 'on:' as True
-        assert "pull_request_target" in triggers
+        # M2 HOTFIX: 只有 workflow_dispatch，不再触发自动运行
+        assert "workflow_dispatch" in triggers
 
     def test_05_concurrency_cancel_in_progress(self, workflow_data):
         """VAL-SHARD-009: concurrency group 含 cancel-in-progress: true。"""

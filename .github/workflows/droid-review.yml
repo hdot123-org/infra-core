@@ -17,19 +17,22 @@
 #   Layer 4: concurrency cap (SHARD_MAX_PARALLEL)
 #   Layer 5: prompt budget instructions (embedded in shard-review-prompt.md)
 
+# HOTFIX (M2): Triggers disabled — workflow_dispatch only.
+# M2 scrutiny: workflow uses pull_request_target with secrets, creating security
+# risk. Scheduled/auto-trigger paths not yet validated for new structure.
+# M4 will rewrite as formal reusable/caller form.
+
 name: Droid Auto Review
 
 on:
-  pull_request_target:
-    types: [opened, ready_for_review, reopened, synchronize]
   workflow_dispatch:
     inputs:
       pr_number:
-        description: 'PR number to review'
-        required: true
-        type: number
+        description: 'PR number (for manual runs)'
+        required: false
+        type: string
       head_sha:
-        description: 'Head commit SHA (optional, defaults to PR head)'
+        description: 'Head SHA override (for manual runs)'
         required: false
         type: string
 
