@@ -1,0 +1,202 @@
+# Droid Review Watchdog — 503 自愈 rerun（TD-503-01 v2）+ CI 失败取消 review + BYOK 配额自愈
+#
+# 职责 1（self-heal-rerun）：droid-action 的 prep 阶段会调 GitHub API 做权限
+# 检查，2026-08-17/18 的持续 503 使 review 在本体开始前就 exit 1，每个 PR
+# 都要人工 rerun。
+#
+# 为什么用 workflow_run 而非 job 内自愈 step（第一版方案的 P0 教训）：
+#   1. rerun-failed-jobs API 要求目标 run 已处于终态。job 内 step 执行时本 run
+#      仍是 in_progress，API 必然拒绝（时序竞争，架构性不可行）。
+#   2. job 内自愈需要 pull_request_target 工作流持有 actions: write，扩大了
+#      可被 PR 事件触发的写权限面。workflow_run 只从默认分支取工作流定义，
+#      恶意 PR 无法篡改本文件，权限面最小化。
+#   3. workflow_run 在上游 run completed 后触发（本仓库 auto-merge.yml 的
+#      INFRA-212 模式），此时 run 已终态，rerun API 可用。
+#
+# 门禁语义：watchdog 只请求 rerun，不改变任何 check 结论。失败轮保持 failure
+# 结算（fail-closed），rerun 的那轮才是有效 review。真代码审查发现（P1/P2）
+# 不含 infra 瞬时日志特征，不会触发 rerun。
+#
+# 职责 2（cancel-on-ci-fail）：CI 失败时取消同 head SHA 上仍在跑的
+# droid-review（2026-08-19 PR #810 实证：并行设计下 CI 变红 review 不自停，
+# Qwen token 空烧）。官方模式：workflow_run conclusion 条件分支（文档
+# events-that-trigger-workflows#running-a-workflow-based-on-the-conclusion-…）。
+#
+# 职责 3（quota-sweep）：BYOK 429 配额耗尽自愈（2026-08-19 PR #850 实证）。
+# Bailian 配额打穿时 review exit 1，但 job log 只有 "Droid Exec exited with
+# code 1"，真实报错（"BYOK Error: 429 usage allocated quota exceeded"）只在
+# debug artifact 的 session transcript 里 — 职责 1 的日志 grep 匹配不到。
+# 且配额耗尽时立即 rerun 无意义（配额未恢复，2-7 分钟内再死），需要延迟
+# 重试。设计：schedule 每 30 分钟扫描失败的 "Droid Auto Review" run →
+# 下载其 droid-review-debug-* artifact → grep transcript 找 429 特征 →
+# 命中且距 run 结束超过 30 分钟（等配额恢复）→ rerun-failed-jobs。
+# run_attempt < 3 限界防 rerun 风暴；配额周期通常按小时/天重置，30 分钟
+# 间隔最多 4 次探测窗口后由人工介入。
+name: Droid Review Watchdog
+
+# 触发源：
+# - workflow_run "Droid Auto Review"/"CI" completed → 职责 1/2（见各 job）
+# - schedule 每 30 分钟 → 职责 3 quota-sweep（配额自愈）
+on:
+  workflow_run:
+    workflows: ["Droid Auto Review", "CI"]
+    types: [completed]
+  schedule:
+    - cron: '*/30 * * * *'
+
+permissions:
+  actions: write
+
+concurrency:
+  group: droid-review-watchdog-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  self-heal-rerun:
+    # 仅处理 Droid Auto Review 的失败 run；run_attempt 限界防止 rerun 风暴
+    # WATCHDOG_MAX_ATTEMPT repo variable（缺失时回退默认值 3，日志记录）
+    if: >
+      github.event.workflow_run.name == 'Droid Auto Review' &&
+      github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Rerun droid-review on infra-transient failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          MAX_ATTEMPT: ${{ vars.WATCHDOG_MAX_ATTEMPT }}
+        run: |
+          set -eu
+          # repo variable fallback（变量缺失时使用默认值并打日志）
+          if [ -z "${MAX_ATTEMPT:-}" ]; then MAX_ATTEMPT=3; echo "变量 WATCHDOG_MAX_ATTEMPT 未设置、使用默认值 3"; fi
+          if [ "$RUN_ATTEMPT" -ge "$MAX_ATTEMPT" ]; then
+            echo "Run $RUN_ID already at attempt $RUN_ATTEMPT (>=$MAX_ATTEMPT). Skipping; needs manual attention."
+            exit 0
+          fi
+          echo "Droid Auto Review run $RUN_ID (attempt $RUN_ATTEMPT/$MAX_ATTEMPT) failed; checking logs..."
+          # 失败特征匹配：prep 阶段的 GitHub API 503/网络瞬时错误（2026-08-17/18 实测日志）
+          PATTERNS='permission - 503|Failed to check permissions|HttpError: No server is currently available|unexpected EOF|TLS handshake timeout'
+          JOB_LOGS=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --jq '.jobs[].id' | while read -r JOB_ID; do
+            gh api "repos/$REPO/actions/jobs/$JOB_ID/logs" 2>/dev/null || true
+          done)
+          if echo "$JOB_LOGS" | grep -qE "$PATTERNS"; then
+            echo "Infra-transient failure detected. Requesting rerun of failed jobs..."
+            if gh api -X POST "repos/$REPO/actions/runs/$RUN_ID/rerun-failed-jobs"; then
+              echo "Rerun requested (upstream run is terminal; API accepts). The rerun carries the effective review."
+            else
+              echo "::warning::Rerun request failed (503 storm?). Manual rerun still possible; not bypassing gate."
+            fi
+          else
+            echo "Failure does not match infra-transient patterns — likely a real review finding or credential issue. No auto-rerun."
+          fi
+
+  cancel-on-ci-fail:
+    # CI（test/qa 门禁）失败 → 取消同 head SHA 上仍在跑的 droid-review。
+    # 背景（2026-08-19 PR #810 实证）：review 与 CI 并行设计下，CI 变红后
+    # review 不会自停，Qwen token 持续烧（单次上界 45min timeout）。本 job
+    # 补上状态机缺失的边：CI 红 → review 终止。合并门禁语义不变（ci-ok 仍
+    # 阻止合并；修复 push 后 droid-review 由 pull_request_target 重新触发）。
+    if: >
+      github.event.workflow_run.name == 'CI' &&
+      github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Cancel in-progress droid-review on CI failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -eu
+          echo "CI failed for $HEAD_SHA; cancelling in-progress Droid Auto Review runs..."
+          # 列出该 head SHA 上 in_progress/queued 的 Droid Auto Review run 并取消
+          RUNS=$(gh api "repos/$REPO/actions/runs?head_sha=$HEAD_SHA&status=in_progress" --paginate --jq '.workflow_runs[] | select(.name == "Droid Auto Review") | .id')
+          QUEUED=$(gh api "repos/$REPO/actions/runs?head_sha=$HEAD_SHA&status=queued" --paginate --jq '.workflow_runs[] | select(.name == "Droid Auto Review") | .id')
+          CANCELLED=0
+          for RUN_ID in $RUNS $QUEUED; do
+            if gh api -X POST "repos/$REPO/actions/runs/$RUN_ID/cancel"; then
+              echo "Cancelled Droid Auto Review run $RUN_ID"
+              CANCELLED=$((CANCELLED + 1))
+            else
+              echo "::warning::Failed to cancel run $RUN_ID (may have just finished; harmless)."
+            fi
+          done
+          echo "Done. Cancelled $CANCELLED review run(s)."
+
+  quota-sweep:
+    # 职责 3：BYOK 429 配额耗尽自愈（2026-08-19 PR #850 实证，见文件头注释）。
+    # 只在 schedule 触发时运行，避免 workflow_run 事件误入（quota 耗尽时立即
+    # rerun 无意义，必须等配额恢复窗口）。
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Rerun quota-exhausted droid-review after recovery window
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          QUOTA_SCAN_WINDOW_HOURS: ${{ vars.QUOTA_SCAN_WINDOW_HOURS }}
+          QUOTA_RECOVERY_WINDOW_SECONDS: ${{ vars.QUOTA_RECOVERY_WINDOW_SECONDS }}
+          WATCHDOG_MAX_ATTEMPT: ${{ vars.WATCHDOG_MAX_ATTEMPT }}
+        run: |
+          set -eu
+          # repo variable fallback（变量缺失时使用默认值并打日志）
+          if [ -z "${QUOTA_SCAN_WINDOW_HOURS:-}" ]; then QUOTA_SCAN_WINDOW_HOURS=6; echo "变量 QUOTA_SCAN_WINDOW_HOURS 未设置、使用默认值 6"; fi
+          if [ -z "${QUOTA_RECOVERY_WINDOW_SECONDS:-}" ]; then QUOTA_RECOVERY_WINDOW_SECONDS=1800; echo "变量 QUOTA_RECOVERY_WINDOW_SECONDS 未设置、使用默认值 1800"; fi
+          if [ -z "${WATCHDOG_MAX_ATTEMPT:-}" ]; then WATCHDOG_MAX_ATTEMPT=3; echo "变量 WATCHDOG_MAX_ATTEMPT 未设置、使用默认值 3"; fi
+          echo "Scanning recent failed 'Droid Auto Review' runs for BYOK quota exhaustion..."
+          # 扫最近 ${QUOTA_SCAN_WINDOW_HOURS} 小时失败的 review run（配额周期上界量级），逐个检测
+          CUTOFF=$(date -u -d "${QUOTA_SCAN_WINDOW_HOURS} hours ago" +%Y-%m-%dT%H:%M:%SZ)
+          FAILED_RUNS=$(gh api "repos/$REPO/actions/runs?status=failure&per_page=50" --paginate --jq ".workflow_runs[] | select(.name == \"Droid Auto Review\" and .updated_at > \"$CUTOFF\") | .id")
+          if [ -z "$FAILED_RUNS" ]; then
+            echo "No failed Droid Auto Review runs in window. Nothing to do."
+            exit 0
+          fi
+          RERUNNED=0
+          for RUN_ID in $FAILED_RUNS; do
+            # run_attempt 限界防 rerun 风暴（与 self-heal-rerun 一致）
+            ATTEMPT=$(gh api "repos/$REPO/actions/runs/$RUN_ID" --jq '.run_attempt')
+            if [ "$ATTEMPT" -ge "$WATCHDOG_MAX_ATTEMPT" ]; then
+              echo "Run $RUN_ID already at attempt $ATTEMPT (>=$WATCHDOG_MAX_ATTEMPT). Skipping; needs manual attention."
+              continue
+            fi
+            # 恢复窗口：run 结束超过 ${QUOTA_RECOVERY_WINDOW_SECONDS}s 才重试（配额未恢复时 rerun 会快速再死）
+            UPDATED_AT=$(gh api "repos/$REPO/actions/runs/$RUN_ID" --jq '.updated_at')
+            AGE_SEC=$(( $(date -u +%s) - $(date -u -d "$UPDATED_AT" +%s) ))
+            if [ "$AGE_SEC" -lt "$QUOTA_RECOVERY_WINDOW_SECONDS" ]; then
+              echo "Run $RUN_ID failed ${AGE_SEC}s ago (<${QUOTA_RECOVERY_WINDOW_SECONDS}s recovery window). Skipping this sweep."
+              continue
+            fi
+            # 已 rerun 过一次且仍失败的 run，等待更长（下个 sweep 周期）
+            # 429 特征检测：真实报错只在 debug artifact 的 session transcript 里，
+            # job log 只有无差别的 "exited with code 1"
+            ARTIFACT_NAME=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" --jq '.artifacts[] | select(.name | startswith("droid-review-debug-")) | .name' | head -1)
+            if [ -z "$ARTIFACT_NAME" ]; then
+              echo "Run $RUN_ID has no debug artifact. Cannot classify; skipping."
+              continue
+            fi
+            rm -rf /tmp/quota-check && mkdir -p /tmp/quota-check
+            if ! gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" --jq ".artifacts[] | select(.name == \"$ARTIFACT_NAME\") | .archive_download_url" | head -1 | xargs -I{} gh api {} > /tmp/quota-check/artifact.zip; then
+              echo "::warning::Failed to download artifact for run $RUN_ID. Skipping."
+              continue
+            fi
+            cd /tmp/quota-check && unzip -q artifact.zip
+            # grep transcript：BYOK Error: 429 usage allocated quota exceeded
+            if grep -rIl "quota exceeded" .factory/sessions/ >/dev/null 2>&1; then
+              echo "Run $RUN_ID: BYOK quota exhaustion confirmed (429 in transcript). Requesting rerun..."
+              if gh api -X POST "repos/$REPO/actions/runs/$RUN_ID/rerun-failed-jobs"; then
+                echo "Rerun requested. The rerun carries the effective review."
+                RERUNNED=$((RERUNNED + 1))
+              else
+                echo "::warning::Rerun request failed for run $RUN_ID."
+              fi
+            else
+              echo "Run $RUN_ID: no quota signature in transcript. Not quota-related; no auto-rerun."
+            fi
+            cd - >/dev/null
+          done
+          echo "Done. Rerun requested for $RERUNNED run(s)."

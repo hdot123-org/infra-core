@@ -1,5 +1,6 @@
 """治理自检测试（VAL-SCAF-006 判定表全覆盖 + dry-run CLI + action 等价性）"""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -113,10 +114,19 @@ class TestGovernanceDryRunCli:
     """CLI dry-run（VAL-SCAF-006 证据 (b)：本地模拟三分支判定）"""
 
     def _run(self, *cli_args: str) -> subprocess.CompletedProcess[str]:
+        # Subprocess must be able to import infra_core even when the package
+        # is not pip-installed (source checkout): prepend src/ to PYTHONPATH.
+        # In CI (pip install -e) this is redundant but harmless.
+        env = dict(os.environ)
+        src_dir = str(Path(__file__).resolve().parent.parent / "src")
+        env["PYTHONPATH"] = (
+            src_dir + os.pathsep + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else src_dir
+        )
         return subprocess.run(
             [sys.executable, "-m", "infra_core.governance", *cli_args],
             capture_output=True,
             text=True,
+            env=env,
         )
 
     def test_dry_run_non_owner_protected_path_denied(self):
@@ -136,6 +146,11 @@ class TestGovernanceDryRunCli:
         assert "Traceback" not in result.stderr
 
     def test_dry_run_files_from_stdin(self):
+        env = dict(os.environ)
+        src_dir = str(Path(__file__).resolve().parent.parent / "src")
+        env["PYTHONPATH"] = (
+            src_dir + os.pathsep + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else src_dir
+        )
         result = subprocess.run(
             [
                 sys.executable,
@@ -149,6 +164,7 @@ class TestGovernanceDryRunCli:
             input=".github/workflows/ci.yml\nREADME.md\n",
             capture_output=True,
             text=True,
+            env=env,
         )
         assert result.returncode == EXIT_DENY
 

@@ -1,0 +1,10 @@
+{
+  "resolved_findings": [
+    {
+      "rule_id": "RULE_A",
+      "location": "code.py",
+      "reopen_count": 1
+    }
+  ],
+  "snapshots": []
+}

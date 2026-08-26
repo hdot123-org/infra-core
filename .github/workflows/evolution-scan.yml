@@ -1,0 +1,75 @@
+# Evolution Scanner Workflow
+# Runs the evolution scanner on a cron schedule to detect regressions and create Issues.
+#
+# CRITICAL TOKEN STRATEGY:
+# This workflow MUST use DISPATCH_TOKEN (a PAT), NOT GITHUB_TOKEN.
+# Reason: DISPATCH_TOKEN is a PAT belonging to @hdot123 (OWNER). Issues created
+# with it have author=hdot123, which satisfies CODEOWNERS and governance checks.
+# The trigger chain is:
+#   GitHub Issue (DISPATCH_TOKEN, author=hdot123) → Linear 原生 GitHub Issue Sync
+#   → Linear webhook → n8n → trigger-droid.sh → droid exec --tag linear-gateway
+#   → PR → CI → 合并
+#
+# Fallback options if DISPATCH_TOKEN is unavailable:
+# 1. Use a GitHub App installation token (finer-grained, auditable)
+# 2. Use workflow_dispatch chain: scanner creates Issue with GITHUB_TOKEN, then
+#    a second workflow with a PAT comments on the Issue (workaround)
+
+name: Evolution Scan
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: evolution-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install package
+        run: pip install -e .
+      - name: Generate error patterns
+        run: memory-error-patterns --all-projects
+      - name: Validate registry.jsonl exists
+        run: |
+          if [ ! -f "memory/kb/patterns/registry.jsonl" ]; then
+            echo "::warning::memory/kb/patterns/registry.jsonl not found - error_patterns adapter will have no input"
+          else
+            echo "✓ registry.jsonl exists"
+          fi
+      - name: Cache evolution history
+        uses: actions/cache@v6
+        with:
+          path: |
+            .evolution/findings_over_time.json
+            .evolution/heartbeat.json
+          key: evolution-history-${{ github.run_id }}
+          restore-keys: evolution-history-
+      - name: Ensure labels exist
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+        run: |
+          gh label create "evolution-found" --color FBCA04 --description "Evolution scanner finding" --force || true
+          gh label create "evolution-isolated" --color B60205 --description "Stuck 3+ ticks" --force || true
+      - name: Run evolution scanner
+        run: python scripts/evolution_scanner.py
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          # LINEAR_API_KEY enables Linear issue state verification in auto_close_resolved.
+          # Without it, the scanner cannot verify Linear terminal state and will
+          # fail-closed (block close) for Linear-linked issues to prevent churn.
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          # P1-A: Prevent module poisoning — blocks automatic insertion of scripts/ into sys.path.
+          # The scanner explicitly re-adds its own directory via sys.path.insert.
+          PYTHONSAFEPATH: '1'
