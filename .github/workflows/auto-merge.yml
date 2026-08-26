@@ -29,7 +29,7 @@ concurrency:
 jobs:
   resolve:
     name: Resolve candidate PRs
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     # workflow_run 只有在结论为 success 时才尝试合并；其余事件各自自行门控。
     if: |
       github.event_name == 'pull_request_target' ||
@@ -81,7 +81,7 @@ jobs:
     name: Auto-merge PR
     needs: resolve
     if: needs.resolve.outputs.pr_numbers != '' && needs.resolve.outputs.pr_numbers != '[]'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     # INFRA-416：限定单腿时长。triage 各分支都是有界 API 调用，10 分钟
     # 足够；防止 gh/网络挂死导致 matrix 腿永久占位（schedule 每 10 分钟
     # 一轮，旧腿不退出会与新腿堆叠）。

@@ -32,15 +32,16 @@ concurrency:
 
 jobs:
   scan:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     permissions:
       contents: read
       issues: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
+      - name: Create per-run venv (isolation from runner site-packages)
+        run: |
+          python3.12 -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
       - name: Install package
         run: pip install -e .
       - name: Generate error patterns
