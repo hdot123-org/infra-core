@@ -53,12 +53,31 @@ jobs:
       
       - name: Run actionlint
         run: |
-          bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash)
           ./actionlint -color
+  
+  mypy:
+    name: mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      
+      - name: Run mypy
+        run: mypy --strict src/infra_core
   
   ci-ok:
     name: ci-ok
-    needs: [pytest, ruff, actionlint]
+    needs: [pytest, ruff, actionlint, mypy]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -66,7 +85,8 @@ jobs:
         run: |
           if [[ "${{ needs.pytest.result }}" != "success" ]] || \
              [[ "${{ needs.ruff.result }}" != "success" ]] || \
-             [[ "${{ needs.actionlint.result }}" != "success" ]]; then
+             [[ "${{ needs.actionlint.result }}" != "success" ]] || \
+             [[ "${{ needs.mypy.result }}" != "success" ]]; then
             echo "One or more jobs failed"
             exit 1
           fi

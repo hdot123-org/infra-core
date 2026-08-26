@@ -77,6 +77,47 @@ class TestGovernanceActionDefaults:
         assert "pull_request_target" in content
 
 
+class TestGovernanceActionScriptPath:
+    """action.yml run 行引用的脚本必须在 action 目录内且真实存在。
+
+    修复 M1 scrutiny 发现的 blocking 缺陷：原路径 `../governance_check/governance_check.py`
+    双重错误——越出 action 根 + 下划线目录名不匹配（实际是 governance-check）。
+    首次真实调用即 crash-deny，M4 全部门禁切换 PR 都会触发。
+    """
+
+    def test_action_yml_references_script_within_action_dir(self):
+        """action.yml 的 run 块不得包含 `..` 越出 action 根目录"""
+        content = _read("actions/governance-check/action.yml")
+        # 提取 run: 块（YAML 多行字符串）
+        run_match = re.search(r"run:\s*\|(.+?)(?=\n\w|\Z)", content, re.DOTALL)
+        assert run_match, "action.yml 必须包含 run 块"
+        run_block = run_match.group(1)
+        # 不得包含路径穿越
+        assert ".." not in run_block or "../" not in run_block, (
+            f"action.yml run 块包含路径穿越（..）：{run_block}"
+        )
+
+    def test_action_yml_script_path_resolves_to_existing_file(self):
+        """action.yml 引用的脚本路径必须在 repo 树中真实存在"""
+        content = _read("actions/governance-check/action.yml")
+        # 查找 $GITHUB_ACTION_PATH/<script> 模式
+        script_match = re.search(r"\$GITHUB_ACTION_PATH/(\S+\.py)", content)
+        assert script_match, "action.yml 必须引用 $GITHUB_ACTION_PATH/<script>.py"
+        script_name = script_match.group(1)
+        # 验证脚本文件存在
+        script_path = REPO_ROOT / "actions" / "governance-check" / script_name
+        assert script_path.exists(), (
+            f"action.yml 引用的脚本不存在：{script_path.relative_to(REPO_ROOT)}"
+        )
+
+    def test_action_yml_uses_correct_script_name(self):
+        """action.yml 必须引用 governance_check.py（与目录同名但下划线）"""
+        content = _read("actions/governance-check/action.yml")
+        assert "$GITHUB_ACTION_PATH/governance_check.py" in content, (
+            "action.yml 必须引用 $GITHUB_ACTION_PATH/governance_check.py"
+        )
+
+
 class TestGovernanceModuleDefaults:
     def test_module_defaults_match_composite_action(self):
         from infra_core.governance import DEFAULT_OWNER_LOGIN, DEFAULT_PROTECTED_PATTERNS
