@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/hdot123-org/infra-core/compare/v0.1.0...v0.2.0) (2026-08-26)
+
+
+### Features
+
+* **M3:** version_sync 迁移 ([#18](https://github.com/hdot123-org/infra-core/issues/18)) ([ccf09c3](https://github.com/hdot123-org/infra-core/commit/ccf09c3ade9cba75e48e293271fdb75c05a25c98))
+
 ## 0.1.0 (2026-08-26)
 
 
