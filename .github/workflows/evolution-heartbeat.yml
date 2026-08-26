@@ -19,7 +19,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Create per-run venv (isolation from runner site-packages)
         run: |
           python3.12 -m venv "$RUNNER_TEMP/venv"
