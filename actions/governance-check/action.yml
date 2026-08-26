@@ -39,7 +39,7 @@ runs:
         rm -f "$ERR_BUF"
 
         # 逐行送入治理判定脚本（随 action 分发，base 上已存在）
-        echo "$CHANGED" | python3 "$GITHUB_ACTION_PATH/../governance_check/governance_check.py" \
+        echo "$CHANGED" | python3 "$GITHUB_ACTION_PATH/governance_check.py" \
           --author "$PR_AUTHOR" \
           --owner "$OWNER_LOGIN" \
           --patterns "$PROTECTED_PATTERNS" \
