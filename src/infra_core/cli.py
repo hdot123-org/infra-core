@@ -1,6 +1,7 @@
 """infra-cli: 统一命令行入口"""
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -64,21 +65,50 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
 
 def cmd_version_sweep(args: argparse.Namespace) -> int:
-    """version-sweep 子命令（M3 version_sync 迁移后实现）"""
-    target = Path(args.target) if args.target else Path.cwd()
+    """version-sweep 子命令：委托 engine.version_sync 执行版本同步"""
+    from infra_core.engine import version_sync
 
-    if not target.exists():
-        print(f"错误：目标路径不存在：{target}", file=sys.stderr)
-        return 1
+    if args.all:
+        # 全局模式：同步所有已知项目
+        lifecycle_root = Path(args.lifecycle_root) if args.lifecycle_root else None
+        result = version_sync.sync_all_known_projects(
+            lifecycle_root=lifecycle_root,
+            target_version=args.target_version,
+            canonical_schema=args.canonical_schema,
+        )
+    else:
+        # 单项目模式
+        target = Path(args.target).resolve() if args.target else Path.cwd().resolve()
 
-    if not target.is_dir():
-        print(f"错误：目标不是目录：{target}", file=sys.stderr)
-        return 1
+        if not target.exists():
+            print(f"错误：目标路径不存在：{target}", file=sys.stderr)
+            return 1
 
-    # M3 前骨架状态：优雅失败
-    print("version-sweep 子命令尚未实现（M3 version_sync 迁移后提供）", file=sys.stderr)
-    print(f"目标路径：{target}", file=sys.stderr)
-    return 1
+        if not target.is_dir():
+            print(f"错误：目标不是目录：{target}", file=sys.stderr)
+            return 1
+
+        result = version_sync.sync_single_project(
+            target, args.target_version, args.canonical_schema
+        )
+
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        if "patched" in result and isinstance(result.get("patched"), list):
+            for entry in result.get("patched", []):
+                print(f"  [PATCH] {entry['name']}: {entry['from']} -> {entry['to']}")
+            for entry in result.get("skipped", []):
+                print(f"  [SKIP]  {entry['name']}: {entry['reason']}")
+            for entry in result.get("errors", []):
+                print(f"  [ERROR] {entry['name']}: {entry['reason']}")
+        else:
+            if result.get("patched"):
+                print(f"Patched: {result['from']} -> {result['to']}")
+            else:
+                print(f"Skipped: {result.get('reason', 'unknown')}")
+
+    return 0
 
 
 def main() -> int:
@@ -109,6 +139,19 @@ def main() -> int:
     sweep_parser = subparsers.add_parser("version-sweep", help="版本同步（M3 实现）")
     sweep_parser.add_argument("--target", type=str, help="目标项目路径（默认当前目录）")
     sweep_parser.add_argument("--all", action="store_true", help="全局模式：同步所有已知项目")
+    sweep_parser.add_argument(
+        "--target-version", type=str, required=True, help="目标版本号（必填）"
+    )
+    sweep_parser.add_argument(
+        "--canonical-schema",
+        type=str,
+        default="context-package-v1",
+        help="规范 schema 版本（默认 context-package-v1）",
+    )
+    sweep_parser.add_argument(
+        "--lifecycle-root", type=str, help="lifecycle 根目录（全局模式使用）"
+    )
+    sweep_parser.add_argument("--json", action="store_true", help="JSON 输出")
 
     args = parser.parse_args()
 
