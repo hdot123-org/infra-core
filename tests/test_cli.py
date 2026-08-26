@@ -68,12 +68,29 @@ def test_audit_skeleton_fails_gracefully(tmp_path, capsys):
     assert "尚未实现" in captured.err
 
 
-def test_version_sweep_skeleton_fails_gracefully(tmp_path, capsys):
-    """测试 version-sweep 骨架优雅失败"""
-    result = cmd_version_sweep(_Args(target=str(tmp_path)))
-    assert result == 1
-    captured = capsys.readouterr()
-    assert "尚未实现" in captured.err
+def test_version_sweep_single_project(tmp_path):
+    """测试 version-sweep 单项目模式正常工作"""
+    # 创建一个测试项目的 memory 结构
+    memory_dir = tmp_path / "memory" / "system"
+    memory_dir.mkdir(parents=True)
+    ownership_toml = memory_dir / "ownership.toml"
+    ownership_toml.write_text('memory_version = "0.1.0"\n')
+
+    result = cmd_version_sweep(
+        _Args(
+            target=str(tmp_path),
+            all=False,
+            target_version="0.2.0",
+            canonical_schema="context-package-v1",
+            lifecycle_root=None,
+            json=False,
+        )
+    )
+    assert result == 0
+
+    # 验证版本已更新
+    content = ownership_toml.read_text()
+    assert 'memory_version = "0.2.0"' in content
 
 
 def test_audit_nonexistent_target(capsys):
