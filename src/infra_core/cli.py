@@ -148,9 +148,7 @@ def main() -> int:
         default="context-package-v1",
         help="规范 schema 版本（默认 context-package-v1）",
     )
-    sweep_parser.add_argument(
-        "--lifecycle-root", type=str, help="lifecycle 根目录（全局模式使用）"
-    )
+    sweep_parser.add_argument("--lifecycle-root", type=str, help="lifecycle 根目录（全局模式使用）")
     sweep_parser.add_argument("--json", action="store_true", help="JSON 输出")
 
     args = parser.parse_args()

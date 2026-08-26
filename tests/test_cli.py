@@ -76,14 +76,16 @@ def test_version_sweep_single_project(tmp_path):
     ownership_toml = memory_dir / "ownership.toml"
     ownership_toml.write_text('memory_version = "0.1.0"\n')
 
-    result = cmd_version_sweep(_Args(
-        target=str(tmp_path),
-        all=False,
-        target_version="0.2.0",
-        canonical_schema="context-package-v1",
-        lifecycle_root=None,
-        json=False,
-    ))
+    result = cmd_version_sweep(
+        _Args(
+            target=str(tmp_path),
+            all=False,
+            target_version="0.2.0",
+            canonical_schema="context-package-v1",
+            lifecycle_root=None,
+            json=False,
+        )
+    )
     assert result == 0
 
     # 验证版本已更新

@@ -251,9 +251,7 @@ def patch_adapter_toml_version(adapter_path: Path, target_version: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _gate_version_bump(
-    current_version: str, target_version: str, schema_changed: bool
-) -> str:
+def _gate_version_bump(current_version: str, target_version: str, schema_changed: bool) -> str:
     """Gate check for version upgrade.
 
     Returns "allowed" if upgrade is safe (patch/minor + schema unchanged).
@@ -351,9 +349,7 @@ def _sync_lock(project_path: Path) -> Any:
 
     while True:
         try:
-            fd = os.open(
-                lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644
-            )
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         except FileExistsError:
             try:
                 age = time.time() - lock_path.stat().st_mtime
@@ -389,9 +385,7 @@ def _sync_lock(project_path: Path) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _try_resign_all(
-    project_path: Path, changed_paths: list[str]
-) -> dict[str, Any]:
+def _try_resign_all(project_path: Path, changed_paths: list[str]) -> dict[str, Any]:
     """Re-sign changed files after version patch using the injected hook.
 
     If no hook is injected, the default no-op returns
@@ -453,9 +447,7 @@ def _patch_three_files_under_lock(
             result["errors"].append({"step": "patch_lock", "reason": str(exc)})
 
         try:
-            if adapter_path.exists() and patch_adapter_toml_version(
-                adapter_path, target_version
-            ):
+            if adapter_path.exists() and patch_adapter_toml_version(adapter_path, target_version):
                 changed_paths.append("memory/system/adapter.toml")
         except OSError as exc:
             result["errors"].append({"step": "patch_adapter", "reason": str(exc)})
@@ -524,9 +516,7 @@ def sync_single_project(
     adapter_path = project_path / "memory" / "system" / "adapter.toml"
 
     current_schema = _read_lock_schema_version(lock_path)
-    schema_changed = (
-        current_schema is not None and current_schema != canonical_schema
-    )
+    schema_changed = current_schema is not None and current_schema != canonical_schema
 
     gate_result = _gate_version_bump(current_version, target_version, schema_changed)
 
@@ -581,9 +571,7 @@ def sync_all_known_projects(
             "target_version": None,
             "patched": [],
             "skipped": [],
-            "errors": [
-                {"path": "", "name": "", "reason": "target_version is required"}
-            ],
+            "errors": [{"path": "", "name": "", "reason": "target_version is required"}],
         }
 
     if lifecycle_root is None:
@@ -628,9 +616,7 @@ def sync_all_known_projects(
                 )
                 continue
 
-            single_result = sync_single_project(
-                project_path, target_version, canonical_schema
-            )
+            single_result = sync_single_project(project_path, target_version, canonical_schema)
 
             if single_result.get("patched"):
                 entry_data = {
@@ -641,9 +627,7 @@ def sync_all_known_projects(
                 }
                 if single_result.get("gate_blocked"):
                     entry_data["gate_blocked"] = True
-                    entry_data["gate_reason"] = single_result.get(
-                        "gate_reason", ""
-                    )
+                    entry_data["gate_reason"] = single_result.get("gate_reason", "")
                 if single_result.get("files_changed"):
                     entry_data["files_changed"] = single_result["files_changed"]
                 report["patched"].append(entry_data)
@@ -657,9 +641,7 @@ def sync_all_known_projects(
                     }
                 )
         except Exception as exc:
-            report["errors"].append(
-                {"path": local_path, "name": project_name, "reason": str(exc)}
-            )
+            report["errors"].append({"path": local_path, "name": project_name, "reason": str(exc)})
 
     return report
 
@@ -694,9 +676,7 @@ def probe_version_and_sync(
         except OSError:
             return None
 
-        match = re.search(
-            r'^memory_version\s*=\s*"([^"]+)"', content, re.MULTILINE
-        )
+        match = re.search(r'^memory_version\s*=\s*"([^"]+)"', content, re.MULTILINE)
         if not match:
             return None
 
@@ -704,9 +684,7 @@ def probe_version_and_sync(
         if lock_version == current_version:
             return None
 
-        return sync_single_project(
-            project_path, current_version, canonical_schema
-        )
+        return sync_single_project(project_path, current_version, canonical_schema)
 
     except Exception as exc:
         logger.debug("probe_version_and_sync failed: %s", exc)
@@ -765,18 +743,14 @@ def main(argv: list[str] | None = None) -> int:
         if not target.is_dir():
             print(f"Error: {target} is not a directory", file=sys.stderr)
             return 2
-        result = sync_single_project(
-            target, args.target_version, args.canonical_schema
-        )
+        result = sync_single_project(target, args.target_version, args.canonical_schema)
     elif args.all_projects:
         result = sync_all_known_projects(
             args.lifecycle_root, args.target_version, args.canonical_schema
         )
     else:
         # Default: single project at cwd
-        result = sync_single_project(
-            Path.cwd(), args.target_version, args.canonical_schema
-        )
+        result = sync_single_project(Path.cwd(), args.target_version, args.canonical_schema)
 
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))

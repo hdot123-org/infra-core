@@ -29,7 +29,6 @@ from infra_core.engine.version_sync import (
     sync_single_project,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -90,9 +89,7 @@ class TestDefaultResignHook:
 
         assert result["patched"] is True
         assert len(result["errors"]) > 0
-        resign_error = next(
-            (e for e in result["errors"] if e.get("step") == "resign"), None
-        )
+        resign_error = next((e for e in result["errors"] if e.get("step") == "resign"), None)
         assert resign_error is not None
         assert "resign hook not injected" in resign_error["reason"]
 
@@ -132,10 +129,9 @@ class TestInjectedResignHook:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Injected hook wrapping memory-core's load_key+sign works."""
+
         # Simulate memory-core's resign wrapper
-        def memory_core_resign_wrapper(
-            project_path: Path, changed_paths: list[str]
-        ) -> dict:
+        def memory_core_resign_wrapper(project_path: Path, changed_paths: list[str]) -> dict:
             # Simulate: load key, sign, return success
             return {"resigned": True, "paths": changed_paths}
 
@@ -149,22 +145,16 @@ class TestInjectedResignHook:
 
         set_resign_hook(None)  # Cleanup
 
-    def test_injected_hook_failure_recorded_in_errors(
-        self, tmp_path: Path
-    ) -> None:
+    def test_injected_hook_failure_recorded_in_errors(self, tmp_path: Path) -> None:
         """Injected hook failure is recorded in errors."""
-        mock_hook = MagicMock(
-            return_value={"resigned": False, "reason": "signing failed"}
-        )
+        mock_hook = MagicMock(return_value={"resigned": False, "reason": "signing failed"})
         set_resign_hook(mock_hook)
 
         project = _make_project(tmp_path, "0.9.0")
         result = sync_single_project(project, "0.9.1")
 
         assert result["patched"] is True
-        resign_error = next(
-            (e for e in result["errors"] if e.get("step") == "resign"), None
-        )
+        resign_error = next((e for e in result["errors"] if e.get("step") == "resign"), None)
         assert resign_error is not None
         assert "signing failed" in resign_error["reason"]
 
@@ -224,9 +214,7 @@ class TestProtocolConstantsParameterized:
         assert result["patched"] is True
         assert result.get("gate_blocked") is not True
 
-    def test_probe_version_and_sync_parameterized(
-        self, tmp_path: Path
-    ) -> None:
+    def test_probe_version_and_sync_parameterized(self, tmp_path: Path) -> None:
         """probe_version_and_sync accepts current_version as parameter."""
         set_resign_hook(None)
 
@@ -236,9 +224,7 @@ class TestProtocolConstantsParameterized:
         assert result is not None
         assert result["patched"] is True
 
-    def test_sync_all_known_projects_requires_target_version(
-        self, tmp_path: Path
-    ) -> None:
+    def test_sync_all_known_projects_requires_target_version(self, tmp_path: Path) -> None:
         """sync_all_known_projects requires target_version parameter."""
         result = sync_all_known_projects(lifecycle_root=tmp_path, target_version=None)
 
@@ -272,8 +258,7 @@ class TestBehaviorEquivalence:
         """patch_memory_lock works as original."""
         lock = tmp_path / "memory.lock"
         lock.write_text(
-            'memory_version = "0.9.0"\n'
-            'locked_at = "2026-01-01T00:00:00+00:00"\n',
+            'memory_version = "0.9.0"\nlocked_at = "2026-01-01T00:00:00+00:00"\n',
             encoding="utf-8",
         )
 
@@ -334,9 +319,7 @@ class TestResignHookMechanism:
         set_resign_hook(None)
         assert get_resign_hook() == _default_resign
 
-    def test_try_resign_all_uses_injected_hook(
-        self, tmp_path: Path
-    ) -> None:
+    def test_try_resign_all_uses_injected_hook(self, tmp_path: Path) -> None:
         """_try_resign_all uses the injected hook."""
         mock_hook = MagicMock(return_value={"resigned": True, "paths": ["f1"]})
         set_resign_hook(mock_hook)
@@ -348,9 +331,7 @@ class TestResignHookMechanism:
 
         set_resign_hook(None)  # Cleanup
 
-    def test_try_resign_all_handles_hook_exception(
-        self, tmp_path: Path
-    ) -> None:
+    def test_try_resign_all_handles_hook_exception(self, tmp_path: Path) -> None:
         """_try_resign_all handles hook exceptions gracefully."""
 
         def failing_hook(project_path: Path, changed_paths: list[str]) -> dict:
