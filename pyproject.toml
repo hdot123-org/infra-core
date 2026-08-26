@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "infra-core"
+version = "0.1.0"
+description = "组织级演进引擎：自进化/审计/门禁体系的共享基础设施"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = "==3.12.*"
+authors = [
+    {name = "hdot123", email = "hdot123@users.noreply.github.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+infra-cli = "infra_core.cli:main"
+
+[project.entry-points."infra_core.packs"]
+# Pack discovery mechanism - packs register themselves here
+# Example: memory = "infra_core.packs.memory:MemoryPack"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

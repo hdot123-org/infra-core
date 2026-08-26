@@ -1,0 +1,28 @@
+name: Evolution Governance
+
+on:
+  pull_request_target:
+    branches: [main]
+    paths:
+      - '.evolution/**'
+      - '.github/workflows/**'
+      - 'src/infra_core/engine/**'
+      - 'webhook-scripts/**'
+
+jobs:
+  governance:
+    name: Block non-owner governance modifications
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check owner
+        run: |
+          OWNER_LOGIN="hdot123"
+          PR_AUTHOR="${{ github.event.pull_request.user.login }}"
+          
+          if [[ "$PR_AUTHOR" != "$OWNER_LOGIN" ]]; then
+            echo "❌ 拒绝：只有 $OWNER_LOGIN 可以修改受保护路径"
+            echo "PR 作者：$PR_AUTHOR"
+            exit 1
+          fi
+          
+          echo "✓ 作者是 $OWNER_LOGIN，允许修改"
