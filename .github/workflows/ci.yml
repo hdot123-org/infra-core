@@ -1,3 +1,5 @@
+# Self-hosted runner CI pipeline (pve-linux)
+# Per-run venv isolation per 2026-08-25-selfhosted-runner-env-shadowing.md
 name: CI
 
 on:
