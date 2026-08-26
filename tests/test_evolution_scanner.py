@@ -10405,7 +10405,7 @@ def test_report_only_no_history_write(tmp_path, capsys):
     """report-only 模式不写 findings_over_time.json。"""
     _write_hotfix_config(tmp_path, "audit_tools: []\n")
 
-    history_file = (tmp_path / ".evolution" / "findings_over_time.json")
+    history_file = tmp_path / ".evolution" / "findings_over_time.json"
 
     # 运行 report-only
     with patch("evolution_scanner.run_audit_tool", return_value=[]):
@@ -10494,8 +10494,7 @@ def test_pack_tool_reference_form(tmp_path):
     """
     _write_hotfix_config(
         tmp_path,
-        "audit_tools:\n"
-        "  - name: ref_tool\n    pack_tool: hygiene\n    command: echo standalone\n",
+        "audit_tools:\n  - name: ref_tool\n    pack_tool: hygiene\n    command: echo standalone\n",
     )
 
     config = evolution_scanner.load_config(tmp_path)
