@@ -1,0 +1,44 @@
+name: "Setup venv"
+description: "Create and activate a Python virtual environment for CI jobs"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create venv
+      shell: bash
+      run: |
+        set -e
+
+        # Create venv directory
+        VENV_DIR="${RUNNER_TEMP:-/tmp}/ci-venv"
+        echo "Creating virtual environment at $VENV_DIR"
+        python3 -m venv "$VENV_DIR"
+
+        # Activate and verify
+        source "$VENV_DIR/bin/activate"
+        echo "✓ venv created and activated"
+        python --version
+        which python
+
+        # Upgrade pip
+        echo "Upgrading pip..."
+        python -m pip install --upgrade pip --quiet
+
+        # Export venv path for subsequent steps
+        echo "VENV_PATH=$VENV_DIR" >> $GITHUB_ENV
+        echo "$VENV_DIR/bin" >> $GITHUB_PATH
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        set -e
+
+        # Activate venv
+        source "${{ env.VENV_PATH }}/bin/activate"
+
+        # Install package with dev dependencies
+        echo "Installing infra-core with dev dependencies..."
+        pip install -e ".[dev]" --quiet
+
+        echo "✓ Dependencies installed"
+        pip list | grep -E "(infra-core|pytest|ruff|mypy)" || true
