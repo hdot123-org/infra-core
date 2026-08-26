@@ -91,7 +91,8 @@ def get_pr_data(pr_number: int) -> dict[str, Any]:
             if transient and attempt < max_attempts:
                 wait = 10 * attempt
                 print(
-                    f"Transient GitHub API error (attempt {attempt}/{max_attempts}): {stderr}\nRetrying in {wait}s...",
+                    f"Transient GitHub API error (attempt {attempt}/{max_attempts}):"
+                    f" {stderr}\nRetrying in {wait}s...",
                     file=sys.stderr,
                 )
                 time.sleep(wait)

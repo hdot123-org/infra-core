@@ -13,6 +13,8 @@ from unittest.mock import patch
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 from infra_core.packs.memory.daily_audit import main
 
 # ---------------------------------------------------------------------------

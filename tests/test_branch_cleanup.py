@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 
 def get_script_path() -> Path:
     """Get path to branch_cleanup.sh script."""

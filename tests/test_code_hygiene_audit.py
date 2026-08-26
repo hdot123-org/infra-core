@@ -4,6 +4,10 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.security
+
 from infra_core.packs.memory.hygiene import (
     CATEGORY,
     RULE_ID,

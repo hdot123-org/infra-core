@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+pytestmark = pytest.mark.e2e
+
 # Engine modules (transplanted from memory-core scripts/) live in src/infra_core/engine
 _engine_dir = Path(__file__).resolve().parent.parent / "src" / "infra_core" / "engine"
 sys.path.insert(0, str(_engine_dir))

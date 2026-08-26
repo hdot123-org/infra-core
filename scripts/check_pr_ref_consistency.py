@@ -54,7 +54,10 @@ def extract_fixes_infra_ids(pr_body: str) -> set[str]:
     # Also supports Oxford comma variant with 'and' connector:
     #   - "Fixes INFRA-1, INFRA-2, and INFRA-3" (Oxford comma)
     #   - "Fixes INFRA-1, INFRA-2 and INFRA-3" (no comma before 'and')
-    keyword_pattern = r"\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+((?:INFRA-\d+)(?:\s*(?:,\s*(?:and\s+)?|and\s+)INFRA-\d+)*)"
+    keyword_pattern = (
+        r"\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+"
+        r"((?:INFRA-\d+)(?:\s*(?:,\s*(?:and\s+)?|and\s+)INFRA-\d+)*)"
+    )
     matches = re.findall(keyword_pattern, pr_body, re.IGNORECASE)
 
     # Extract all INFRA-xxx IDs from each match (handles comma-separated lists)
@@ -139,7 +142,12 @@ def _resolve_repo_owner_name() -> tuple[str, str]:
     Raises:
         RuntimeError: if origin URL is missing or unparseable
     """
-    result = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True, check=True)
+    result = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     url = result.stdout.strip()
     # SSH form: git@github.com:OWNER/REPO.git
     # HTTPS form: https://github.com/OWNER/REPO.git
@@ -214,7 +222,16 @@ def fetch_issue_comments(issue_number: int) -> str:
         Combined comment bodies as string
     """
     result = subprocess.run(
-        ["gh", "issue", "view", str(issue_number), "--json", "comments", "--jq", ".comments[].body"],
+        [
+            "gh",
+            "issue",
+            "view",
+            str(issue_number),
+            "--json",
+            "comments",
+            "--jq",
+            ".comments[].body",
+        ],
         capture_output=True,
         text=True,
         check=True,

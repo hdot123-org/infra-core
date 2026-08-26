@@ -47,7 +47,13 @@ def run_cli(
     findings = collect_findings()
 
     if args.json:
-        print(json.dumps({"findings": findings, "count": len(findings)}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {"findings": findings, "count": len(findings)},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     elif not findings:
         print(f"{label}: clean (0 findings)")
     else:

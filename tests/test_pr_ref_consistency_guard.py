@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.script_module_helpers import init_test_git_repo, load_script_module
+pytestmark = pytest.mark.security
+
+from tests.script_module_helpers import load_script_module
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATH = REPO_ROOT / "scripts" / "check_pr_ref_consistency.py"
@@ -58,11 +60,13 @@ def test_extract_linkback_three_tiers():
     assert mod.extract_linkback_from_comments(html_comment) == "INFRA-123"
 
     # Tier 2a: href format (must include linear-linkback marker to be detected)
-    href_text = "Some text\n<!-- linear-linkback -->\nCheck linear.app/org/issue/INFRA-456 for details"
+    href_text = (
+        "Some text\n<!-- linear-linkback -->\nCheck linear.app/org/issue/INFRA-456 for details"
+    )
     assert mod.extract_linkback_from_comments(href_text) == "INFRA-456"
 
     # Tier 2b: anchor text (must include linear-linkback marker to be detected)
-    anchor_text = "Some text\n<!-- linear-linkback -->\nSee <a href=\"...\">INFRA-789</a> for more"
+    anchor_text = 'Some text\n<!-- linear-linkback -->\nSee <a href="...">INFRA-789</a> for more'
     assert mod.extract_linkback_from_comments(anchor_text) == "INFRA-789"
 
     # No linkback
@@ -84,6 +88,7 @@ def test_resolve_repo_owner_name():
     for url, expected_owner, expected_name in test_urls:
         # Mock git remote
         import subprocess
+
         original_run = subprocess.run
 
         def mock_run(cmd, *args, **kwargs):

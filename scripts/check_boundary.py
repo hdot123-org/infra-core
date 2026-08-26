@@ -40,10 +40,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 LEAK_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     ("local-abs-path-users", re.compile(r"/Users/\S+")),
     ("local-abs-path-home", re.compile(r"/home/\S+")),
-    ("hardcoded-secret", re.compile(
-        r"""(?i)(api[_\-]?key|token|password|secret)"""
-        r"""\s*[:=]\s*["'][A-Za-z0-9_\-]{20,}["']"""
-    )),
+    (
+        "hardcoded-secret",
+        re.compile(
+            r"""(?i)(api[_\-]?key|token|password|secret)"""
+            r"""\s*[:=]\s*["'][A-Za-z0-9_\-]{20,}["']"""
+        ),
+    ),
 )
 
 # 业务专属文件名前缀（保留全量——infra-core 同样拒绝业务项目专属知识污染）。
@@ -87,22 +90,24 @@ EXEMPT_PATH_FRAGMENTS: tuple[str, ...] = (
 )
 
 # 目录名快速跳过（避免慢遍历）。
-_EXEMPT_DIR_NAMES: frozenset[str] = frozenset({
-    "__pycache__",
-    ".git",
-    ".venv",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".mypy_cache",
-    "node_modules",
-    "artifacts",
-    "log",
-    "build",
-    "dist",
-    "droid-wiki",
-    "memory",
-    "project-map",
-})
+_EXEMPT_DIR_NAMES: frozenset[str] = frozenset(
+    {
+        "__pycache__",
+        ".git",
+        ".venv",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+        "node_modules",
+        "artifacts",
+        "log",
+        "build",
+        "dist",
+        "droid-wiki",
+        "memory",
+        "project-map",
+    }
+)
 
 
 def _is_exempt(path: Path) -> bool:
@@ -149,10 +154,7 @@ def scan_protected_domain_leaks() -> list[dict[str, str]]:
             continue
 
         for dirpath, dirnames, filenames in os.walk(domain_root, topdown=True):
-            dirnames[:] = [
-                d for d in dirnames
-                if not _is_dir_exempt(Path(dirpath) / d)
-            ]
+            dirnames[:] = [d for d in dirnames if not _is_dir_exempt(Path(dirpath) / d)]
 
             for filename in filenames:
                 filepath = Path(dirpath) / filename
@@ -180,17 +182,19 @@ def scan_protected_domain_leaks() -> list[dict[str, str]]:
                 for name, regex in compiled:
                     m = regex.search(text)
                     if m:
-                        line_no = text[:m.start()].count("\n") + 1
-                        findings.append({
-                            "kind": "protected-domain-leak",
-                            "path": str(filepath.relative_to(REPO_ROOT)),
-                            "line": str(line_no),
-                            "matched": name,
-                            "rule": (
-                                "BOUNDARY: protected domain must not contain "
-                                "local paths / hardcoded secrets / org-internal info"
-                            ),
-                        })
+                        line_no = text[: m.start()].count("\n") + 1
+                        findings.append(
+                            {
+                                "kind": "protected-domain-leak",
+                                "path": str(filepath.relative_to(REPO_ROOT)),
+                                "line": str(line_no),
+                                "matched": name,
+                                "rule": (
+                                    "BOUNDARY: protected domain must not contain "
+                                    "local paths / hardcoded secrets / org-internal info"
+                                ),
+                            }
+                        )
 
     return findings
 
@@ -209,15 +213,17 @@ def scan_business_file_names() -> list[dict[str, str]]:
                 continue
             for prefix in BUSINESS_PREFIX_PATTERNS:
                 if entry.name.startswith(prefix):
-                    findings.append({
-                        "kind": "business-file-prefix",
-                        "path": str(entry.relative_to(REPO_ROOT)),
-                        "matched": prefix,
-                        "rule": (
-                            "BOUNDARY 4.1: business-prefixed files must not "
-                            "appear in the public engine repo"
-                        ),
-                    })
+                    findings.append(
+                        {
+                            "kind": "business-file-prefix",
+                            "path": str(entry.relative_to(REPO_ROOT)),
+                            "matched": prefix,
+                            "rule": (
+                                "BOUNDARY 4.1: business-prefixed files must not "
+                                "appear in the public engine repo"
+                            ),
+                        }
+                    )
                     break
     return findings
 

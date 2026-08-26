@@ -7,6 +7,10 @@ infra-core 侧对 shipped workflow 模板断言字节级一致。
 import re
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.schema
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # 契约：workflow 名（auto-merge workflow_run 依赖）

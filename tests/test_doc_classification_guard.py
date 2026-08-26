@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.script_module_helpers import init_test_git_repo, load_script_module
+pytestmark = pytest.mark.security
+
+from tests.script_module_helpers import load_script_module
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATH = REPO_ROOT / "scripts" / "check_doc_classification.py"
@@ -48,9 +50,8 @@ def test_exempt_paths():
     for path in exempt_test_cases:
         # Check if path matches exception logic
         path_str = str(path)
-        is_exempt = (
-            path.name in mod.SKIP_FILES or
-            any(exc in path_str for exc in mod.EXCEPTION_DIRS)
+        is_exempt = path.name in mod.SKIP_FILES or any(
+            exc in path_str for exc in mod.EXCEPTION_DIRS
         )
         assert is_exempt, f"Should be exempt: {path}"
 

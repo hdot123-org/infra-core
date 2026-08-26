@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.security
+
 from tests.script_module_helpers import init_test_git_repo, load_script_module
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

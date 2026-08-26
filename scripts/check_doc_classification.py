@@ -33,9 +33,7 @@ DOC_CATEGORIES = {
 }
 
 # 例外目录（允许存在但不属于上述分类）
-EXCEPTION_DIRS = (
-    "docs/__pycache__/",
-)
+EXCEPTION_DIRS = ("docs/__pycache__/",)
 
 # 顶层例外文件
 TOP_LEVEL_EXCEPTIONS: frozenset[str] = frozenset(
@@ -47,9 +45,7 @@ TOP_LEVEL_EXCEPTIONS: frozenset[str] = frozenset(
 )
 
 # 扫描根目录
-SCAN_ROOTS: tuple[Path, ...] = (
-    REPO_ROOT / "docs",
-)
+SCAN_ROOTS: tuple[Path, ...] = (REPO_ROOT / "docs",)
 
 # 跳过的文件名模式
 SKIP_FILES: frozenset[str] = frozenset(
@@ -90,7 +86,10 @@ def _is_in_registered_dir(file_path: Path, repo_root: Path | None = None) -> boo
     return any(rel_dir.startswith(exc_dir) for exc_dir in EXCEPTION_DIRS)
 
 
-def scan_doc_classification(scan_root: Path | None = None, repo_root: Path | None = None) -> list[dict[str, str]]:
+def scan_doc_classification(
+    scan_root: Path | None = None,
+    repo_root: Path | None = None,
+) -> list[dict[str, str]]:
     """扫描 docs/ 目录，找出不在注册分类中的文件。"""
     findings: list[dict[str, str]] = []
     root = scan_root or REPO_ROOT / "docs"
