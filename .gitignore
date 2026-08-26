@@ -48,7 +48,7 @@ htmlcov/
 Thumbs.db
 
 # Memory artifacts (memory-hook 产物，公开仓禁止提交)
-memory/
+/memory/
 project-map/
 INDEX.md
 NOW.md

@@ -277,7 +277,7 @@ def check_repositories_yml() -> list[dict[str, Any]]:
         return findings
 
     try:
-        import yaml
+        import yaml  # noqa: PLC0415
 
         data = yaml.safe_load(REPOSITORIES_YML.read_text())
         if not isinstance(data, dict):
@@ -836,16 +836,48 @@ def check_reverse_closure() -> list[dict[str, Any]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run all 9 checks and output findings as JSON.
+    """Run all 10 checks and output findings as JSON.
 
     Args:
         argv: 命令行参数（测试与入口点注入用）；None 时读 sys.argv[1:]。
     """
+    global PROJECT_ROOT, EVOLUTION_DIR, SUPPRESS_JSON, FINDINGS_OVER_TIME
+    global EVOLUTION_CONFIG, HEARTBEAT_FILE, LOCK_DIR, TRIGGER_DROID
+    global RECONCILE_SCRIPT, REPOSITORIES_YML
+
     parser = argparse.ArgumentParser(
-        prog="memory-evolution-audit",
-        description="Evolution self-audit tool: 9 checks for pipeline health.",
+        prog="infra-self-audit",
+        description="Evolution self-audit tool: 10 checks for pipeline health.",
     )
-    parser.parse_args(argv)
+    parser.add_argument(
+        "--repo-root",
+        "--repo_root",
+        dest="repo_root",
+        type=str,
+        default=None,
+        help="Override PROJECT_ROOT (default: auto-detect from module location).",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        default=True,
+        help="Output results as JSON (default: True).",
+    )
+    args = parser.parse_args(argv)
+
+    # Allow --repo-root to override PROJECT_ROOT and derived paths
+    if args.repo_root:
+        PROJECT_ROOT = Path(args.repo_root).resolve()
+        EVOLUTION_DIR = PROJECT_ROOT / ".evolution"
+        SUPPRESS_JSON = EVOLUTION_DIR / "suppress.json"
+        FINDINGS_OVER_TIME = EVOLUTION_DIR / "findings_over_time.json"
+        EVOLUTION_CONFIG = EVOLUTION_DIR / "config.yml"
+        HEARTBEAT_FILE = EVOLUTION_DIR / "heartbeat.json"
+        FACTORY_HOME = Path.home() / ".factory"
+        LOCK_DIR = FACTORY_HOME / "webhook" / "locks"
+        TRIGGER_DROID = FACTORY_HOME / "webhook" / "scripts" / "trigger-droid.sh"
+        RECONCILE_SCRIPT = FACTORY_HOME / "webhook" / "scripts" / "reconcile-evolution.sh"
+        REPOSITORIES_YML = FACTORY_HOME / "config" / "repositories.yml"
 
     all_findings: list[dict[str, Any]] = []
     all_findings.extend(check_suppress_json())
