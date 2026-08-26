@@ -1,11 +1,8 @@
 """CLI 测试"""
 
-import io
-import sys
-from pathlib import Path
 from unittest.mock import patch
 
-from infra_core.cli import cmd_audit, cmd_scan, cmd_version_sweep, main
+from infra_core.cli import cmd_audit, cmd_version_sweep, main
 
 
 def test_infra_cli_help(capsys):
