@@ -2,7 +2,6 @@
 
 import subprocess
 import sys
-from pathlib import Path
 
 
 def test_infra_cli_help():
