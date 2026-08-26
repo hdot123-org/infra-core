@@ -1,0 +1,34 @@
+name: Evolution Heartbeat
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'  # Every 2 hours
+  workflow_dispatch: {}
+
+concurrency:
+  group: evolution-heartbeat
+  cancel-in-progress: false
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install package
+        run: pip install -e .
+      - name: Ensure labels exist
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+        run: |
+          gh label create "evolution-heartbeat" --color D93F0B --description "Evolution heartbeat alert" --force || true
+      - name: Run heartbeat check
+        run: python scripts/evolution_heartbeat.py
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          PYTHONSAFEPATH: '1'

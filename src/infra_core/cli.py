@@ -1,15 +1,48 @@
 """infra-cli: 统一命令行入口"""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
-    """scan 子命令（M2 移植后实现）"""
-    print("scan 子命令尚未实现（M2 移植后提供）", file=sys.stderr)
-    print("提示：M2 完成后将支持 --repo-root 和 --report-only 参数", file=sys.stderr)
-    return 1
+    """scan 子命令：委托 engine.evolution_scanner 执行演进扫描
+
+    引擎的 main() 通过 argparse 解析 sys.argv，因此这里把 CLI 解析好的
+    参数重新组装为引擎 argv 并转发，保持单一实现（CLI 不做独立扫描逻辑）。
+    """
+    # 延迟导入：保证 `infra-cli --help` / `infra-cli scan --help` 不触发引擎
+    # 加载副作用（VAL-ENG-004），也让未安装 pyyaml 的环境可用其余子命令
+    from infra_core.engine import evolution_scanner
+
+    repo_root = Path(args.repo_root).resolve()
+
+    if not repo_root.exists():
+        print(f"错误：目标路径不存在：{repo_root}", file=sys.stderr)
+        return 1
+    if not repo_root.is_dir():
+        print(f"错误：目标不是目录：{repo_root}", file=sys.stderr)
+        return 1
+
+    engine_argv = ["infra-cli scan", "--repo-root", str(repo_root)]
+    if args.report_only:
+        engine_argv.append("--report-only")
+    if args.output:
+        engine_argv.extend(["--output", str(args.output)])
+
+    original_argv = sys.argv
+    try:
+        sys.argv = engine_argv
+        evolution_scanner.main()
+    except SystemExit as e:
+        # 引擎用 sys.exit 表达 tick 结果（P1-2/P2-A 硬退出码 1、kill switch 0）
+        if e.code is None:
+            return 0
+        return e.code if isinstance(e.code, int) else 1
+    finally:
+        sys.argv = original_argv
+    return 0
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
@@ -59,9 +92,14 @@ def main() -> int:
 
     # scan 子命令
     scan_parser = subparsers.add_parser("scan", help="扫描仓库（M2 实现）")
-    scan_parser.add_argument("--repo-root", type=str, help="目标仓库路径（默认当前目录）")
+    scan_parser.add_argument(
+        "--repo-root",
+        type=str,
+        default=os.getcwd(),
+        help="目标仓库路径（默认当前目录）",
+    )
     scan_parser.add_argument("--report-only", action="store_true", help="只读模式，不创建 issue")
-    scan_parser.add_argument("--output", type=str, help="输出报告路径")
+    scan_parser.add_argument("--output", type=str, default=None, help="输出报告路径")
 
     # audit 子命令
     audit_parser = subparsers.add_parser("audit", help="审计项目（M3 实现）")
