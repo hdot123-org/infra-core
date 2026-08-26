@@ -1,11 +1,13 @@
+# HOTFIX (M2): Triggers disabled — workflow_dispatch only.
+# M2 scrutiny: scripts/branch_cleanup.sh and branch_cleanup_issue.sh paths
+# do not exist (shell scripts in src/infra_core/shell/). Run 32953988692
+# exited 127. Scheduled cron + pull_request trigger caused persistent failures.
+# M4 will rewrite as formal reusable/caller form.
+
 name: Branch Cleanup
 
 on:
-  schedule:
-    - cron: '0 * * * *'  # Every hour at minute 0 (UTC)
-  pull_request:
-    types: [closed]
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
   contents: write

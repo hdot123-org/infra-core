@@ -29,31 +29,31 @@ def _quota_sweep_run() -> str:
 
 
 class TestQuotaSweepJobStructure:
-    """quota-sweep job 的存在性与触发配置。"""
+    """quota-sweep job 的存在性与触发配置。
+
+    M2 HOTFIX: 触发器全部禁用为 workflow_dispatch-only 桩。
+    以下测试适配 dispatch-only 形态，M4 reusable/caller 重写时更新。
+    """
 
     def test_quota_sweep_job_exists(self):
         """quota-sweep job 必须存在（429 自愈入口）。"""
         assert "quota-sweep" in _load()["jobs"]
 
-    def test_schedule_trigger_present(self):
-        """schedule 每 30 分钟触发（配额恢复探测窗口）。"""
+    def test_dispatch_only_trigger(self):
+        """M2 HOTFIX: 触发器禁用为 workflow_dispatch only。"""
         on_block = _load()[True]  # yaml 把 `on:` 解析为 True
-        assert "schedule" in on_block
-        crons = [c["cron"] for c in on_block["schedule"]]
-        assert "*/30 * * * *" in crons
+        assert "workflow_dispatch" in on_block
+        # schedule 和 workflow_run 不应存在（HOTFIX 移除）
+        assert "schedule" not in on_block
+        assert "workflow_run" not in on_block
 
     def test_quota_sweep_gated_on_schedule_event(self):
-        """quota-sweep 只在 schedule 事件运行，workflow_run 不误入
-        （配额耗尽时立即 rerun 无意义，必须走恢复窗口）。"""
+        """quota-sweep 的 if: 条件保留（M4 恢复 schedule 时直接生效）。"""
         assert _load()["jobs"]["quota-sweep"]["if"] == "github.event_name == 'schedule'"
 
-    def test_workflow_run_trigger_preserved(self):
-        """原有 workflow_run 双触发源（self-heal-rerun / cancel-on-ci-fail）不受影响。"""
-        on_block = _load()[True]
-        assert "workflow_run" in on_block
-        names = on_block["workflow_run"]["workflows"]
-        assert "Droid Auto Review" in names
-        assert "CI" in names
+    def test_contract_name_preserved(self):
+        """M2 HOTFIX: workflow name 契约字符串保留。"""
+        assert _load()["name"] == "Droid Review Watchdog"
 
 
 class TestQuotaSweepDetectionLogic:

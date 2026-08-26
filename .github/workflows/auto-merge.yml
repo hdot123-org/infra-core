@@ -1,30 +1,15 @@
 name: Auto Merge
 
-# 为什么用 workflow_run + schedule 而非 check_run（INFRA-212）
-# ----------------------------------------------------------------
-# GitHub 为防止递归调用，不会把 check_run / check_suite 事件投递给其他
-# workflow——只要该 check 由 GitHub Actions 工作流产生。本仓库的 CI、QA、
-# droid-review、evolution-governance 全部是 GitHub Actions 工作流，因此
-# check_run: completed 实际上永远不会触发，导致 CI 全绿后 PR 不自动合并，
-# 只能靠手动 workflow_dispatch。
-#
-# 正确做法：
-#   1. workflow_run       —— 上游工作流成功结束时触发（快速路径）
-#   2. schedule           —— 每 10 分钟扫描兜底，保证任何遗漏事件都能收敛
-#   3. pull_request_target —— PR 打开/更新时立即尝试一次
-#   4. workflow_dispatch   —— 手动触发（不指定 PR 号则扫描全部 open PR）
+# HOTFIX (M2): Triggers disabled — workflow_dispatch only.
+# M2 scrutiny: workflow_run triggers with write tokens cause security risk.
+# Schedule */10 causes persistent red ticks. M4 will rewrite as formal
+# reusable/caller form.
+
 on:
-  workflow_run:
-    workflows: ["CI", "QA", "Droid Auto Review", "Evolution Governance"]
-    types: [completed]
-  pull_request_target:
-    types: [opened, synchronize, reopened]
-  schedule:
-    - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       pr_number:
-        description: 'PR number to merge (empty = sweep all open PRs)'
+        description: 'PR number (leave empty to sweep all open PRs)'
         required: false
         type: string
 

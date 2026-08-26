@@ -1284,10 +1284,38 @@ def resolve_rule_packs(config: dict[str, Any]) -> None:
         print("[evolution] Error: audit_tools must be a list")
         sys.exit(1)
 
+    # Resolve pack_tool references: an inline entry with `pack_tool: <name>`
+    # uses the pack-defined tool with that name as its base, overlaying any
+    # inline fields (e.g. enabled: false). This implements the §5 contract:
+    #   - name: hygiene
+    #     pack_tool: hygiene
+    #     enabled: false
+    resolved_inline: list[dict[str, Any]] = []
+    pack_tools_by_name = {t.get("name"): t for t in pack_tools if isinstance(t, dict)}
+    for tool in inline_tools:
+        if not isinstance(tool, dict):
+            resolved_inline.append(tool)
+            continue
+        pack_tool_name = tool.get("pack_tool")
+        if pack_tool_name:
+            base = pack_tools_by_name.get(pack_tool_name)
+            if base is not None:
+                # Pack definition as base, inline fields as override (minus pack_tool key)
+                merged_tool = {**base}
+                for k, v in tool.items():
+                    if k != "pack_tool":
+                        merged_tool[k] = v
+                resolved_inline.append(merged_tool)
+            else:
+                # No matching pack tool — use inline entry as-is (needs 'command')
+                resolved_inline.append({k: v for k, v in tool.items() if k != "pack_tool"})
+        else:
+            resolved_inline.append(tool)
+
     # Inline entries override same-name pack tools.
-    inline_names = {t.get("name") for t in inline_tools if isinstance(t, dict)}
+    inline_names = {t.get("name") for t in resolved_inline if isinstance(t, dict)}
     merged = [t for t in pack_tools if t.get("name") not in inline_names]
-    merged.extend(inline_tools)
+    merged.extend(resolved_inline)
 
     # enabled: false disables an entry (pack-defined or inline).
     disabled = [t.get("name") for t in merged if isinstance(t, dict) and t.get("enabled") is False]
