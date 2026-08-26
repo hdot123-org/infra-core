@@ -1,0 +1,35 @@
+name: Release Please
+
+# 批处理发版策略：
+# - schedule: 每天定时 2 次（北京时间 12:00 / 20:00），批量打包积攒的 commits
+# - push(paths): release PR 合并时自动触发（仅 .release-please-manifest.json 变更）
+# - workflow_dispatch: 手动即时发版
+# 代码 PR 实时合入 main 不变，发版与合入解耦。
+on:
+  schedule:
+    - cron: '0 4 * * *'   # 北京时间 12:00
+    - cron: '0 12 * * *'   # 北京时间 20:00
+  push:
+    branches:
+      - main
+    paths:
+      - '.release-please-manifest.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          token: ${{ secrets.GITHUB_TOKEN }}
