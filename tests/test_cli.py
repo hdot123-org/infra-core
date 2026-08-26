@@ -1,88 +1,87 @@
 """CLI 测试"""
 
-import subprocess
+import io
 import sys
+from pathlib import Path
+from unittest.mock import patch
+
+from infra_core.cli import cmd_audit, cmd_scan, cmd_version_sweep, main
 
 
-def test_infra_cli_help():
+def test_infra_cli_help(capsys):
     """测试 infra-cli --help 安全无副作用"""
-    result = subprocess.run(
-        [sys.executable, "-m", "infra_core.cli", "--help"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-    assert "infra-cli" in result.stdout
-    assert "scan" in result.stdout
-    assert "audit" in result.stdout
-    assert "version-sweep" in result.stdout
+    with patch("sys.argv", ["infra-cli", "--help"]):
+        try:
+            main()
+        except SystemExit as e:
+            assert e.code == 0
+    captured = capsys.readouterr()
+    assert "infra-cli" in captured.out
+    assert "scan" in captured.out
+    assert "audit" in captured.out
+    assert "version-sweep" in captured.out
 
 
-def test_scan_help():
+def test_scan_help(capsys):
     """测试 scan --help"""
-    result = subprocess.run(
-        [sys.executable, "-m", "infra_core.cli", "scan", "--help"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-    assert "--repo-root" in result.stdout
-    assert "--report-only" in result.stdout
+    with patch("sys.argv", ["infra-cli", "scan", "--help"]):
+        try:
+            main()
+        except SystemExit as e:
+            assert e.code == 0
+    captured = capsys.readouterr()
+    assert "--repo-root" in captured.out
+    assert "--report-only" in captured.out
 
 
-def test_audit_help():
+def test_audit_help(capsys):
     """测试 audit --help"""
-    result = subprocess.run(
-        [sys.executable, "-m", "infra_core.cli", "audit", "--help"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-    assert "--target" in result.stdout
+    with patch("sys.argv", ["infra-cli", "audit", "--help"]):
+        try:
+            main()
+        except SystemExit as e:
+            assert e.code == 0
+    captured = capsys.readouterr()
+    assert "--target" in captured.out
 
 
-def test_version_sweep_help():
+def test_version_sweep_help(capsys):
     """测试 version-sweep --help"""
-    result = subprocess.run(
-        [sys.executable, "-m", "infra_core.cli", "version-sweep", "--help"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-    assert "--target" in result.stdout
+    with patch("sys.argv", ["infra-cli", "version-sweep", "--help"]):
+        try:
+            main()
+        except SystemExit as e:
+            assert e.code == 0
+    captured = capsys.readouterr()
+    assert "--target" in captured.out
 
 
-def test_audit_skeleton_fails_gracefully(tmp_path):
+class _Args:
+    """简单 mock args 对象"""
+
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+def test_audit_skeleton_fails_gracefully(tmp_path, capsys):
     """测试 audit 骨架优雅失败"""
-    result = subprocess.run(
-        [sys.executable, "-m", "infra_core.cli", "audit", "--target", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1
-    assert "尚未实现" in result.stderr
-    assert "Traceback" not in result.stderr
+    result = cmd_audit(_Args(target=str(tmp_path)))
+    assert result == 1
+    captured = capsys.readouterr()
+    assert "尚未实现" in captured.err
 
 
-def test_version_sweep_skeleton_fails_gracefully(tmp_path):
+def test_version_sweep_skeleton_fails_gracefully(tmp_path, capsys):
     """测试 version-sweep 骨架优雅失败"""
-    result = subprocess.run(
-        [sys.executable, "-m", "infra_core.cli", "version-sweep", "--target", str(tmp_path)],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1
-    assert "尚未实现" in result.stderr
-    assert "Traceback" not in result.stderr
+    result = cmd_version_sweep(_Args(target=str(tmp_path)))
+    assert result == 1
+    captured = capsys.readouterr()
+    assert "尚未实现" in captured.err
 
 
-def test_audit_nonexistent_target():
+def test_audit_nonexistent_target(capsys):
     """测试 audit 不存在的路径"""
-    result = subprocess.run(
-        [sys.executable, "-m", "infra_core.cli", "audit", "--target", "/nonexistent/path"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1
-    assert "不存在" in result.stderr
-    assert "Traceback" not in result.stderr
+    result = cmd_audit(_Args(target="/nonexistent/path"))
+    assert result == 1
+    captured = capsys.readouterr()
+    assert "不存在" in captured.err
