@@ -36,11 +36,11 @@ infra-core（public 引擎仓库）
 
 infra-core 用自己的 governance 门禁保护自身（self-bootstrap）：
 
-- workflow `Evolution Governance` 在 PR 触碰受保护路径时要求 owner 身份
+- workflow `Evolution Governance` 在 PR 触碰受保护路径时要求 owner 身份（`pull_request_target`，workflow 与 action 均从 base 分支解析执行，PR 无法改写自己的门禁）
 - 受保护路径（默认）：`.evolution/**`、`.github/workflows/**`、`src/infra_core/engine/**`、`webhook-scripts/**`
 - 判定核心在 `src/infra_core/governance.py`（fail-closed：作者未知即拒绝；路径匹配用 fnmatch，目录模式覆盖目录条目本身）
 - 本地 dry-run：`python -m infra_core.governance --author <login> --files <path>...`（退出码 0 放行 / 1 拒绝 / 2 输入错误）
-- composite action `actions/governance-check` 参数化 owner-login / protected-patterns，供消费仓复用
+- composite action `actions/governance-check` 参数化 owner-login / protected-patterns / github-token，供消费仓复用；action 内嵌自包含判定脚本 `governance_check.py`（与包内模块判定等价，等价性由测试锁定——消费仓使用 action 时不假设 infra-core 已安装）
 
 ## 4. CLI（infra-cli）
 
@@ -54,7 +54,7 @@ infra-core 用自己的 governance 门禁保护自身（self-bootstrap）：
 | ruff | `CI` | lint + format 检查 |
 | actionlint | `CI` | workflow 语法检查 |
 | ci-ok | `CI` | 聚合（branch protection required check） |
-| governance | `Evolution Governance` | 受保护路径 owner 门禁（pull_request_target） |
+| governance | `Evolution Governance` | 受保护路径 owner 门禁（pull_request_target，执行 shipped governance-check action） |
 
 ## 6. 演进路线
 

@@ -1,7 +1,8 @@
-"""治理自检测试（VAL-SCAF-006 判定表全覆盖 + dry-run CLI）"""
+"""治理自检测试（VAL-SCAF-006 判定表全覆盖 + dry-run CLI + action 等价性）"""
 
 import subprocess
 import sys
+from pathlib import Path
 
 from infra_core.governance import (
     DEFAULT_PROTECTED_PATTERNS,
@@ -172,3 +173,81 @@ class TestGovernanceDryRunCli:
             "src/infra_core/engine/**",
             "webhook-scripts/**",
         )
+
+
+class TestActionScriptEquivalence:
+    """action 内嵌脚本与包内模块判定等价（消费仓在任意 base 使用 action，
+    不能假设 infra-core 已安装，故 action 自带脚本；两者必须判定一致）"""
+
+    ACTION_SCRIPT = (
+        Path(__file__).resolve().parent.parent
+        / "actions"
+        / "governance-check"
+        / "governance_check.py"
+    )
+
+    CASES = [
+        # (changed_files, author, owner, patterns)
+        ([".evolution/config.yml"], "someone-else", "hdot123", None),
+        (["README.md", "docs/architecture.md"], "someone-else", "hdot123", None),
+        ([".evolution/config.yml", ".github/workflows/ci.yml"], "hdot123", "hdot123", None),
+        ([], "someone-else", "hdot123", None),
+        (["README.md"], "", "hdot123", None),
+        ([".evolution"], "someone-else", "hdot123", None),
+        (["src/infra_core/engine/evolution_scanner.py"], "someone-else", "hdot123", None),
+        (["webhook-scripts/MANIFEST.sh"], "someone-else", "hdot123", None),
+        (["src/infra_core/cli.py"], "someone-else", "hdot123", None),
+        (["zone/a.yml", "zone/b.yml"], "alice", "bob", ["zone/**"]),
+        (["zone/a.yml"], "alice", "alice", ["zone/**"]),
+    ]
+
+    def _run_action_script(
+        self,
+        files: list[str],
+        author: str,
+        owner: str,
+        patterns: list[str] | None,
+    ):
+        cmd = [sys.executable, str(self.ACTION_SCRIPT), "--author", author, "--owner", owner]
+        if patterns is not None:
+            cmd += ["--patterns", ",".join(patterns)]
+        for f in files:
+            cmd += ["--files", f]
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+    def test_action_script_exists(self):
+        assert self.ACTION_SCRIPT.exists()
+
+    def test_equivalent_verdicts_on_decision_table(self):
+        from infra_core.governance import check_governance as pkg_check
+
+        for files, author, owner, patterns in self.CASES:
+            pkg = pkg_check(
+                changed_files=files,
+                pr_author=author,
+                owner_login=owner,
+                protected_patterns=patterns or list(DEFAULT_PROTECTED_PATTERNS),
+            )
+            action = self._run_action_script(files, author, owner, patterns)
+            assert action.returncode == (0 if pkg.allowed else 1), (
+                f"判定不一致：files={files} author={author} owner={owner} "
+                f"patterns={patterns} pkg.allowed={pkg.allowed} "
+                f"action.exit={action.returncode} action.stderr={action.stderr}"
+            )
+            assert "Traceback" not in action.stderr, action.stderr
+
+    def test_action_script_stdin_mode(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(self.ACTION_SCRIPT),
+                "--author",
+                "someone-else",
+                "--files-from",
+                "-",
+            ],
+            input=".evolution/config.yml\n",
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == EXIT_DENY

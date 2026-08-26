@@ -90,7 +90,7 @@ actionlint
 
 ## 治理自检 dry-run
 
-governance 门禁的判定核心在 `src/infra_core/governance.py`，可本地模拟验证（fail-closed）：
+governance 门禁（workflow `Evolution Governance` + composite action `actions/governance-check`）的判定核心可本地模拟验证（fail-closed、路径感知）：
 
 ```bash
 # 非 owner 修改受保护路径 → 退出码 1（拒绝）

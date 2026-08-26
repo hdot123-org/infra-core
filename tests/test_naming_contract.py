@@ -63,6 +63,19 @@ class TestGovernanceActionDefaults:
         ):
             assert fragment in content
 
+    def test_governance_workflow_uses_shipped_action(self):
+        """governance workflow 必须执行 shipped action（VAL-SCAF-006 路径感知判定），
+        不能回退为只查作者不查路径的内联脚本"""
+        content = _read(".github/workflows/evolution-governance.yml")
+        assert "hdot123-org/infra-core/actions/governance-check@main" in content
+        # 不得残留旧的内联作者检查（只对比作者、无路径感知）
+        assert 'PR_AUTHOR="${{ github.event.pull_request.user.login }}"' not in content
+
+    def test_governance_workflow_uses_pull_request_target(self):
+        """pull_request_target 从 base 运行（受保护门禁不能被 PR 自身改写）"""
+        content = _read(".github/workflows/evolution-governance.yml")
+        assert "pull_request_target" in content
+
 
 class TestGovernanceModuleDefaults:
     def test_module_defaults_match_composite_action(self):
