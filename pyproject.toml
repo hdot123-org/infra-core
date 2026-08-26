@@ -55,7 +55,13 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "security: 安全与治理守卫（boundary、governance、pr-ref-consistency、fix-has-test、doc-classification）",
+    "schema: Schema 与版本同步测试（version_sync、naming_contract）",
+    "integration: 集成测试（CLI 入口、跨模块交互、drift_watch、suppression、tick_budget）",
+    "e2e: 端到端测试（scanner 全流程、heartbeat、webhook_anchor、CLI 冒烟）",
+]
 
 [tool.ruff]
 line-length = 100

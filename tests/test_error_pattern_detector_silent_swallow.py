@@ -13,6 +13,10 @@ Static code-inspection tests following the established pattern in
 
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.security
+
 from tests.silent_swallow_helpers import function_body as _func_body
 
 REPO_ROOT = Path(__file__).parent.parent

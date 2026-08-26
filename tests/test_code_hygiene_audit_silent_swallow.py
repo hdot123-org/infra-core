@@ -22,6 +22,10 @@ and portably, so static inspection is the appropriate guard.
 
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.security
+
 from tests.silent_swallow_helpers import except_positions as _except_positions
 
 REPO_ROOT = Path(__file__).parent.parent

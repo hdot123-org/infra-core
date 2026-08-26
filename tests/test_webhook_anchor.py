@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 # Engine modules (transplanted from memory-core scripts/) live in src/infra_core/engine
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src" / "infra_core" / "engine"))
 from evolution_utils import extract_linkback_anchor

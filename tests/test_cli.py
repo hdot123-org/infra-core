@@ -2,7 +2,11 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from infra_core.cli import cmd_audit, cmd_version_sweep, main
+
+pytestmark = pytest.mark.integration
 
 
 def test_infra_cli_help(capsys):

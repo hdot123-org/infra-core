@@ -1,0 +1,54 @@
+name: "Ensure jq"
+description: "Install jq for JSON processing in CI (idempotent)"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install jq
+      shell: bash
+      run: |
+        set -e
+
+        # Check if jq is already available
+        if command -v jq &>/dev/null; then
+          echo "jq already available: $(jq --version)"
+          exit 0
+        fi
+
+        echo "Installing jq..."
+
+        # Try system package manager first
+        if command -v apt-get &>/dev/null; then
+          sudo apt-get update -qq
+          sudo apt-get install -y jq
+        elif command -v yum &>/dev/null; then
+          sudo yum install -y jq
+        elif command -v apk &>/dev/null; then
+          sudo apk add --no-cache jq
+        elif command -v brew &>/dev/null; then
+          brew install jq
+        else
+          # Fallback: download prebuilt binary
+          echo "No package manager found, downloading prebuilt binary..."
+          JQ_VERSION="1.7.1"
+          JQ_URL="https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/jq-linux-amd64"
+
+          if command -v curl &>/dev/null; then
+            sudo curl -L "$JQ_URL" -o /usr/local/bin/jq
+          elif command -v wget &>/dev/null; then
+            sudo wget -O /usr/local/bin/jq "$JQ_URL"
+          else
+            echo "No curl/wget available to download jq"
+            exit 1
+          fi
+
+          sudo chmod +x /usr/local/bin/jq
+        fi
+
+        # Verify installation
+        if command -v jq &>/dev/null; then
+          echo "jq installed successfully: $(jq --version)"
+        else
+          echo "jq installation failed"
+          exit 1
+        fi

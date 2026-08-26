@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 from tests.shellcheck_helpers import assert_shellcheck_clean
 
 

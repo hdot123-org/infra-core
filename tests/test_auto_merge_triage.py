@@ -21,6 +21,10 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 
 def get_script_path() -> Path:
     """Get path to auto_merge_triage.sh script."""
