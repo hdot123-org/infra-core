@@ -43,7 +43,7 @@ concurrency:
 jobs:
   # ── Job 0: Setup - resolve PR context for both trigger types ──
   setup:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     outputs:
       pr_number: ${{ steps.resolve.outputs.pr_number }}
       base_sha: ${{ steps.resolve.outputs.base_sha }}
@@ -99,7 +99,7 @@ jobs:
   plan-shards:
     needs: setup
     if: needs.setup.outputs.draft == 'false' && needs.setup.outputs.user_login != 'dependabot[bot]'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     timeout-minutes: 5
     outputs:
       shards: ${{ steps.plan.outputs.shards }}
@@ -178,7 +178,7 @@ jobs:
       needs.plan-shards.outputs.docs_only != 'true' &&
       needs.plan-shards.outputs.shards != '[]' &&
       needs.plan-shards.outputs.shards != ''
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     timeout-minutes: ${{ fromJSON(vars.SHARD_TIMEOUT_MINUTES || '45') }}
     strategy:
       fail-fast: false
@@ -345,7 +345,7 @@ jobs:
   droid-review:
     needs: [setup, plan-shards, review-shard]
     if: always() && needs.plan-shards.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     timeout-minutes: ${{ fromJSON(vars.DROID_REVIEW_TIMEOUT_MINUTES || '90') }}
     permissions:
       contents: read

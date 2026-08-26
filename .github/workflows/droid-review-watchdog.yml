@@ -56,7 +56,7 @@ jobs:
     if: >
       github.event.workflow_run.name == 'Droid Auto Review' &&
       github.event.workflow_run.conclusion == 'failure'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     timeout-minutes: 10
     steps:
       - name: Rerun droid-review on infra-transient failure
@@ -100,7 +100,7 @@ jobs:
     if: >
       github.event.workflow_run.name == 'CI' &&
       github.event.workflow_run.conclusion == 'failure'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     timeout-minutes: 5
     steps:
       - name: Cancel in-progress droid-review on CI failure
@@ -130,7 +130,7 @@ jobs:
     # 只在 schedule 触发时运行，避免 workflow_run 事件误入（quota 耗尽时立即
     # rerun 无意义，必须等配额恢复窗口）。
     if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     timeout-minutes: 10
     steps:
       - name: Rerun quota-exhausted droid-review after recovery window

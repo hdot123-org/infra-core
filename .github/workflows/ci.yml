@@ -1,3 +1,5 @@
+# Self-hosted runner CI pipeline (pve-linux)
+# Per-run venv isolation per 2026-08-25-selfhosted-runner-env-shadowing.md
 name: CI
 
 on:
@@ -9,76 +11,76 @@ on:
 jobs:
   pytest:
     name: pytest
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      
+
+      - name: Create per-run venv (isolation from runner site-packages)
+        run: |
+          python3.12 -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      
+
       - name: Run tests
         run: pytest -q
-  
+
   ruff:
     name: ruff
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      
+
+      - name: Create per-run venv (isolation from runner site-packages)
+        run: |
+          python3.12 -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+
       - name: Install ruff
         run: pip install ruff
-      
+
       - name: Run ruff
         run: |
           ruff check .
           ruff format --check .
-  
+
   actionlint:
     name: actionlint
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Run actionlint
         run: |
           bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash)
           ./actionlint -color
-  
+
   mypy:
     name: mypy
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      
+
+      - name: Create per-run venv (isolation from runner site-packages)
+        run: |
+          python3.12 -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      
+
       - name: Run mypy
         run: mypy --strict src/infra_core
-  
+
   ci-ok:
     name: ci-ok
     needs: [pytest, ruff, actionlint, mypy]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, pve-linux]
     if: always()
     steps:
       - name: Check all jobs
