@@ -39,7 +39,12 @@ def _patch_infra_critical():
             "servers": {
                 "srv1": {
                     "violations": [
-                        {"type": "ssh_fail", "severity": "critical", "path": "srv1", "detail": "fail"},
+                        {
+                            "type": "ssh_fail",
+                            "severity": "critical",
+                            "path": "srv1",
+                            "detail": "fail",
+                        },
                     ],
                 },
             },

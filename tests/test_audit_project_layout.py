@@ -144,7 +144,9 @@ class TestAuditMultiGenerationConflict:
         conflict_findings = [f for f in result.findings if f.kind == "multi_generation_conflict"]
         assert len(conflict_findings) == 0
 
-    def test_no_conflict_for_dot_memory_plus_current_memory_plus_project_map(self, tmp_path: Path) -> None:
+    def test_no_conflict_for_dot_memory_plus_current_memory_plus_project_map(
+        self, tmp_path: Path
+    ) -> None:
         """.memory + memory + project-map should NOT trigger conflict."""
         (tmp_path / "memory" / "system").mkdir(parents=True)
         (tmp_path / "memory" / "inbox.md").write_text("# Inbox\n")
@@ -555,7 +557,9 @@ class TestPlanResidueMigration:
         # ownership_missing (P1) makes risk_level "high"
         assert plan.risk_level == "high"
 
-    def test_plan_risk_level_not_critical_for_current_memory_combinations(self, tmp_path: Path) -> None:
+    def test_plan_risk_level_not_critical_for_current_memory_combinations(
+        self, tmp_path: Path
+    ) -> None:
         """.memory + memory should NOT have critical risk level."""
         (tmp_path / "memory" / "system").mkdir(parents=True)
 
@@ -732,7 +736,11 @@ class TestPlanResidueMigration:
         plan = plan_residue_migration(audit_result, tmp_path)
 
         # Should be adopt_existing_memory, not mark_legacy_readonly
-        adopt_actions = [a for a in plan.actions if a.action == "adopt_existing_memory" and a.kind == "current_memory"]
+        adopt_actions = [
+            a
+            for a in plan.actions
+            if a.action == "adopt_existing_memory" and a.kind == "current_memory"
+        ]
         assert len(adopt_actions) > 0
         legacy_actions = [a for a in plan.actions if a.action == "mark_legacy_readonly"]
         assert len(legacy_actions) == 0
@@ -748,7 +756,9 @@ class TestPlanResidueMigration:
         ignore_actions = [a for a in plan.actions if a.action == "ignore_runtime_artifact"]
         assert len(ignore_actions) > 0
 
-    def test_plan_action_manual_decision_required_for_workspace_conflict(self, tmp_path: Path) -> None:
+    def test_plan_action_manual_decision_required_for_workspace_conflict(
+        self, tmp_path: Path
+    ) -> None:
         """Root vs workspace conflict should escalate to manual_decision_required."""
         (tmp_path / "memory" / "system").mkdir(parents=True)
         (tmp_path / "workspace").mkdir()

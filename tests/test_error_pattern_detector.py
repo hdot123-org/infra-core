@@ -376,10 +376,16 @@ class TestGroupByFingerprint:
     def test_type_script_constant(self) -> None:
         entries = [
             self._make_entry(
-                "2026-07-12T09:00:00+08:00", "err in /x/a.py", error_type="hook_timeout", script="session_end"
+                "2026-07-12T09:00:00+08:00",
+                "err in /x/a.py",
+                error_type="hook_timeout",
+                script="session_end",
             ),
             self._make_entry(
-                "2026-07-12T10:00:00+08:00", "err in /y/b.py", error_type="hook_timeout", script="session_end"
+                "2026-07-12T10:00:00+08:00",
+                "err in /y/b.py",
+                error_type="hook_timeout",
+                script="session_end",
             ),
         ]
         groups = group_by_fingerprint(entries)
@@ -491,7 +497,11 @@ class TestDateExtraction:
 class TestRealDataIntegration:
     @pytest.mark.skipif(not REAL_ERRORS, reason="No real error data found")
     def test_real_data_curl_pattern(self) -> None:
-        curl_entries = [e for e in REAL_ERRORS if e.get("msg", "").startswith("LLM API curl error: curl: option")]
+        curl_entries = [
+            e
+            for e in REAL_ERRORS
+            if e.get("msg", "").startswith("LLM API curl error: curl: option")
+        ]
         if not curl_entries:
             pytest.skip("No curl blank-arg entries")
         groups = group_by_fingerprint(curl_entries)

@@ -72,7 +72,9 @@ class TestSourceRepoVersionCheckSkip:
         result = audit_project("memory-core", tmp_path, {})
 
         # No version_mismatch violations should exist
-        version_violations = [v for v in result["violations"] if v.get("type") == "version_mismatch"]
+        version_violations = [
+            v for v in result["violations"] if v.get("type") == "version_mismatch"
+        ]
         assert len(version_violations) == 0
 
     def test_source_repo_has_note(self, tmp_path: Path) -> None:

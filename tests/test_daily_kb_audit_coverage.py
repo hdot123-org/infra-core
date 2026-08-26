@@ -728,7 +728,10 @@ class TestBuildReport:
     def test_basic_report(self):
         projects = {
             "proj1": {"path": "/p1", "violations": []},
-            "proj2": {"path": "/p2", "violations": [{"type": "x", "severity": "critical", "file": "f", "detail": "d"}]},
+            "proj2": {
+                "path": "/p2",
+                "violations": [{"type": "x", "severity": "critical", "file": "f", "detail": "d"}],
+            },
         }
         report = build_report(projects)
         assert report["projects_checked"] == 2
@@ -781,8 +784,18 @@ class TestSummarizeReport:
             "projects": {
                 "proj1": {
                     "violations": [
-                        {"type": "hash_mismatch", "severity": "critical", "file": "f.md", "detail": "tampered"},
-                        {"type": "unsigned_file", "severity": "warning", "file": "u.md", "detail": "unsigned"},
+                        {
+                            "type": "hash_mismatch",
+                            "severity": "critical",
+                            "file": "f.md",
+                            "detail": "tampered",
+                        },
+                        {
+                            "type": "unsigned_file",
+                            "severity": "warning",
+                            "file": "u.md",
+                            "detail": "unsigned",
+                        },
                     ]
                 }
             },
@@ -793,7 +806,10 @@ class TestSummarizeReport:
         assert "proj1" in summary
 
     def test_many_violations_truncated(self):
-        violations = [{"type": "t", "severity": "warning", "file": f"f{i}.md", "detail": f"d{i}"} for i in range(10)]
+        violations = [
+            {"type": "t", "severity": "warning", "file": f"f{i}.md", "detail": f"d{i}"}
+            for i in range(10)
+        ]
         report = {
             "audit_date": "2026-07-12",
             "projects_checked": 1,
@@ -901,21 +917,36 @@ class TestNotifyViaLark:
     def test_lark_cli_not_installed(self, mock_run):
         mock_run.side_effect = FileNotFoundError()
         with patch.dict(os.environ, {"LARK_AUDIT_CHAT_ID": "chat123"}):
-            report = {"audit_date": "2026-07-12", "projects_checked": 0, "total_violations": 0, "projects": {}}
+            report = {
+                "audit_date": "2026-07-12",
+                "projects_checked": 0,
+                "total_violations": 0,
+                "projects": {},
+            }
             assert notify_via_lark(report) is False
 
     @patch("infra_core.packs.memory.daily_audit.subprocess.run")
     def test_lark_success(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
         with patch.dict(os.environ, {"LARK_AUDIT_CHAT_ID": "chat123"}):
-            report = {"audit_date": "2026-07-12", "projects_checked": 0, "total_violations": 0, "projects": {}}
+            report = {
+                "audit_date": "2026-07-12",
+                "projects_checked": 0,
+                "total_violations": 0,
+                "projects": {},
+            }
             assert notify_via_lark(report) is True
 
     @patch("infra_core.packs.memory.daily_audit.subprocess.run")
     def test_lark_failure(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess([], 1, "", "error msg")
         with patch.dict(os.environ, {"LARK_AUDIT_CHAT_ID": "chat123"}):
-            report = {"audit_date": "2026-07-12", "projects_checked": 0, "total_violations": 0, "projects": {}}
+            report = {
+                "audit_date": "2026-07-12",
+                "projects_checked": 0,
+                "total_violations": 0,
+                "projects": {},
+            }
             assert notify_via_lark(report) is False
 
 
