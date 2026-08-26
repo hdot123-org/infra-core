@@ -5,14 +5,14 @@ import sys
 from pathlib import Path
 
 
-def cmd_scan(args):
+def cmd_scan(args: argparse.Namespace) -> int:
     """scan 子命令（M2 移植后实现）"""
     print("scan 子命令尚未实现（M2 移植后提供）", file=sys.stderr)
     print("提示：M2 完成后将支持 --repo-root 和 --report-only 参数", file=sys.stderr)
     return 1
 
 
-def cmd_audit(args):
+def cmd_audit(args: argparse.Namespace) -> int:
     """audit 子命令（M3 规则包迁入后实现）"""
     target = Path(args.target) if args.target else Path.cwd()
 
@@ -30,7 +30,7 @@ def cmd_audit(args):
     return 1
 
 
-def cmd_version_sweep(args):
+def cmd_version_sweep(args: argparse.Namespace) -> int:
     """version-sweep 子命令（M3 version_sync 迁移后实现）"""
     target = Path(args.target) if args.target else Path.cwd()
 
@@ -48,7 +48,7 @@ def cmd_version_sweep(args):
     return 1
 
 
-def main():
+def main() -> int:
     """infra-cli 主入口"""
     parser = argparse.ArgumentParser(
         prog="infra-cli",
