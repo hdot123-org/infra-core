@@ -13,6 +13,18 @@ inputs:
   dispatch-token:
     description: 'GitHub token for branch deletion and issue management'
     required: true
+  branch-age-merged-hours:
+    description: 'Hours threshold for merged-PR branches (empty → script defaults to 1)'
+    required: false
+    default: ''
+  branch-age-closed-hours:
+    description: 'Hours threshold for closed-PR branches (empty → script defaults to 4)'
+    required: false
+    default: ''
+  branch-age-orphan-hours:
+    description: 'Hours threshold for orphan branches (empty → script defaults to 24)'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -35,9 +47,9 @@ runs:
         TRIGGER_BRANCH: ${{ inputs.trigger-branch }}
         MODE: ${{ inputs.mode }}
         # Tiered thresholds: MERGED PR 1h / CLOSED PR 4h / ORPHAN 24h
-        BRANCH_AGE_MERGED_HOURS: ${{ vars.BRANCH_AGE_MERGED_HOURS }}
-        BRANCH_AGE_CLOSED_HOURS: ${{ vars.BRANCH_AGE_CLOSED_HOURS }}
-        BRANCH_AGE_ORPHAN_HOURS: ${{ vars.BRANCH_AGE_ORPHAN_HOURS }}
+        BRANCH_AGE_MERGED_HOURS: ${{ inputs.branch-age-merged-hours }}
+        BRANCH_AGE_CLOSED_HOURS: ${{ inputs.branch-age-closed-hours }}
+        BRANCH_AGE_ORPHAN_HOURS: ${{ inputs.branch-age-orphan-hours }}
       run: |
         if [ "$MODE" = "immediate" ]; then
           # PR-close trigger: immediate cleanup of the merged branch only

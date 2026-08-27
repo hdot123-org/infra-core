@@ -585,18 +585,22 @@ def test_double_run_idempotent(tmp_path: Path):
 # VAL-BCI-013: workflow calls the tracking-issue script (wiring contract)
 # ============================================================================
 def test_workflow_calls_tracking_issue_script():
-    """branch-cleanup.yml invokes scripts/branch_cleanup_issue.sh with the
-    documented arguments and always() condition."""
-    workflow_path = Path(__file__).parent.parent / ".github" / "workflows" / "branch-cleanup.yml"
-    content = workflow_path.read_text()
+    """The shipped composite action invokes branch_cleanup_issue.sh with the
+    documented arguments and always() condition.
 
-    assert "scripts/branch_cleanup_issue.sh" in content, (
-        "Workflow must call the INFRA-385 tracking-issue script"
+    M4 (INFRA-583): the caller workflow is now a thin caller; the INFRA-385
+    tracking-issue wiring lives inside actions/branch-cleanup/action.yml.
+    """
+    action_path = Path(__file__).parent.parent / "actions" / "branch-cleanup" / "action.yml"
+    content = action_path.read_text()
+
+    assert "$GITHUB_ACTION_PATH/branch_cleanup_issue.sh" in content, (
+        "Action must call the INFRA-385 tracking-issue script"
     )
     assert "if: always()" in content, "Step must run always so resolved tracking issues get closed"
     for arg in ("--deleted", "--protected", "--run-url", "--run-date"):
-        assert arg in content, f"Workflow must pass {arg}"
-    assert "GH_REPO_KEY" in content, "Workflow must pass the repository key for gh search"
+        assert arg in content, f"Action must pass {arg}"
+    assert "GH_REPO_KEY" in content, "Action must pass the repository key for gh search"
 
 
 # ============================================================================
