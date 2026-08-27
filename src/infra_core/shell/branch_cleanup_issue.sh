@@ -211,31 +211,45 @@ sync_linear_project() {
 
   ISSUE_TITLE="Branch cleanup tracking"
 
-  # Query Linear for the issue with matching title
-  LINEAR_ISSUE_ID=$(curl -s -X POST \
+  # Query Linear for tracking issues scoped to THIS repository. The
+  # Linear-GitHub integration mirrors the GitHub issue body into the Linear
+  # description, which embeds the per-repo workflow run URL
+  # (github.com/<owner>/<repo>/actions/runs/<id>). Title alone is ambiguous
+  # across repos (memory and infra-core both track "Branch cleanup tracking"
+  # in the same Linear workspace), so we filter on GH_REPO_KEY client-side;
+  # otherwise one repo's run would tag the other repo's Linear issue.
+  LINEAR_MATCHES=$(curl -s -X POST \
     -H "Content-Type: application/json" \
     -H "Authorization: ${LINEAR_API_KEY}" \
-    -d "{\"query\": \"query { issues(filter: { title: { eq: \\\"${ISSUE_TITLE}\\\" } }) { nodes { id title } } }\"}" \
-    https://api.linear.app/graphql 2>/dev/null | jq -r '.data.issues.nodes[0].id // ""')
+    -d "{\"query\": \"query { issues(filter: { title: { eq: \\\"${ISSUE_TITLE}\\\" } }, first: 50) { nodes { id description } } }\"}" \
+    https://api.linear.app/graphql 2>/dev/null)
 
-  if [[ -z "$LINEAR_ISSUE_ID" || "$LINEAR_ISSUE_ID" == "null" ]]; then
+  LINEAR_ISSUE_IDS=$(echo "$LINEAR_MATCHES" | jq -r --arg repo "github.com/${GH_REPO_KEY}/" \
+    '[.data.issues.nodes[]? | select((.description // "") | contains($repo)) | .id] | join("\n")')
+
+  if [[ -z "$LINEAR_ISSUE_IDS" ]]; then
     echo "linear_sync=skipped (Linear issue not found or not yet synced)"
     return 0
   fi
 
-  # Add the issue to the project
-  MUTATION_RESULT=$(curl -s -X POST \
-    -H "Content-Type: application/json" \
-    -H "Authorization: ${LINEAR_API_KEY}" \
-    -d "{\"query\": \"mutation { issueAddProjectRelation(input: { issueId: \\\"${LINEAR_ISSUE_ID}\\\", projectId: \\\"${LINEAR_PROJECT_ID}\\\" }) { success } }\"}" \
-    https://api.linear.app/graphql 2>/dev/null)
+  # Sync every same-repo match (current + historical trackers); the
+  # issueAddProjectRelation mutation is idempotent.
+  while IFS= read -r LINEAR_ISSUE_ID; do
+    [[ -z "$LINEAR_ISSUE_ID" ]] && continue
 
-  if echo "$MUTATION_RESULT" | jq -e '.data.issueAddProjectRelation.success' >/dev/null; then
-    echo "linear_sync=success (project=${LINEAR_PROJECT_ID})"
-  else
-    # Fail silently - sync failures must not break the workflow
-    echo "linear_sync=failed (mutation unsuccessful)"
-  fi
+    MUTATION_RESULT=$(curl -s -X POST \
+      -H "Content-Type: application/json" \
+      -H "Authorization: ${LINEAR_API_KEY}" \
+      -d "{\"query\": \"mutation { issueAddProjectRelation(input: { issueId: \\\"${LINEAR_ISSUE_ID}\\\", projectId: \\\"${LINEAR_PROJECT_ID}\\\" }) { success } }\"}" \
+      https://api.linear.app/graphql 2>/dev/null)
+
+    if echo "$MUTATION_RESULT" | jq -e '.data.issueAddProjectRelation.success' >/dev/null; then
+      echo "linear_sync=success (issue=${LINEAR_ISSUE_ID} project=${LINEAR_PROJECT_ID})"
+    else
+      # Fail silently - sync failures must not break the workflow
+      echo "linear_sync=failed (mutation unsuccessful)"
+    fi
+  done <<< "$LINEAR_ISSUE_IDS"
 }
 
 # ---------------------------------------------------------------------------

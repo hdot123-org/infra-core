@@ -55,10 +55,14 @@ class GhMockHarness:
         tmp_path: Path,
         issues: dict[int, str] | None = None,
         env: dict[str, str] | None = None,
+        curl_responses: list[str] | None = None,
     ) -> None:
         """Args:
         issues: mapping of issue number -> body for OPEN issues.
         env: additional environment variables to pass to the script.
+        curl_responses: canned responses for the mock curl (consumed in order,
+            the last one repeats). Defaults to ``{}`` so no test touches the
+            real Linear API.
         """
         self.tmp_path = tmp_path
         self.issues: dict[int, str] = dict(issues or {})
@@ -71,8 +75,10 @@ class GhMockHarness:
         # State shared with the mock script via files (simplest robust IPC)
         self.state_file = tmp_path / "gh_state.json"
         self.calls_file = tmp_path / "gh_calls.jsonl"
+        self.curl_calls_file = tmp_path / "curl_calls.jsonl"
         self._write_state()
         self.calls_file.write_text("")
+        self.curl_calls_file.write_text("")
 
         mock_gh = mock_dir / "gh"
         mock_gh.write_text(
@@ -136,6 +142,29 @@ class GhMockHarness:
         mock_gh.chmod(0o755)
         self.mock_bin = mock_dir
 
+        # Mock curl: records every invocation and serves canned responses
+        # (round-robin with last-repeats), keeping tests fully offline.
+        self.curl_responses_file = tmp_path / "curl_responses.json"
+        self.curl_counter_file = tmp_path / "curl_counter.txt"
+        self.curl_responses_file.write_text(
+            json.dumps(curl_responses if curl_responses is not None else ["{}"])
+        )
+        self.curl_counter_file.write_text("0")
+        mock_curl = mock_dir / "curl"
+        mock_curl.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            "args = sys.argv[1:]\n"
+            "data = args[args.index('-d') + 1] if '-d' in args else ''\n"
+            "with open(" + repr(str(self.curl_calls_file)) + ", 'a') as f:\n"
+            "    f.write(json.dumps({'args': args, 'data': data}) + '\\n')\n"
+            "responses = json.load(open(" + repr(str(self.curl_responses_file)) + "))\n"
+            "i = int(open(" + repr(str(self.curl_counter_file)) + ").read() or 0)\n"
+            "open(" + repr(str(self.curl_counter_file)) + ", 'w').write(str(i + 1))\n"
+            "print(responses[min(i, len(responses) - 1)])\n"
+        )
+        mock_curl.chmod(0o755)
+
     def _write_state(self) -> None:
         self.state_file.write_text(json.dumps({"issues": self.issues, "next": self.next_number}))
 
@@ -146,6 +175,18 @@ class GhMockHarness:
                 data = json.loads(line)
                 calls.append(GhCall(data["args"]))
         return calls
+
+    def read_curl_calls(self) -> list[dict]:
+        """Return recorded curl invocations as {"args": [...], "data": str}."""
+        calls = []
+        for line in self.curl_calls_file.read_text().splitlines():
+            if line.strip():
+                calls.append(json.loads(line))
+        return calls
+
+    def curl_calls_matching(self, substring: str) -> list[dict]:
+        """Return curl calls whose request payload contains substring."""
+        return [c for c in self.read_curl_calls() if substring in c["data"]]
 
     def run_script(
         self,
@@ -760,3 +801,123 @@ class TestLinearProjectSync:
         # Should reference vars.LINEAR_PROJECT_INFRA_CORE_ID or vars.LINEAR_PROJECT_MEMORY_CORE_ID
         # based on repository context
         assert "vars.LINEAR_PROJECT" in content or "inputs.linear-project-id" in content
+
+    # ------------------------------------------------------------------
+    # Repo-scoped issue resolution (2026-08-28, INFRA-586 live-validation finding)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _issues_response(pairs: list[tuple[str, str]]) -> str:
+        """Build a GraphQL issues response from (id, description) pairs."""
+        return json.dumps(
+            {"data": {"issues": {"nodes": [{"id": i, "description": d} for i, d in pairs]}}}
+        )
+
+    @staticmethod
+    def _mutation_ok_response() -> str:
+        return json.dumps({"data": {"issueAddProjectRelation": {"success": True}}})
+
+    def test_linear_sync_scopes_to_own_repository(self, tmp_path: Path):
+        """VAL-GATE-118: title alone is ambiguous across repos — memory and
+        infra-core both have "Branch cleanup tracking" issues in one Linear
+        workspace. The sync must only tag issues whose description embeds
+        THIS repo's workflow-run URL (github.com/<owner>/<repo>/)."""
+        harness = GhMockHarness(
+            tmp_path,
+            issues={781: tracker_body(["old-branch"])},
+            env={
+                "LINEAR_API_KEY": "test-key",
+                "LINEAR_PROJECT_ID": "proj-memory-core",
+            },
+            curl_responses=[
+                self._issues_response(
+                    [
+                        (
+                            "lin-infra-issue",
+                            "Workflow run: https://github.com/other-org/infra-core/actions/runs/1",
+                        ),
+                        (
+                            "lin-memory-issue",
+                            "Workflow run: https://github.com/example-org/memory/actions/runs/9",
+                        ),
+                    ]
+                ),
+                self._mutation_ok_response(),
+            ],
+        )
+
+        exit_code, stdout, _ = harness.run_script(deleted=["new-branch"])
+
+        assert exit_code == 0, stdout
+        assert "issue_action=updated" in stdout
+        assert "linear_sync=success" in stdout
+        mutations = harness.curl_calls_matching("issueAddProjectRelation")
+        assert len(mutations) == 1, "只有本仓的 Linear issue 应被加 project relation"
+        assert "lin-memory-issue" in mutations[0]["data"]
+        assert "lin-infra-issue" not in mutations[0]["data"]
+
+    def test_linear_sync_skips_when_no_repo_scoped_match(self, tmp_path: Path):
+        """No description matching GH_REPO_KEY → skip instead of tagging a
+        foreign repo's Linear issue."""
+        harness = GhMockHarness(
+            tmp_path,
+            issues={781: tracker_body(["old-branch"])},
+            env={
+                "LINEAR_API_KEY": "test-key",
+                "LINEAR_PROJECT_ID": "proj-memory-core",
+            },
+            curl_responses=[
+                self._issues_response(
+                    [
+                        (
+                            "lin-foreign-issue",
+                            "Workflow run: https://github.com/other-org/infra-core/actions/runs/1",
+                        )
+                    ]
+                ),
+            ],
+        )
+
+        exit_code, stdout, _ = harness.run_script()
+
+        assert exit_code == 0, stdout
+        assert "linear_sync=skipped (Linear issue not found or not yet synced)" in stdout
+        assert harness.curl_calls_matching("issueAddProjectRelation") == []
+
+    def test_linear_sync_tags_all_same_repo_matches(self, tmp_path: Path):
+        """All same-repo tracking issues (current + historical) get the project
+        relation; the mutation is idempotent so this is safe."""
+        harness = GhMockHarness(
+            tmp_path,
+            issues={781: tracker_body(["old-branch"])},
+            env={
+                "LINEAR_API_KEY": "test-key",
+                "LINEAR_PROJECT_ID": "proj-infra-core",
+            },
+            curl_responses=[
+                self._issues_response(
+                    [
+                        (
+                            "lin-own-current",
+                            "run https://github.com/example-org/memory/actions/runs/9",
+                        ),
+                        (
+                            "lin-own-closed",
+                            "run https://github.com/example-org/memory/actions/runs/3",
+                        ),
+                        (
+                            "lin-foreign",
+                            "run https://github.com/other-org/infra-core/actions/runs/1",
+                        ),
+                    ]
+                ),
+                self._mutation_ok_response(),
+            ],
+        )
+
+        exit_code, stdout, _ = harness.run_script(deleted=["new-branch"])
+
+        assert exit_code == 0, stdout
+        mutations = harness.curl_calls_matching("issueAddProjectRelation")
+        tagged = [c for c in mutations if "lin-own" in c["data"]]
+        assert len(tagged) == 2, "本仓新旧两个 tracking issue 都应挂上 project"
+        assert all("lin-foreign" not in c["data"] for c in mutations)
