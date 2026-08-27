@@ -12,7 +12,10 @@ session transcript 里；且配额未恢复时立即 rerun 无意义。quota-swe
 
 from pathlib import Path
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.e2e
 
 REPO_ROOT = Path(__file__).parent.parent
 WATCHDOG_PATH = REPO_ROOT / ".github/workflows/droid-review-watchdog.yml"

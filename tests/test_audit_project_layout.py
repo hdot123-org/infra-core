@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.schema
+
 from infra_core.packs.memory.layout_audit import (
     audit_project_layout,
     main,

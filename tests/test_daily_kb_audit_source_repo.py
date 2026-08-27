@@ -8,6 +8,10 @@ INFRA-263: daily_kb_audit 对 memory-core 源仓库不再报 HASH_MISMATCH 误�
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 from infra_core.packs.memory.daily_audit import (
     audit_project,
 )

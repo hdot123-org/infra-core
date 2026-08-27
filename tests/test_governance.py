@@ -5,11 +5,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from infra_core.governance import (
     DEFAULT_PROTECTED_PATTERNS,
     EXIT_DENY,
     check_governance,
 )
+
+pytestmark = [pytest.mark.security, pytest.mark.business_policy]
 
 
 class TestCheckGovernance:

@@ -9,6 +9,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.schema
+
 from infra_core.packs.memory.error_patterns import (
     PatternGroup,
     _is_test_artifact,

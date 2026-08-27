@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 
 def get_script_path() -> Path:
     """Get path to branch_cleanup.sh script."""
@@ -999,32 +1001,73 @@ def test_script_rejects_no_args():
 
 
 # ============================================================================
-# VAL-BRANCH-012: Workflow calls extracted script with correct arguments
+# VAL-BRANCH-012: Thin caller invokes the composite action (M4, INFRA-583)
 # ============================================================================
-def test_workflow_calls_extracted_script():
-    """Workflow YAML contains script reference, correct event-based dispatch."""
+def test_workflow_calls_composite_action():
+    """branch-cleanup.yml is a thin caller of the shipped composite action.
+
+    Contract (M4): the caller must not inline cleanup logic — it forwards
+    mode / trigger-branch / dispatch-token to
+    hdot123-org/infra-core/actions/branch-cleanup@main, mirroring the
+    memory-core caller exactly.
+    """
+    import yaml
+
     workflow_path = Path(__file__).parent.parent / ".github" / "workflows" / "branch-cleanup.yml"
-    content = workflow_path.read_text()
+    data = yaml.safe_load(workflow_path.read_text())
 
-    # Check that script is referenced
-    assert "scripts/branch_cleanup.sh" in content, "Workflow should reference the extracted script"
+    # Naming contract: workflow name and job key are load-bearing
+    # (check-name contracts / auto-merge wiring depend on them)
+    assert data["name"] == "Branch Cleanup"
+    assert list(data["jobs"].keys()) == ["cleanup"]
 
-    # Check for event-based dispatch
-    assert "github.event_name" in content, (
-        "Workflow should use github.event_name for mode selection"
+    steps = data["jobs"]["cleanup"]["steps"]
+    uses_steps = [s for s in steps if "uses" in s]
+    assert len(uses_steps) == 1, "caller must have exactly one action step"
+    assert uses_steps[0]["uses"] == "hdot123-org/infra-core/actions/branch-cleanup@main"
+
+    with_map = uses_steps[0].get("with", {})
+    # Event-based mode dispatch: PR-close → immediate, schedule → scheduled,
+    # workflow_dispatch → operator-selected mode
+    assert "github.event_name == 'workflow_dispatch' && inputs.mode" in with_map["mode"]
+    assert "github.event_name == 'pull_request' && 'immediate'" in with_map["mode"]
+    # Trigger branch forwarding (PR-close head ref or manual dispatch input)
+    assert "inputs.branch" in with_map["trigger-branch"]
+    assert "github.event.pull_request.head.ref" in with_map["trigger-branch"]
+    # Token forwarding (branch deletion + issue management)
+    assert with_map["dispatch-token"] == "${{ secrets.DISPATCH_TOKEN }}"
+
+    steps_blob = "\n".join(str(s) for s in steps)
+    assert "scripts/branch_cleanup.sh" not in steps_blob, (
+        "caller steps must not reference repo-local script paths (M2 stub residue)"
     )
-    assert "--immediate" in content, "Workflow should call script with --immediate for PR events"
-    assert "--scheduled" in content, (
-        "Workflow should call script with --scheduled for scheduled events"
-    )
 
-    # Check that pull_request.head.ref is passed
-    assert "github.event.pull_request.head.ref" in content, (
-        "Workflow should pass trigger branch name"
-    )
 
-    # Check that GH_TOKEN is set
-    assert "GH_TOKEN" in content, "Workflow should set GH_TOKEN"
+def test_workflow_triggers_and_permissions_preserved():
+    """Caller restores the M2-hotfix-disabled triggers and keeps permissions.
+
+    The M2 stub was workflow_dispatch-only; M4 parity with memory-core
+    requires schedule + pull_request(closed) + workflow_dispatch and the
+    original write permissions.
+    """
+    import yaml
+
+    workflow_path = Path(__file__).parent.parent / ".github" / "workflows" / "branch-cleanup.yml"
+    data = yaml.safe_load(workflow_path.read_text())
+
+    triggers = data.get(True) or data.get("on") or {}
+    assert "schedule" in triggers, "schedule trigger missing (M2 stub residue)"
+    assert triggers["schedule"][0]["cron"] == "0 * * * *"
+    assert "pull_request" in triggers and triggers["pull_request"]["types"] == ["closed"]
+    assert "workflow_dispatch" in triggers
+
+    mode_input = triggers["workflow_dispatch"]["inputs"]["mode"]
+    assert mode_input["type"] == "choice"
+    assert set(mode_input["options"]) == {"scheduled", "immediate"}
+    assert "branch" in triggers["workflow_dispatch"]["inputs"]
+
+    perms = data["permissions"]
+    assert perms == {"contents": "write", "issues": "write", "pull-requests": "read"}
 
 
 # ============================================================================
@@ -2042,6 +2085,39 @@ def test_retirement_list_tracks_infra_401() -> None:
         "infra-398's superseded branch (closed PR #806) must be listed for retirement"
     )
     assert "INFRA-401" in content, "the infra-401 entries must carry their INFRA reference"
+
+
+# ============================================================================
+# VAL-BRANCH-033 (INFRA-586): retirement list ships with infra-586 entry
+# ============================================================================
+def test_retirement_list_tracks_infra_586() -> None:
+    """The checked-in retirement list also lists the superseded
+    factory/infra-581-rule-packs-docs branch so tracking issue INFRA-586
+    (mirror #29) can drain once the scheduled cleanup deletes the branch.
+
+    Evidence chain:
+    - PR #24 (infra-core) closed unmerged at 2026-08-27T02:16Z; it was a
+      docs-only README rule-pack section sync for INFRA-581.
+    - The core fix (resolve_rule_packs lazy-load, 5-tool expansion,
+      enabled:false override) landed on main via PR #23 (6164aa3) and
+      INFRA-581 was marked terminal without merging the docs PR
+      (terminal absorption); the owner cross-referenced #24 from merged
+      PR #27 as a superseded precedent.
+    - Discretionary docs-sync work abandoned by the owner's close: the
+      INFRA-383 merge-tree containment check cannot see "owner closed
+      without merging", so the branch would be protected forever and the
+      INFRA-586 tracking issue would never drain.
+
+    Mirrors VAL-BRANCH-029/031/032: the list is the audit artifact, and
+    adding or removing entries requires PR review.
+    """
+    retired = repo_root() / "src" / "infra_core" / "shell" / "branch_cleanup_retired.txt"
+    assert retired.is_file(), "scripts/branch_cleanup_retired.txt must exist"
+    content = retired.read_text()
+    assert "factory/infra-581-rule-packs-docs" in content, (
+        "infra-586 superseded branch must be listed for retirement"
+    )
+    assert "INFRA-586" in content, "the infra-586 entry must carry its INFRA reference"
 
 
 # ============================================================================

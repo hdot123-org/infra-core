@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.security
+
 # The jq expression extracted from check_droid_review.sh
 # This must be kept in sync with the script's actual jq logic.
 SCRIPT_PATH = (

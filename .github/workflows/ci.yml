@@ -1,5 +1,10 @@
 # Self-hosted runner CI pipeline (pve-linux)
 # Per-run venv isolation per 2026-08-25-selfhosted-runner-env-shadowing.md
+#
+# Step2 wiring: structured jobs (guards / test groups / domain mypy / advisory)
+# Coverage ramp-up: 45% baseline, +5 per release, target 80%.
+# Existing 6 check names preserved (naming contract):
+#   pytest, ruff, actionlint, mypy, Block non-owner governance modifications, ci-ok
 name: CI
 
 on:
@@ -9,24 +14,34 @@ on:
     branches: [main]
 
 jobs:
+  # ─── Existing jobs (naming contract: DO NOT RENAME) ───
+
   pytest:
     name: pytest
     runs-on: [self-hosted, pve-linux]
     steps:
       - uses: actions/checkout@v5
 
-      - name: Create per-run venv (isolation from runner site-packages)
-        run: |
-          python3.12 -m venv "$RUNNER_TEMP/venv"
-          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
 
-      - name: Install dependencies
+      - name: "Run tests (parallel: 8 workers, loadgroup for shared-state safety) + coverage"
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pytest -q -n 8 --dist loadgroup \
+            --cov=src/infra_core \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=45
 
-      - name: "Run tests (parallel: 8 workers, loadgroup for shared-state safety)"
-        run: pytest -q -n 8 --dist loadgroup
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 14
+        # Note: No Codecov token configured — coverage.xml uploaded as artifact
+        # for local inspection. Remote upload (Codecov/Coveralls) deferred to
+        # a later feature when a token is available.
 
   ruff:
     name: ruff
@@ -34,13 +49,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Create per-run venv (isolation from runner site-packages)
-        run: |
-          python3.12 -m venv "$RUNNER_TEMP/venv"
-          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
-
-      - name: Install ruff
-        run: pip install ruff
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
 
       - name: Run ruff
         run: |
@@ -64,32 +74,305 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Create per-run venv (isolation from runner site-packages)
-        run: |
-          python3.12 -m venv "$RUNNER_TEMP/venv"
-          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
 
       - name: Run mypy
         run: mypy --strict src/infra_core
 
+  # ─── Guards (security markers + structural invariants) ───
+
+  guards:
+    name: guards
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # full history for PR diff analysis
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: Setup jq
+        uses: ./.github/actions/ensure-jq
+
+      - name: "BOUNDARY guard (public repo: no secrets, no local paths)"
+        run: python scripts/check_boundary.py
+
+      - name: Doc classification guard
+        run: python scripts/check_doc_classification.py
+
+      - name: Fix-has-test guard (PR only — requires GH_TOKEN)
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/check_fix_has_test.py --pr ${{ github.event.pull_request.number }}
+
+      - name: PR reference consistency (PR only — requires GH_TOKEN)
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/check_pr_ref_consistency.py ${{ github.event.pull_request.number }}
+
+  # ─── Specialized test groups (pytest markers) ───
+
+  security-tests:
+    name: security-tests
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: "Run security marker tests (-m security, -n 4)"
+        run: pytest -q -m security -n 4 --no-cov
+
+  schema-tests:
+    name: schema-tests
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: "Run schema marker tests (-m schema, -n 4)"
+        run: pytest -q -m schema -n 4 --no-cov
+
+  integration-tests:
+    name: integration-tests
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: "Run integration marker tests (-m integration, -n 4)"
+        run: pytest -q -m integration -n 4 --no-cov
+
+  e2e-tests:
+    name: e2e-tests
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: "Run e2e marker tests (-m e2e, -n 4)"
+        run: pytest -q -m e2e -n 4 --no-cov
+
+      - name: CLI smoke test (entry points callable)
+        run: bash scripts/cli_smoke_test.sh
+
+  # ─── Domain mypy (strict per domain) ───
+
+  mypy-src-strict:
+    name: "Enforce mypy --strict (src/)"
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: "mypy --strict src/infra_core"
+        run: mypy --strict src/infra_core
+
+  mypy-scripts-strict:
+    name: "Enforce mypy --strict (scripts/)"
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: "mypy --strict scripts/"
+        run: mypy --strict scripts/
+
+  # ─── Advisory (continue-on-error: surfaced but non-blocking) ───
+
+  advisory-dependency-security-scan:
+    name: "Advisory dependency security scan"
+    runs-on: [self-hosted, pve-linux]
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run pip-audit
+        run: pip-audit --progress-spinner off
+
+  advisory-deptry:
+    name: "Advisory deptry"
+    runs-on: [self-hosted, pve-linux]
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: Install deptry
+        run: pip install deptry
+
+      - name: Run deptry
+        run: deptry .
+
+  # ─── Gap-filling jobs (M3 基础层补齐，参照 memory-core 原版) ───
+
+  shellcheck:
+    name: shellcheck
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install shellcheck to RUNNER_TEMP
+        shell: bash
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            wget -q https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz
+            tar -xf shellcheck-v0.10.0.linux.x86_64.tar.xz -C "${RUNNER_TEMP}"
+            export PATH="${RUNNER_TEMP}/shellcheck-v0.10.0:$PATH"
+            echo "${RUNNER_TEMP}/shellcheck-v0.10.0" >> "$GITHUB_PATH"
+            rm -f shellcheck-v0.10.0.linux.x86_64.tar.xz
+          fi
+          shellcheck --version | head -2
+
+      - name: Shell lint (find *.sh -exec shellcheck -x)
+        shell: bash
+        run: |
+          find . -name '*.sh' \
+            -not -path './.venv/*' \
+            -not -path './.git/*' \
+            -not -path './node_modules/*' \
+            -print0 | xargs -0 shellcheck -x
+
+  health-check:
+    name: health-check
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: Run CI health check
+        run: bash scripts/ci_health_check.sh
+
+  repo-consistency:
+    name: repo-consistency
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run repo delivery consistency check
+        run: bash scripts/repo_health_check.sh --ci
+
+  advisory-telemetry-audit:
+    name: "Advisory telemetry coverage audit"
+    runs-on: [self-hosted, pve-linux]
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run telemetry coverage audit
+        run: bash scripts/audit_telemetry_coverage.sh
+
+  business-policy-tests:
+    name: business-policy-tests
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: "Run business_policy marker tests (-m business_policy, -n 4)"
+        run: pytest -q -m business_policy -n 4 --no-cov
+
+  # ─── ci-ok: aggregation gate (naming contract: DO NOT RENAME) ───
+
   ci-ok:
     name: ci-ok
-    needs: [pytest, ruff, actionlint, mypy]
+    needs:
+      # Existing (naming contract)
+      - pytest
+      - ruff
+      - actionlint
+      - mypy
+      # Guards
+      - guards
+      # Specialized test groups
+      - security-tests
+      - schema-tests
+      - integration-tests
+      - e2e-tests
+      # Domain mypy
+      - mypy-src-strict
+      - mypy-scripts-strict
+      # Advisory (continue-on-error above, but still listed for completeness)
+      - advisory-dependency-security-scan
+      - advisory-deptry
+      # Gap-filling jobs (M3 基础层补齐)
+      - shellcheck
+      - health-check
+      - repo-consistency
+      - advisory-telemetry-audit
+      - business-policy-tests
     runs-on: [self-hosted, pve-linux]
     if: always()
     steps:
-      - name: Check all jobs
+      - name: Check all required jobs
         run: |
-          if [[ "${{ needs.pytest.result }}" != "success" ]] || \
-             [[ "${{ needs.ruff.result }}" != "success" ]] || \
-             [[ "${{ needs.actionlint.result }}" != "success" ]] || \
-             [[ "${{ needs.mypy.result }}" != "success" ]]; then
-            echo "One or more jobs failed"
+          FAILED=0
+
+          # Existing jobs (naming contract)
+          echo "Checking existing jobs..."
+          [[ "${{ needs.pytest.result }}" == "success" ]] || { echo "FAIL: pytest"; FAILED=1; }
+          [[ "${{ needs.ruff.result }}" == "success" ]] || { echo "FAIL: ruff"; FAILED=1; }
+          [[ "${{ needs.actionlint.result }}" == "success" ]] || { echo "FAIL: actionlint"; FAILED=1; }
+          [[ "${{ needs.mypy.result }}" == "success" ]] || { echo "FAIL: mypy"; FAILED=1; }
+
+          # Guards
+          echo "Checking guards..."
+          [[ "${{ needs.guards.result }}" == "success" ]] || { echo "FAIL: guards"; FAILED=1; }
+
+          # Specialized test groups
+          echo "Checking specialized test groups..."
+          [[ "${{ needs.security-tests.result }}" == "success" ]] || { echo "FAIL: security-tests"; FAILED=1; }
+          [[ "${{ needs.schema-tests.result }}" == "success" ]] || { echo "FAIL: schema-tests"; FAILED=1; }
+          [[ "${{ needs.integration-tests.result }}" == "success" ]] || { echo "FAIL: integration-tests"; FAILED=1; }
+          [[ "${{ needs.e2e-tests.result }}" == "success" ]] || { echo "FAIL: e2e-tests"; FAILED=1; }
+
+          # Domain mypy
+          echo "Checking domain mypy..."
+          [[ "${{ needs.mypy-src-strict.result }}" == "success" ]] || { echo "FAIL: mypy-src-strict"; FAILED=1; }
+          [[ "${{ needs.mypy-scripts-strict.result }}" == "success" ]] || { echo "FAIL: mypy-scripts-strict"; FAILED=1; }
+
+          # Gap-filling jobs (M3 基础层补齐)
+          echo "Checking gap-filling jobs..."
+          [[ "${{ needs.shellcheck.result }}" == "success" ]] || { echo "FAIL: shellcheck"; FAILED=1; }
+          [[ "${{ needs.health-check.result }}" == "success" ]] || { echo "FAIL: health-check"; FAILED=1; }
+          [[ "${{ needs.repo-consistency.result }}" == "success" ]] || { echo "FAIL: repo-consistency"; FAILED=1; }
+          [[ "${{ needs.business-policy-tests.result }}" == "success" ]] || { echo "FAIL: business-policy-tests"; FAILED=1; }
+
+          # Advisory (non-blocking, for visibility only)
+          echo "Advisory jobs (non-blocking):"
+          echo "  advisory-dependency-security-scan: ${{ needs.advisory-dependency-security-scan.result }}"
+          echo "  advisory-deptry: ${{ needs.advisory-deptry.result }}"
+          echo "  advisory-telemetry-audit: ${{ needs.advisory-telemetry-audit.result }}"
+
+          if [[ "$FAILED" -eq 1 ]]; then
+            echo "❌ One or more required jobs failed"
             exit 1
           fi
-          echo "All jobs passed"
+          echo "✅ All required jobs passed"
