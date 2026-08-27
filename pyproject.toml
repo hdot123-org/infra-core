@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "infra-core"
-version = "0.1.0"
+version = "0.2.0"
 description = "组织级演进引擎：自进化/审计/门禁体系的共享基础设施"
 readme = "README.md"
 license = {text = "MIT"}
@@ -55,7 +55,14 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "security: 安全与治理守卫（boundary、governance、pr-ref-consistency、fix-has-test、doc-classification）",
+    "schema: Schema 与版本同步测试（version_sync、naming_contract）",
+    "integration: 集成测试（CLI 入口、跨模块交互、drift_watch、suppression、tick_budget）",
+    "e2e: 端到端测试（scanner 全流程、heartbeat、webhook_anchor、CLI 冒烟）",
+    "business_policy: 业务策略与守卫契约测试（governance、naming contract、guard contracts、delivery policy）",
+]
 
 [tool.ruff]
 line-length = 100
@@ -78,8 +85,26 @@ warn_return_any = true
 warn_unused_configs = true
 
 # Ignore missing imports for bare imports added via sys.path manipulation
+# (engine modules use bare imports for historical reasons from memory-core transplant)
 [[tool.mypy.overrides]]
 module = [
+    "evolution_adapters",
+    "evolution_utils",
+]
+ignore_missing_imports = true
+
+# deptry: dependency completeness check
+# DEP001 exemptions: internal modules imported via sys.path manipulation
+#   (engine modules use bare imports for historical reasons from memory-core transplant;
+#    guard_cli is a scripts/ local module imported via sys.path)
+# DEP002 exemptions: dev-only tools not imported in production code
+# DEP003 exemptions: transitive deps used directly (acceptable for now)
+[tool.deptry]
+ignore = ["DEP002"]
+
+[tool.deptry.per_rule_ignores]
+DEP001 = [
+    "guard_cli",
     "evolution_scanner",
     "evolution_utils",
     "evolution_adapters",
@@ -88,4 +113,13 @@ module = [
     "anchor_gate",
     "extract_anchor",
 ]
-ignore_missing_imports = true
+DEP003 = ["packaging", "tomli", "infra_core"]
+
+# Coverage ramp-up plan (orchestrator ruling 2026-08-27):
+# Current baseline: 46% (step2-wiring snapshot)
+# Threshold: 45% (enforced by --cov-fail-under=45 in CI)
+# Ramp-up: +5% per release
+# Target: 80% (sustainable quality floor)
+#
+# Enforcement: pytest --cov-fail-under=45 in ci.yml
+# Progress tracking: update this comment and the threshold each release

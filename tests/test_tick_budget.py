@@ -15,6 +15,10 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 # Engine modules (transplanted from memory-core scripts/) live in src/infra_core/engine
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src" / "infra_core" / "engine"))
 

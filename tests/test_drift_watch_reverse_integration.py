@@ -15,6 +15,10 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 # Engine modules (transplanted from memory-core scripts/) live in src/infra_core/engine
 _engine_dir = Path(__file__).resolve().parent.parent / "src" / "infra_core" / "engine"
 sys.path.insert(0, str(_engine_dir))

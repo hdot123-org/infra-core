@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 from infra_core.packs.memory.daily_audit import (
     MANIFEST_FILENAME,
     _append_infra_summary,

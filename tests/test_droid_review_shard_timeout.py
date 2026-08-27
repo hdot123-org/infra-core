@@ -13,7 +13,10 @@ Layer 3 SHARD_MAX_FILES/SHARD_MAX_LINES、Layer 4 SHARD_MAX_PARALLEL），
 
 from pathlib import Path
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).parent.parent
 WORKFLOW_PATH = REPO_ROOT / ".github/workflows/droid-review.yml"
