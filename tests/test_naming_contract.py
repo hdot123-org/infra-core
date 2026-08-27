@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.schema
+pytestmark = [pytest.mark.schema, pytest.mark.business_policy]
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 

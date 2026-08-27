@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.security
+pytestmark = [pytest.mark.security, pytest.mark.business_policy]
 
 from tests.script_module_helpers import init_test_git_repo, load_script_module
 

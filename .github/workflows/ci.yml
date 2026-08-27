@@ -227,6 +227,78 @@ jobs:
       - name: Run deptry
         run: deptry .
 
+  # ─── Gap-filling jobs (M3 基础层补齐，参照 memory-core 原版) ───
+
+  shellcheck:
+    name: shellcheck
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install shellcheck to RUNNER_TEMP
+        shell: bash
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            wget -q https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz
+            tar -xf shellcheck-v0.10.0.linux.x86_64.tar.xz -C "${RUNNER_TEMP}"
+            export PATH="${RUNNER_TEMP}/shellcheck-v0.10.0:$PATH"
+            echo "${RUNNER_TEMP}/shellcheck-v0.10.0" >> "$GITHUB_PATH"
+            rm -f shellcheck-v0.10.0.linux.x86_64.tar.xz
+          fi
+          shellcheck --version | head -2
+
+      - name: Shell lint (find *.sh -exec shellcheck -x)
+        shell: bash
+        run: |
+          find . -name '*.sh' \
+            -not -path './.venv/*' \
+            -not -path './.git/*' \
+            -not -path './node_modules/*' \
+            -print0 | xargs -0 shellcheck -x
+
+  health-check:
+    name: health-check
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: Run CI health check
+        run: bash scripts/ci_health_check.sh
+
+  repo-consistency:
+    name: repo-consistency
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run repo delivery consistency check
+        run: bash scripts/repo_health_check.sh --ci
+
+  advisory-telemetry-audit:
+    name: "Advisory telemetry coverage audit"
+    runs-on: [self-hosted, pve-linux]
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run telemetry coverage audit
+        run: bash scripts/audit_telemetry_coverage.sh
+
+  business-policy-tests:
+    name: business-policy-tests
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: "Run business_policy marker tests (-m business_policy, -n 4)"
+        run: pytest -q -m business_policy -n 4 --no-cov
+
   # ─── ci-ok: aggregation gate (naming contract: DO NOT RENAME) ───
 
   ci-ok:
@@ -250,6 +322,12 @@ jobs:
       # Advisory (continue-on-error above, but still listed for completeness)
       - advisory-dependency-security-scan
       - advisory-deptry
+      # Gap-filling jobs (M3 基础层补齐)
+      - shellcheck
+      - health-check
+      - repo-consistency
+      - advisory-telemetry-audit
+      - business-policy-tests
     runs-on: [self-hosted, pve-linux]
     if: always()
     steps:
@@ -280,10 +358,18 @@ jobs:
           [[ "${{ needs.mypy-src-strict.result }}" == "success" ]] || { echo "FAIL: mypy-src-strict"; FAILED=1; }
           [[ "${{ needs.mypy-scripts-strict.result }}" == "success" ]] || { echo "FAIL: mypy-scripts-strict"; FAILED=1; }
 
+          # Gap-filling jobs (M3 基础层补齐)
+          echo "Checking gap-filling jobs..."
+          [[ "${{ needs.shellcheck.result }}" == "success" ]] || { echo "FAIL: shellcheck"; FAILED=1; }
+          [[ "${{ needs.health-check.result }}" == "success" ]] || { echo "FAIL: health-check"; FAILED=1; }
+          [[ "${{ needs.repo-consistency.result }}" == "success" ]] || { echo "FAIL: repo-consistency"; FAILED=1; }
+          [[ "${{ needs.business-policy-tests.result }}" == "success" ]] || { echo "FAIL: business-policy-tests"; FAILED=1; }
+
           # Advisory (non-blocking, for visibility only)
           echo "Advisory jobs (non-blocking):"
           echo "  advisory-dependency-security-scan: ${{ needs.advisory-dependency-security-scan.result }}"
           echo "  advisory-deptry: ${{ needs.advisory-deptry.result }}"
+          echo "  advisory-telemetry-audit: ${{ needs.advisory-telemetry-audit.result }}"
 
           if [[ "$FAILED" -eq 1 ]]; then
             echo "❌ One or more required jobs failed"
