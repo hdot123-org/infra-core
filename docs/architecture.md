@@ -46,14 +46,26 @@ infra-core 用自己的 governance 门禁保护自身（self-bootstrap）：
 
 `infra-cli` 是统一命令行入口。M1 为骨架态：子命令 `scan` / `audit` / `version-sweep` 框架就位，`--help` 安全零副作用，未实现子命令优雅失败（非零退出 + 人类可读诊断，无 traceback）。
 
-## 5. 门禁矩阵（M1）
+## 5. 门禁矩阵
+
+`CI` workflow 共 19 个 job：既有 4 个（命名契约）+ guards + 4 个专项测试组 + 2 个分域 mypy + 3 个 advisory + 基础层补齐 4 个 + ci-ok 聚合。结构契约由 `tests/test_ci_structure_contract.py` 锁定（job 集合快照只对齐当前 main，后续 ci.yml 变更由对应 feature 同步该测试）。
 
 | 门禁 | workflow | 说明 |
 |------|----------|------|
-| pytest | `CI` | 单元测试 |
+| pytest | `CI` | 单元测试 + 覆盖率地板（`--cov-fail-under`，ramp-up 计划见 pyproject.toml） |
 | ruff | `CI` | lint + format 检查 |
 | actionlint | `CI` | workflow 语法检查 |
-| ci-ok | `CI` | 聚合（branch protection required check） |
+| mypy | `CI` | mypy（历史 check 名保留） |
+| guards | `CI` | 4 个守卫脚本：边界污染 / 文档分类 / fix-has-test / PR 引用一致性（后两个 PR-only，依赖 GH_TOKEN） |
+| security-tests / schema-tests / integration-tests / e2e-tests | `CI` | 专项测试组，按 pytest marker 分组（`-m <marker> -n 4 --no-cov`）；e2e 附 CLI 冒烟 |
+| mypy-src-strict / mypy-scripts-strict | `CI` | 分域 `mypy --strict`（src/infra_core 与 scripts/） |
+| advisory-dependency-security-scan / advisory-deptry | `CI` | advisory 扫描（pip-audit / deptry），`continue-on-error` 非阻塞，ci-ok 仅透出结果 |
+| advisory-telemetry-audit | `CI` | advisory：遥测覆盖率审计（`scripts/audit_telemetry_coverage.sh`），`continue-on-error` 非阻塞，ci-ok 仅透出结果 |
+| shellcheck | `CI` | shell 脚本静态检查 |
+| health-check | `CI` | CI 健康自检（`scripts/ci_health_check.sh`） |
+| repo-consistency | `CI` | 仓库交付一致性检查（`scripts/repo_health_check.sh --ci`） |
+| business-policy-tests | `CI` | 业务策略测试组（`-m business_policy -n 4 --no-cov`） |
+| ci-ok | `CI` | 聚合（branch protection required check），逐项显式阻断全部阻塞 job，advisory 不阻断 |
 | governance | `Evolution Governance` | 受保护路径 owner 门禁（pull_request_target，执行 shipped governance-check action） |
 | release | `Release Please` | 非门禁：发版管道（schedule/push(paths)/dispatch，DISPATCH_TOKEN，详见第 6 节） |
 
