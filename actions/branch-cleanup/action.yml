@@ -25,6 +25,14 @@ inputs:
     description: 'Hours threshold for orphan branches (empty → script defaults to 24)'
     required: false
     default: ''
+  linear-api-key:
+    description: 'Linear API key for syncing issues to projects (empty = skip sync)'
+    required: false
+    default: ''
+  linear-project-id:
+    description: 'Linear project ID to sync issues to (empty = skip sync)'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -85,6 +93,8 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.dispatch-token }}
         GH_REPO_KEY: ${{ github.repository }}
+        LINEAR_API_KEY: ${{ inputs.linear-api-key }}
+        LINEAR_PROJECT_ID: ${{ inputs.linear-project-id }}
       run: |
         RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         RUN_DATE=$(date -u '+%Y-%m-%d %H:%M UTC')

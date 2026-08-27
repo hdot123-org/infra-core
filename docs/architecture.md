@@ -55,8 +55,51 @@ infra-core 用自己的 governance 门禁保护自身（self-bootstrap）：
 | actionlint | `CI` | workflow 语法检查 |
 | ci-ok | `CI` | 聚合（branch protection required check） |
 | governance | `Evolution Governance` | 受保护路径 owner 门禁（pull_request_target，执行 shipped governance-check action） |
+| release | `Release Please` | 非门禁：发版管道（schedule/push(paths)/dispatch，DISPATCH_TOKEN，详见第 6 节） |
 
-## 6. 演进路线
+## 6. 发版管道（release-please）
+
+workflow：`Release Please`（`.github/workflows/release-please.yml`），配置 `release-please-config.json`（python release-type），版本权威源 `.release-please-manifest.json`。
+
+### 触发策略
+
+| 触发 | 说明 |
+|------|------|
+| schedule（每日 2 次） | 北京时间 12:00 / 20:00，批量打包积攒的 conventional commits |
+| push(paths) | main 上 `.release-please-manifest.json` 变更（即 Release PR 合并）→ 自动 tag + 发 Release |
+| workflow_dispatch | 手动即时发版 |
+
+代码 PR 实时合入 main 不变，发版与合入解耦（批处理模式）。
+
+### Token 铁律：DISPATCH_TOKEN，禁止 GITHUB_TOKEN
+
+release-please 的 `token` 输入必须用 `secrets.DISPATCH_TOKEN`（hdot123 PAT），不能用 `GITHUB_TOKEN`：
+
+1. 仓库默认 workflow 权限为 read 且未开启「允许 GITHUB_TOKEN 创建 PR」——GITHUB_TOKEN 连 Release PR 都开不出来（2026-08-26 run 33007886603 事故）。
+2. GitHub 递归防护会抑制 GITHUB_TOKEN 操作产生的 push 事件——Release PR 合并后的 `push(paths: .release-please-manifest.json)` 二次触发失效，tag/Release 永远出不来（memory-core 2026-08-15 v0.29.0/v0.30.0 两次事故，auto-merge 同源教训）。
+
+### 发版链路（v0.1.0 已端到端验证）
+
+```
+schedule/dispatch → release-please 扫描 conventional commits
+→ 开 Release PR（autorelease: pending，改 manifest + CHANGELOG.md）
+→ CI 全绿 → 合并 Release PR
+→ push(paths) 二次触发 → 打 tag（vX.Y.Z）+ 创建 GitHub Release
+```
+
+- manifest 初始 0.0.0，首个 Release PR 产出 v0.1.0（tag 格式无组件前缀）
+- commit message 必须 conventional 格式（feat/fix/perf/chore/docs/refactor/ci/test）；`[INFRA-xxx] 描述` 前缀格式无法被解析、不进 CHANGELOG
+- 架构铁律：禁止手动 tag、禁止手改 manifest 版本号，一切版本变更经 Release PR
+
+### 排障
+
+| 症状 | 根因与处置 |
+|------|-----------|
+| `Input required and not supplied: token` | 仓库 DISPATCH_TOKEN secret 缺失或值为空（2026-08-26 run 33008369603），按 1Password 权威值 `gh secret set` 重设 |
+| `GitHub Actions is not permitted to create or approve pull requests` | token 用了 GITHUB_TOKEN，或仓库 Actions 权限被回退为 read 且禁止建 PR，检查 token 与仓库 Actions 设置 |
+| Release PR 合并后没出 tag | 合并凭证不是真实用户/PAT（GITHUB_TOKEN 合并被递归防护吞掉 push 事件），用 DISPATCH_TOKEN 或本人凭证重新合并/手动 dispatch 补救 |
+
+## 7. 演进路线
 
 - M2：引擎移植（copy-not-move）——`src/infra_core/engine/` 落地 scanner 家族 + argparse（`--repo-root` / `--report-only`）
 - M3：memory 规则包迁入 `packs/memory/`；version_sync 整体迁入 + resign 注入钩子
