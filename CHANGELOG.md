@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.0](https://github.com/hdot123-org/infra-core/compare/v0.2.0...v0.3.0) (2026-08-27)
+
+
+### Features
+
+* **ci:** 基础层第二步 - 结构化门禁接线 ([#21](https://github.com/hdot123-org/infra-core/issues/21)) ([38b6289](https://github.com/hdot123-org/infra-core/commit/38b628910f842be31030e08b3add031b4ff7d6e4))
+* **ci:** 补齐基础层五道门禁（shellcheck/health-check/repo-consistency/telemetry-audit/business-policy-tests） ([#25](https://github.com/hdot123-org/infra-core/issues/25)) ([9d525d8](https://github.com/hdot123-org/infra-core/commit/9d525d872eb56b93d005b2a5ee6f5ea51cb6daab))
+* **guard:** 落地门禁守卫资产与 pytest markers 基础设施 ([#20](https://github.com/hdot123-org/infra-core/issues/20)) ([ad8c756](https://github.com/hdot123-org/infra-core/commit/ad8c756fa888c69d21d172a74e8efc3333d54de6))
+* INFRA-583 M4 收尾——branch-cleanup 自仓切 thin caller 并加双副本漂移防护 ([#27](https://github.com/hdot123-org/infra-core/issues/27)) ([e500f37](https://github.com/hdot123-org/infra-core/commit/e500f376ceb38a12f014de6e211474f006815920))
+* M4 branch-cleanup composite action（定时+即时双模式） ([#26](https://github.com/hdot123-org/infra-core/issues/26)) ([6cf8bc9](https://github.com/hdot123-org/infra-core/commit/6cf8bc95ddaabbb15b5fc18a23f1c37f63c4c0f3))
+* **M4:** 添加 setup-labels reusable workflow 与契约测试 ([#30](https://github.com/hdot123-org/infra-core/issues/30)) ([afe6570](https://github.com/hdot123-org/infra-core/commit/afe65707cdf0695bb1c91b8fbb553d38d9e5e47c))
+
+
+### Bug Fixes
+
+* 修复 rule_packs 懒加载并更新契约测试 ([#23](https://github.com/hdot123-org/infra-core/issues/23)) ([6164aa3](https://github.com/hdot123-org/infra-core/commit/6164aa3e867e69fe5dd791b0f91652b61f335cb0))
+
 ## [0.2.0](https://github.com/hdot123-org/infra-core/compare/v0.1.0...v0.2.0) (2026-08-26)
 
 
