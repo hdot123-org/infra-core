@@ -10419,7 +10419,11 @@ def test_report_only_no_history_write(tmp_path, capsys):
 
 
 def test_rule_packs_parsing_known_pack(tmp_path):
-    """rule_packs 配置解析已知 pack（memory）成功，不报错。"""
+    """rule_packs 配置解析已知 pack（memory）成功，懒加载后含 5 工具。
+
+    VAL-SEAM-009 契约：resolve_rule_packs 触发懒加载后
+    KNOWN_RULE_PACKS['memory'] 含 5 个工具名。
+    """
     _write_hotfix_config(tmp_path, "rule_packs:\n  - pack: memory\naudit_tools: []\n")
 
     config = evolution_scanner.load_config(tmp_path)
@@ -10428,11 +10432,18 @@ def test_rule_packs_parsing_known_pack(tmp_path):
     assert "rule_packs" in config
     assert config["rule_packs"] == [{"pack": "memory"}]
 
-    # resolve_rule_packs 不应抛出异常（memory 是已知的空 pack）
+    # resolve_rule_packs 触发懒加载，memory pack 含 5 工具
     evolution_scanner.resolve_rule_packs(config)
 
-    # memory pack 当前为空，audit_tools 保持空
-    assert config["audit_tools"] == []
+    expected_tool_names = {
+        "daily_kb_audit",
+        "layout_audit",
+        "code_hygiene",
+        "error_patterns",
+        "evolution_self_audit",
+    }
+    actual_names = {t["name"] for t in config["audit_tools"] if isinstance(t, dict)}
+    assert expected_tool_names == actual_names
 
 
 def test_rule_packs_unknown_pack_error(tmp_path, capsys):
@@ -10454,7 +10465,10 @@ def test_rule_packs_unknown_pack_error(tmp_path, capsys):
 
 
 def test_rule_packs_with_inline_override(tmp_path):
-    """rule_packs + audit_tools 同名条目时，inline 覆盖 pack 定义。"""
+    """rule_packs + audit_tools 同名条目时，inline 覆盖 pack 定义。
+
+    VAL-SEAM-009 契约：memory pack 懒加载 5 工具 + 1 inline 工具，共 6 个。
+    """
     _write_hotfix_config(
         tmp_path,
         "rule_packs:\n  - pack: memory\n"
@@ -10464,13 +10478,23 @@ def test_rule_packs_with_inline_override(tmp_path):
     config = evolution_scanner.load_config(tmp_path)
     evolution_scanner.resolve_rule_packs(config)
 
-    # inline 的 test_tool 保留（memory pack 为空，无覆盖）
-    assert len(config["audit_tools"]) == 1
-    assert config["audit_tools"][0]["name"] == "test_tool"
+    # memory pack 5 工具 + 1 inline 工具 = 6 工具
+    assert len(config["audit_tools"]) == 6
+    names = [t["name"] for t in config["audit_tools"] if isinstance(t, dict)]
+    assert "test_tool" in names
+    assert "daily_kb_audit" in names
+    assert "layout_audit" in names
+    assert "code_hygiene" in names
+    assert "error_patterns" in names
+    assert "evolution_self_audit" in names
 
 
 def test_rule_packs_enabled_false_disables_tool(tmp_path):
-    """audit_tools 中 enabled: false 的条目被 resolve_rule_packs 移除。"""
+    """audit_tools 中 enabled: false 的条目被 resolve_rule_packs 移除。
+
+    VAL-SEAM-009 契约：memory pack 5 工具 + 2 inline 工具（1 启用、1 禁用），
+    最终保留 5 个 pack 工具 + 1 个启用的 inline 工具 = 6 个工具。
+    """
     _write_hotfix_config(
         tmp_path,
         "rule_packs:\n  - pack: memory\n"
@@ -10482,17 +10506,25 @@ def test_rule_packs_enabled_false_disables_tool(tmp_path):
     config = evolution_scanner.load_config(tmp_path)
     evolution_scanner.resolve_rule_packs(config)
 
-    # 验证只有 enabled 的 tool 保留
-    assert len(config["audit_tools"]) == 1
-    assert config["audit_tools"][0]["name"] == "enabled_tool"
+    # memory pack 5 工具 + 1 启用的 inline 工具 = 6 工具
+    assert len(config["audit_tools"]) == 6
+    names = [t["name"] for t in config["audit_tools"] if isinstance(t, dict)]
+    assert "enabled_tool" in names
+    assert "disabled_tool" not in names  # 被 enabled: false 移除
+    # 验证 5 个 pack 工具都在
+    assert "daily_kb_audit" in names
+    assert "layout_audit" in names
+    assert "code_hygiene" in names
+    assert "error_patterns" in names
+    assert "evolution_self_audit" in names
 
 
 def test_pack_tool_reference_form(tmp_path):
     """audit_tools 中的 pack_tool 引用形式被解析为 pack 内工具定义。
 
-    M2 memory pack 为空（KNOWN_RULE_PACKS["memory"] == []），所以
-    pack_tool 引用一个不存在的 pack 工具名时，entry 作为 standalone 保留
-    （剥离 pack_tool key 后保留其他字段）。
+    VAL-SEAM-009 契约：memory pack 现含 5 工具，pack_tool 引用
+    不存在的 pack 工具名（如 hygiene）时，entry 降级为 standalone
+    （剥离 pack_tool key，保留其余字段），同时 5 个 pack 工具保留。
     """
     _write_hotfix_config(
         tmp_path,
@@ -10505,9 +10537,92 @@ def test_pack_tool_reference_form(tmp_path):
     config["rule_packs"] = [{"pack": "memory"}]
     evolution_scanner.resolve_rule_packs(config)
 
-    # pack_tool: hygiene 在 memory pack 里找不到对应工具（memory 为空），
+    # pack_tool: hygiene 在 memory pack 里找不到对应工具（pack 有 code_hygiene 而非 hygiene），
     # 所以 entry 降级为 standalone（剥离 pack_tool key，保留其余字段）
-    assert len(config["audit_tools"]) == 1
-    tool = config["audit_tools"][0]
-    assert tool["name"] == "ref_tool"
-    assert "pack_tool" not in tool, "pack_tool key should be stripped after resolution"
+    # 同时 memory pack 的 5 个工具也保留，共 6 个工具
+    assert len(config["audit_tools"]) == 6
+    names = {t["name"] for t in config["audit_tools"] if isinstance(t, dict)}
+    assert "ref_tool" in names
+    assert "daily_kb_audit" in names
+    assert "layout_audit" in names
+    assert "code_hygiene" in names
+    assert "error_patterns" in names
+    assert "evolution_self_audit" in names
+    # 验证 ref_tool 已剥离 pack_tool key
+    ref_tool = [t for t in config["audit_tools"] if t.get("name") == "ref_tool"][0]
+    assert "pack_tool" not in ref_tool, "pack_tool key should be stripped after resolution"
+
+
+def test_resolve_rule_packs_lazy_loads_memory_pack(tmp_path):
+    """VAL-SEAM-009 契约测试：resolve_rule_packs 触发懒加载后
+    KNOWN_RULE_PACKS['memory'] 含 5 个工具名。
+
+    修复前：resolve_rule_packs() 从未调用 _load_pack_tools()，
+    KNOWN_RULE_PACKS['memory'] 恒为空列表。
+    修复后：首次 resolve 时懒加载，5 工具名正确填入。
+    """
+    _write_hotfix_config(tmp_path, "rule_packs:\n  - pack: memory\naudit_tools: []\n")
+
+    # 重置懒加载状态（确保测试隔离）
+    evolution_scanner._PACKS_LOADED.clear()
+    evolution_scanner.KNOWN_RULE_PACKS["memory"] = []
+
+    config = evolution_scanner.load_config(tmp_path)
+    evolution_scanner.resolve_rule_packs(config)
+
+    # 验证懒加载触发后 KNOWN_RULE_PACKS['memory'] 含 5 工具
+    expected_tool_names = {
+        "daily_kb_audit",
+        "layout_audit",
+        "code_hygiene",
+        "error_patterns",
+        "evolution_self_audit",
+    }
+    loaded_names = {
+        t["name"] for t in evolution_scanner.KNOWN_RULE_PACKS["memory"] if isinstance(t, dict)
+    }
+    assert loaded_names == expected_tool_names, (
+        f"KNOWN_RULE_PACKS['memory'] 应含 {expected_tool_names}，实际含 {loaded_names}"
+    )
+
+    # 验证 _PACKS_LOADED 标记已设置
+    assert evolution_scanner._PACKS_LOADED.get("memory") is True
+
+    # 验证 config["audit_tools"] 也包含这 5 个工具
+    config_tool_names = {t["name"] for t in config["audit_tools"] if isinstance(t, dict)}
+    assert config_tool_names == expected_tool_names
+
+
+def test_rule_packs_enabled_false_disables_pack_tool(tmp_path):
+    """VAL-SEAM-009 行为契约：rule_packs + audit_tools 中 enabled: false 覆盖 pack 工具。
+
+    配置 memory pack 并禁用 code_hygiene，验证：
+    - code_hygiene 被移除（不执行）
+    - 其他 4 个 pack 工具保留
+    """
+    _write_hotfix_config(
+        tmp_path,
+        "rule_packs:\n  - pack: memory\n"
+        "audit_tools:\n"
+        "  - name: code_hygiene\n    pack_tool: code_hygiene\n    enabled: false\n",
+    )
+
+    # 重置懒加载状态（确保测试隔离）
+    evolution_scanner._PACKS_LOADED.clear()
+    evolution_scanner.KNOWN_RULE_PACKS["memory"] = []
+
+    config = evolution_scanner.load_config(tmp_path)
+    evolution_scanner.resolve_rule_packs(config)
+
+    # 验证 code_hygiene 被移除
+    tool_names = {t["name"] for t in config["audit_tools"] if isinstance(t, dict)}
+    assert "code_hygiene" not in tool_names, "code_hygiene 应被 enabled: false 禁用"
+
+    # 验证其他 4 个 pack 工具保留
+    expected_remaining = {
+        "daily_kb_audit",
+        "layout_audit",
+        "error_patterns",
+        "evolution_self_audit",
+    }
+    assert tool_names == expected_remaining, f"应保留 {expected_remaining}，实际含 {tool_names}"
