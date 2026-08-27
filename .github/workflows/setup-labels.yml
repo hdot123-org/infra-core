@@ -1,0 +1,94 @@
+# Setup Labels - Reusable Workflow (M4, INFRA-583)
+# Creates standard issue labels in a repository.
+# Called by thin caller with workflow_dispatch trigger.
+#
+# Naming contract: no workflow name contract (caller is "Setup Labels").
+# This reusable workflow is invoked by the thin caller via `uses:`.
+
+name: Setup Labels
+
+on:
+  workflow_call:
+    inputs:
+      labels-json:
+        description: 'JSON array of labels to create (each: {name, color, description})'
+        required: false
+        type: string
+        default: ''
+    outputs:
+      created-count:
+        description: 'Number of labels created'
+        value: ${{ jobs.create-labels.outputs.created-count }}
+      skipped-count:
+        description: 'Number of labels skipped (already exist)'
+        value: ${{ jobs.create-labels.outputs.skipped-count }}
+
+permissions:
+  issues: write
+
+jobs:
+  create-labels:
+    runs-on: [self-hosted, pve-linux]
+    outputs:
+      created-count: ${{ steps.create.outputs.created-count }}
+      skipped-count: ${{ steps.create.outputs.skipped-count }}
+    steps:
+      - name: Create labels
+        id: create
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Default labels if no input provided
+            const defaultLabels = [
+              { name: "P0", color: "b60205", description: "Critical: must fix immediately" },
+              { name: "P1", color: "d93f0b", description: "High: fix before next release" },
+              { name: "P2", color: "fbca04", description: "Medium: fix in current sprint" },
+              { name: "P3", color: "0e8a16", description: "Low: backlog item" },
+              { name: "chore", color: "fef2c0", description: "Maintenance or cleanup" },
+              { name: "security", color: "b60205", description: "Security-related" },
+              { name: "dependencies", color: "0366d6", description: "Dependency updates" },
+              { name: "area/core", color: "c5def5", description: "Core library code" },
+              { name: "area/cli", color: "c5def5", description: "CLI tools" },
+              { name: "area/ci", color: "c5def5", description: "CI/CD configuration" },
+              { name: "area/docs", color: "c5def5", description: "Documentation" },
+            ];
+
+            // Parse input labels or use defaults
+            let labels;
+            const inputJson = `${{ inputs.labels-json }}`;
+            if (inputJson && inputJson.trim()) {
+              try {
+                labels = JSON.parse(inputJson);
+              } catch (e) {
+                core.setFailed(`Invalid labels-json input: ${e.message}`);
+                return;
+              }
+            } else {
+              labels = defaultLabels;
+            }
+
+            let created = 0;
+            let skipped = 0;
+
+            for (const label of labels) {
+              try {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ...label
+                });
+                console.log(`Created: ${label.name}`);
+                created++;
+              } catch (e) {
+                if (e.status === 422) {
+                  console.log(`Already exists: ${label.name}`);
+                  skipped++;
+                } else {
+                  throw e;
+                }
+              }
+            }
+
+            core.setOutput('created-count', created);
+            core.setOutput('skipped-count', skipped);
+            console.log(`Summary: ${created} created, ${skipped} skipped`);
