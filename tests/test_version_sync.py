@@ -29,7 +29,7 @@ from infra_core.engine.version_sync import (
     sync_single_project,
 )
 
-pytestmark = pytest.mark.schema
+pytestmark = [pytest.mark.schema, pytest.mark.business_policy]
 
 # ---------------------------------------------------------------------------
 # Helpers
