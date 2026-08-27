@@ -48,7 +48,7 @@ infra-core 用自己的 governance 门禁保护自身（self-bootstrap）：
 
 ## 5. 门禁矩阵
 
-`CI` workflow 共 14 个 job：既有 4 个（命名契约）+ guards + 4 个专项测试组 + 2 个分域 mypy + 2 个 advisory + ci-ok 聚合。结构契约由 `tests/test_ci_structure_contract.py` 锁定。
+`CI` workflow 共 19 个 job：既有 4 个（命名契约）+ guards + 4 个专项测试组 + 2 个分域 mypy + 3 个 advisory + 基础层补齐 4 个 + ci-ok 聚合。结构契约由 `tests/test_ci_structure_contract.py` 锁定（job 集合快照只对齐当前 main，后续 ci.yml 变更由对应 feature 同步该测试）。
 
 | 门禁 | workflow | 说明 |
 |------|----------|------|
@@ -60,6 +60,11 @@ infra-core 用自己的 governance 门禁保护自身（self-bootstrap）：
 | security-tests / schema-tests / integration-tests / e2e-tests | `CI` | 专项测试组，按 pytest marker 分组（`-m <marker> -n 4 --no-cov`）；e2e 附 CLI 冒烟 |
 | mypy-src-strict / mypy-scripts-strict | `CI` | 分域 `mypy --strict`（src/infra_core 与 scripts/） |
 | advisory-dependency-security-scan / advisory-deptry | `CI` | advisory 扫描（pip-audit / deptry），`continue-on-error` 非阻塞，ci-ok 仅透出结果 |
+| advisory-telemetry-audit | `CI` | advisory：遥测覆盖率审计（`scripts/audit_telemetry_coverage.sh`），`continue-on-error` 非阻塞，ci-ok 仅透出结果 |
+| shellcheck | `CI` | shell 脚本静态检查 |
+| health-check | `CI` | CI 健康自检（`scripts/ci_health_check.sh`） |
+| repo-consistency | `CI` | 仓库交付一致性检查（`scripts/repo_health_check.sh --ci`） |
+| business-policy-tests | `CI` | 业务策略测试组（`-m business_policy -n 4 --no-cov`） |
 | ci-ok | `CI` | 聚合（branch protection required check），逐项显式阻断全部阻塞 job，advisory 不阻断 |
 | governance | `Evolution Governance` | 受保护路径 owner 门禁（pull_request_target，执行 shipped governance-check action） |
 | release | `Release Please` | 非门禁：发版管道（schedule/push(paths)/dispatch，DISPATCH_TOKEN，详见第 6 节） |

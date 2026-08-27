@@ -1,8 +1,8 @@
 """CI 结构契约测试（INFRA-580）
 
-锁定 14-job 结构化 CI 的拓扑不变量，防止 guards / 专项测试组 / 分域 mypy /
-advisory job 被静默删除或降级（ci-ok needs 漏配、advisory 变阻塞、marker
-参数漂移、runner 标签漂移）。
+锁定 19-job 结构化 CI 的拓扑不变量，防止 guards / 专项测试组 / 分域 mypy /
+advisory job / 基础层补齐 job 被静默删除或降级（ci-ok needs 漏配、advisory
+变阻塞、marker 参数漂移、runner 标签漂移）。
 
 与 tests/test_naming_contract.py 的分工：naming_contract 锁既有 check 名的
 字节级契约（architecture.md §2）；本文件锁结构层——job 集合完整性、ci-ok
@@ -20,7 +20,8 @@ pytestmark = pytest.mark.schema
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CI_YML = REPO_ROOT / ".github/workflows/ci.yml"
 
-# 14 个 job 的完整集合（6 → 14 扩展，INFRA-580）
+# 19 个 job 的完整集合（6 → 14 扩展，INFRA-580；14 → 19 基础层补齐，
+# 随 #25 合入 main。快照只对齐当前 main：后续 ci.yml 变更由各自 feature 同步本表）
 EXPECTED_JOBS = frozenset(
     {
         # 既有 job（命名契约：不可重命名，见 architecture.md §2）
@@ -41,12 +42,20 @@ EXPECTED_JOBS = frozenset(
         # advisory（非阻塞，continue-on-error）
         "advisory-dependency-security-scan",
         "advisory-deptry",
+        "advisory-telemetry-audit",
+        # 基础层补齐（M3，随 #25 合入）
+        "shellcheck",
+        "health-check",
+        "repo-consistency",
+        "business-policy-tests",
         # 聚合门禁（branch protection required check）
         "ci-ok",
     }
 )
 
-ADVISORY_JOBS = frozenset({"advisory-dependency-security-scan", "advisory-deptry"})
+ADVISORY_JOBS = frozenset(
+    {"advisory-dependency-security-scan", "advisory-deptry", "advisory-telemetry-audit"}
+)
 BLOCKING_JOBS = EXPECTED_JOBS - ADVISORY_JOBS - {"ci-ok"}
 
 TEST_GROUP_MARKERS = {
