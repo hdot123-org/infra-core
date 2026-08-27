@@ -7,7 +7,7 @@
 infra-core 是从 memory-core 抽离的组织级共享引擎，提供：
 
 - **引擎层**：scanner、utils、adapters、heartbeat、droid-review 分片/发布
-- **规则包**：daily-audit、layout-audit、hygiene、self-audit（memory 等）
+- **规则包**：daily-kb-audit、layout-audit、code-hygiene、error-patterns、evolution-self-audit（memory 包，5 工具）
 - **webhook 脚本**：manifest + trigger 家族（生产同步源）
 - **CI/CD**：reusable workflows + composite actions
 - **CLI**：infra-cli 统一入口
@@ -45,17 +45,43 @@ infra-cli version-sweep --target /path/to/project
 
 ### 规则包
 
-消费仓通过 `.evolution/config.yml` 声明使用的规则包：
+消费仓通过 `.evolution/config.yml` 声明使用的规则包。首次引用时按 entry point
+（`infra_core.packs` 组）懒加载 pack 工具定义，`memory` 包展开为 5 个审计工具：
+
+| 工具名 | 命令 | 用途 |
+|--------|------|------|
+| `daily_kb_audit` | `infra-daily-audit` | 每日 KB 审计（完整性/新鲜度） |
+| `layout_audit` | `infra-layout-audit` | 项目布局审计 |
+| `code_hygiene` | `infra-hygiene-audit` | 代码卫生（静默吞异常/TODO/重复块） |
+| `error_patterns` | `infra-error-patterns` | 错误模式检测 |
+| `evolution_self_audit` | `infra-self-audit` | 演进系统自审计 |
 
 ```yaml
 rule_packs:
   - pack: memory
 
+# 可选：覆盖/禁用 pack 工具，或补充 inline 工具
 audit_tools:
+  # 同名 inline 条目覆盖 pack 定义（inline wins）
   - name: consistency_check
     command: "memory-consistency-check --json"
     output_format: json
+  # 引用形式：以 pack 工具为基座，仅覆盖部分字段
+  - name: code_hygiene_ref
+    pack_tool: code_hygiene
+    timeout: 600
+  # enabled: false 禁用单个 pack 工具
+  - name: code_hygiene
+    pack_tool: code_hygiene
+    enabled: false
 ```
+
+解析语义（`resolve_rule_packs`）：
+
+- pack 工具自动并入 `audit_tools`，无需逐个声明命令
+- 同名 inline 条目覆盖 pack 定义；`pack_tool` 引用形式以 pack 定义为基座叠加 inline 字段
+- `enabled: false` 的条目（pack 定义或 inline）被移除，不参与执行
+- 未知 pack 名直接报错退出并列出可用 pack
 
 ## 架构
 
