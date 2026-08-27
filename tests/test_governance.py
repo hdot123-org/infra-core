@@ -13,7 +13,7 @@ from infra_core.governance import (
     check_governance,
 )
 
-pytestmark = pytest.mark.security
+pytestmark = [pytest.mark.security, pytest.mark.business_policy]
 
 
 class TestCheckGovernance:
