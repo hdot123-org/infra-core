@@ -133,3 +133,52 @@ class TestGovernanceModuleDefaults:
             "src/infra_core/engine/**",
             "webhook-scripts/**",
         )
+
+
+class TestBranchCleanupCompositeContextGuard:
+    """复合 action 上下文守卫：vars/secrets context 在 composite action 内不可用。
+
+    根因（INFRA-585，2026-08-27）：actions/branch-cleanup/action.yml 使用
+    ${{ vars.BRANCH_AGE_* }} 导致模板校验失败（Unrecognized named-value: vars）。
+    vars/secrets context 仅在 workflow 层合法，composite action 必须通过
+    inputs 接收值（caller 在 workflow 层经 with: 转发 vars.BRANCH_AGE_*）。
+    actionlint 无法检出此问题，仅真实执行暴露。本测试防止回退。
+    """
+
+    ACTION_YML = "actions/branch-cleanup/action.yml"
+
+    def _non_comment_lines(self) -> list[tuple[int, str]]:
+        """返回 (行号, 行内容) 列表，跳过注释行。"""
+        lines = _read(self.ACTION_YML).split("\n")
+        return [(i, line) for i, line in enumerate(lines, 1) if not line.strip().startswith("#")]
+
+    def test_action_yml_no_vars_context(self):
+        """action.yml 不得引用 vars.* context（composite action 内不合法）"""
+        for i, line in self._non_comment_lines():
+            assert "${{ vars." not in line, (
+                f"action.yml 第 {i} 行包含 vars.* context 引用（composite action 内不合法）：{line}"
+            )
+
+    def test_action_yml_no_secrets_context(self):
+        """action.yml 不得直接引用 secrets.* context（必须通过 inputs 传入）"""
+        for i, line in self._non_comment_lines():
+            assert "${{ secrets." not in line, (
+                f"action.yml 第 {i} 行包含 secrets.* context 引用（应通过 inputs 传入）：{line}"
+            )
+
+    def test_action_yml_has_branch_age_inputs(self):
+        """action.yml 必须声明 branch-age-* inputs（接收阈值）"""
+        content = _read(self.ACTION_YML)
+        for input_name in (
+            "branch-age-merged-hours",
+            "branch-age-closed-hours",
+            "branch-age-orphan-hours",
+        ):
+            assert input_name in content, f"action.yml 缺少 input: {input_name}"
+
+    def test_action_yml_uses_inputs_for_branch_age(self):
+        """action.yml env 块必须使用 inputs.* 而非 vars.*"""
+        content = _read(self.ACTION_YML)
+        assert "${{ inputs.branch-age-merged-hours }}" in content
+        assert "${{ inputs.branch-age-closed-hours }}" in content
+        assert "${{ inputs.branch-age-orphan-hours }}" in content
