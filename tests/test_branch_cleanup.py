@@ -2223,3 +2223,120 @@ def test_gh_pr_list_no_repo_flag_without_github_repository_env(tmp_path: Path):
     )
     remaining_branches = get_remote_branches(bare_repo)
     assert "feature-A" not in remaining_branches, "feature-A should be deleted"
+
+
+# VAL-BRANCH-034 (INFRA-589): scheduled sweep ignores synthetic pull/N/merge refs
+# ============================================================================
+def test_scheduled_mode_ignores_synthetic_pull_refs(tmp_path: Path) -> None:
+    """Synthetic pull/N/merge refs must not enter the scheduled sweep.
+
+    Regression test for INFRA-589: actions/checkout on self-hosted runners
+    leaves cached pull/N/merge refs in the clone. A scheduled sweep then
+    wasted ~4 minutes issuing gh pr list calls for ~120 synthetic refs that
+    are neither real branches nor deletable.
+
+    Fixture: a clone with a stale pull/1234/merge remote-tracking ref plus
+    one real orphan branch. The sweep must process only the real branch
+    (deleted) and never mention the synthetic ref as "Checking branch".
+    """
+    now = datetime.now(UTC)
+    old_date = now - timedelta(days=2)
+
+    branches = [("orphan-old", old_date, False)]
+    bare_repo, clone_dir = create_fixture_repo(tmp_path, branches)
+
+    # Simulate a leftover synthetic ref from a cached actions/checkout fetch.
+    pr_head = subprocess.run(
+        ["git", "rev-parse", "origin/orphan-old"],
+        cwd=clone_dir,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/pull/1234/merge", pr_head],
+        cwd=clone_dir,
+        check=True,
+        capture_output=True,
+    )
+
+    mock_gh = create_gh_mock(tmp_path, {"orphan-old": []})
+
+    env_overrides = {
+        "PATH": f"{mock_gh.parent}:{os.environ['PATH']}",
+    }
+
+    exit_code, stdout, stderr = run_branch_cleanup(
+        "--scheduled",
+        cwd=clone_dir,
+        env_overrides=env_overrides,
+    )
+
+    assert exit_code == 0, f"Expected exit 0, got {exit_code}. stderr: {stderr}"
+    assert "--- Checking branch: pull/1234/merge ---" not in stdout, (
+        "Synthetic pull/N/merge refs must be filtered out of the sweep. stdout:\n" + stdout
+    )
+    assert "--- Checking branch: orphan-old ---" in stdout, (
+        "Real branches must still be processed. stdout:\n" + stdout
+    )
+    remaining_branches = get_remote_branches(bare_repo)
+    assert "orphan-old" not in remaining_branches, "Real orphan must still be deleted"
+
+
+# ============================================================================
+# VAL-BRANCH-035 (INFRA-589): action state files live under RUNNER_TEMP,
+# never under a fixed /tmp path shared across runs and repositories
+# ============================================================================
+def test_action_uses_per_run_state_directory() -> None:
+    """The composite action must not keep inter-step state in fixed /tmp files.
+
+    Regression test for INFRA-589: on shared self-hosted runners the fixed
+    /tmp/branch_cleanup_output.txt, /tmp/deleted_branches.txt and
+    /tmp/protected_branches.txt leaked state across runs AND across
+    repositories. When a later run had PROTECTED_COUNT=0, the extraction
+    `if` skipped the list rewrite while `touch` preserved the previous
+    content, so branch_cleanup_issue.sh read a foreign/stale protected list
+    and created a phantom tracking issue in the wrong repository
+    (memory-core's INFRA-589 / #1052 for an infra-core branch).
+
+    Contract: all mutable state paths are derived from RUNNER_TEMP
+    (per-job isolated by GitHub Actions) with a /tmp fallback only for
+    local manual runs, and the list files are truncated (: >) before the
+    cleanup script runs so an empty result always overwrites stale content.
+    """
+    action_path = repo_root() / "actions" / "branch-cleanup" / "action.yml"
+    content = action_path.read_text()
+
+    # Per-run scratch dir derived from RUNNER_TEMP
+    assert "${RUNNER_TEMP:-/tmp}/branch-cleanup-state" in content, (
+        "action must keep state under a RUNNER_TEMP-derived per-run directory"
+    )
+    # List files are truncated up-front: empty results must overwrite stale state
+    assert ': > "$DELETED_FILE"' in content, "deleted list must be truncated before the sweep"
+    assert ': > "$PROTECTED_FILE"' in content, "protected list must be truncated before the sweep"
+    # No fixed /tmp state files remain
+    for forbidden in (
+        "/tmp/branch_cleanup_output.txt",
+        "/tmp/deleted_branches.txt",
+        "/tmp/protected_branches.txt",
+    ):
+        assert forbidden not in content, (
+            f"fixed shared state path {forbidden} must not appear in action.yml"
+        )
+
+
+# ============================================================================
+# VAL-BRANCH-036 (INFRA-589): sweep filter tolerates leading whitespace in
+# git branch -r output (macOS/BSD alignment with the Linux runner)
+# ============================================================================
+def test_sweep_filter_in_source_matches_synthetic_refs() -> None:
+    """Source-level check that the enumeration pipeline drops pull/ refs.
+
+    Companion to VAL-BRANCH-034: verifies the shipped filter exists even on
+    hosts where the fixture cannot create refs/remotes refs (the behavioral
+    test above is the authoritative check).
+    """
+    content = get_script_path().read_text()
+    assert "grep -v 'pull/'" in content, (
+        "scheduled sweep must filter pull/ synthetic refs out of git branch -r output"
+    )
