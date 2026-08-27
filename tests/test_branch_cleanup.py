@@ -2088,6 +2088,39 @@ def test_retirement_list_tracks_infra_401() -> None:
 
 
 # ============================================================================
+# VAL-BRANCH-033 (INFRA-586): retirement list ships with infra-586 entry
+# ============================================================================
+def test_retirement_list_tracks_infra_586() -> None:
+    """The checked-in retirement list also lists the superseded
+    factory/infra-581-rule-packs-docs branch so tracking issue INFRA-586
+    (mirror #29) can drain once the scheduled cleanup deletes the branch.
+
+    Evidence chain:
+    - PR #24 (infra-core) closed unmerged at 2026-08-27T02:16Z; it was a
+      docs-only README rule-pack section sync for INFRA-581.
+    - The core fix (resolve_rule_packs lazy-load, 5-tool expansion,
+      enabled:false override) landed on main via PR #23 (6164aa3) and
+      INFRA-581 was marked terminal without merging the docs PR
+      (terminal absorption); the owner cross-referenced #24 from merged
+      PR #27 as a superseded precedent.
+    - Discretionary docs-sync work abandoned by the owner's close: the
+      INFRA-383 merge-tree containment check cannot see "owner closed
+      without merging", so the branch would be protected forever and the
+      INFRA-586 tracking issue would never drain.
+
+    Mirrors VAL-BRANCH-029/031/032: the list is the audit artifact, and
+    adding or removing entries requires PR review.
+    """
+    retired = repo_root() / "src" / "infra_core" / "shell" / "branch_cleanup_retired.txt"
+    assert retired.is_file(), "scripts/branch_cleanup_retired.txt must exist"
+    content = retired.read_text()
+    assert "factory/infra-581-rule-packs-docs" in content, (
+        "infra-586 superseded branch must be listed for retirement"
+    )
+    assert "INFRA-586" in content, "the infra-586 entry must carry its INFRA reference"
+
+
+# ============================================================================
 # VAL-BRANCH-030 (INFRA-388): script documents the retirement mechanism
 # ============================================================================
 def test_script_documents_retirement_list() -> None:
