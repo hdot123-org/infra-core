@@ -591,9 +591,7 @@ def test_workflow_calls_tracking_issue_script():
     M4 (INFRA-583): the caller workflow is now a thin caller; the INFRA-385
     tracking-issue wiring lives inside actions/branch-cleanup/action.yml.
     """
-    action_path = (
-        Path(__file__).parent.parent / "actions" / "branch-cleanup" / "action.yml"
-    )
+    action_path = Path(__file__).parent.parent / "actions" / "branch-cleanup" / "action.yml"
     content = action_path.read_text()
 
     assert "$GITHUB_ACTION_PATH/branch_cleanup_issue.sh" in content, (

@@ -20,12 +20,21 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # (action 副本, src 权威副本) —— 均为 git index 中的 100755/100644 文件
 COPIED_FILES = [
-    ("branch_cleanup.sh", "actions/branch-cleanup/branch_cleanup.sh",
-     "src/infra_core/shell/branch_cleanup.sh"),
-    ("branch_cleanup_issue.sh", "actions/branch-cleanup/branch_cleanup_issue.sh",
-     "src/infra_core/shell/branch_cleanup_issue.sh"),
-    ("branch_cleanup_retired.txt", "actions/branch-cleanup/branch_cleanup_retired.txt",
-     "src/infra_core/shell/branch_cleanup_retired.txt"),
+    (
+        "branch_cleanup.sh",
+        "actions/branch-cleanup/branch_cleanup.sh",
+        "src/infra_core/shell/branch_cleanup.sh",
+    ),
+    (
+        "branch_cleanup_issue.sh",
+        "actions/branch-cleanup/branch_cleanup_issue.sh",
+        "src/infra_core/shell/branch_cleanup_issue.sh",
+    ),
+    (
+        "branch_cleanup_retired.txt",
+        "actions/branch-cleanup/branch_cleanup_retired.txt",
+        "src/infra_core/shell/branch_cleanup_retired.txt",
+    ),
 ]
 
 
@@ -76,8 +85,7 @@ class TestBranchCleanupActionCopies:
         assert action_rel in modes, f"{action_rel} 未被 git 跟踪"
         assert src_rel in modes, f"{src_rel} 未被 git 跟踪"
         assert modes[action_rel] == modes[src_rel], (
-            f"{name} git 模式漂移：{action_rel}={modes[action_rel]} vs "
-            f"{src_rel}={modes[src_rel]}"
+            f"{name} git 模式漂移：{action_rel}={modes[action_rel]} vs {src_rel}={modes[src_rel]}"
         )
 
     def test_action_yml_references_scripts_within_action_dir(self):
