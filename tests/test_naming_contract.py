@@ -135,6 +135,207 @@ class TestGovernanceModuleDefaults:
         )
 
 
+class TestSetupLabelsReusableWorkflow:
+    """setup-labels reusable workflow 契约测试
+
+    验证 infra-core 提供的 setup-labels reusable workflow 满足契约：
+    - workflow_call 触发器
+    - labels-json input
+    - created-count/skipped-count outputs
+    """
+
+    def test_setup_labels_workflow_exists(self):
+        """setup-labels.yml 存在"""
+        workflow_path = REPO_ROOT / ".github/workflows/setup-labels.yml"
+        assert workflow_path.exists()
+
+    def test_setup_labels_has_workflow_call_trigger(self):
+        """setup-labels.yml 必须声明 workflow_call 触发器"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/setup-labels.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        triggers = data.get(True, {})  # YAML parses 'on:' as True key
+        assert "workflow_call" in triggers, "setup-labels must declare workflow_call trigger"
+
+    def test_setup_labels_has_labels_json_input(self):
+        """setup-labels.yml 必须声明 labels-json input"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/setup-labels.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        triggers = data.get(True, {})
+        workflow_call = triggers.get("workflow_call", {})
+        inputs = workflow_call.get("inputs", {})
+        assert "labels-json" in inputs, "setup-labels must declare labels-json input"
+        assert inputs["labels-json"].get("type") == "string"
+
+    def test_setup_labels_has_outputs(self):
+        """setup-labels.yml 必须声明 created-count/skipped-count outputs"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/setup-labels.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        triggers = data.get(True, {})
+        workflow_call = triggers.get("workflow_call", {})
+        outputs = workflow_call.get("outputs", {})
+        assert "created-count" in outputs, "setup-labels must declare created-count output"
+        assert "skipped-count" in outputs, "setup-labels must declare skipped-count output"
+
+
+class TestGovernanceCompositeActionMemoryCore:
+    """governance composite action 对 memory-core 保护模式的支持
+
+    memory-core 的五类保护路径：
+    - .evolution/**
+    - scripts/evolution_*.py
+    - scripts/ (整个目录，防模块投毒)
+    - .github/workflows/evolution-*.yml
+    - .github/CODEOWNERS
+    """
+
+    def test_governance_check_supports_evolution_scripts_pattern(self):
+        """governance_check.py 支持 scripts/evolution_*.py 模式"""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        script = (
+            Path(__file__).resolve().parent.parent / "actions/governance-check/governance_check.py"
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--author",
+                "someone-else",
+                "--owner",
+                "hdot123",
+                "--patterns",
+                "scripts/evolution_*.py",
+                "--files",
+                "scripts/evolution_scanner.py",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1, "Non-owner modifying evolution scripts should be denied"
+
+    def test_governance_check_supports_scripts_dir_protection(self):
+        """governance_check.py 支持 scripts/ 整个目录保护（防模块投毒）"""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        script = (
+            Path(__file__).resolve().parent.parent / "actions/governance-check/governance_check.py"
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--author",
+                "someone-else",
+                "--owner",
+                "hdot123",
+                "--patterns",
+                "scripts/**",
+                "--files",
+                "scripts/new_module.py",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1, "Non-owner modifying any scripts/ file should be denied"
+
+    def test_governance_check_supports_evolution_workflows_pattern(self):
+        """governance_check.py 支持 .github/workflows/evolution-*.yml 模式"""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        script = (
+            Path(__file__).resolve().parent.parent / "actions/governance-check/governance_check.py"
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--author",
+                "someone-else",
+                "--owner",
+                "hdot123",
+                "--patterns",
+                ".github/workflows/evolution-*.yml",
+                "--files",
+                ".github/workflows/evolution-scan.yml",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1, "Non-owner modifying evolution workflows should be denied"
+
+    def test_governance_check_supports_codeowners_pattern(self):
+        """governance_check.py 支持 .github/CODEOWNERS 保护"""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        script = (
+            Path(__file__).resolve().parent.parent / "actions/governance-check/governance_check.py"
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--author",
+                "someone-else",
+                "--owner",
+                "hdot123",
+                "--patterns",
+                ".github/CODEOWNERS",
+                "--files",
+                ".github/CODEOWNERS",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1, "Non-owner modifying CODEOWNERS should be denied"
+
+    def test_governance_module_supports_memory_core_patterns(self):
+        """infra_core.governance.check_governance 支持 memory-core 保护模式"""
+        from infra_core.governance import check_governance
+
+        # Test all 5 pattern types
+        patterns = [
+            ".evolution/**",
+            "scripts/evolution_*.py",
+            "scripts/**",  # whole dir protection
+            ".github/workflows/evolution-*.yml",
+            ".github/CODEOWNERS",
+        ]
+
+        test_cases = [
+            (".evolution/config.yml", True),
+            ("scripts/evolution_scanner.py", True),
+            ("scripts/new_module.py", True),  # scripts/ dir protection
+            (".github/workflows/evolution-scan.yml", True),
+            (".github/CODEOWNERS", True),
+        ]
+
+        for file_path, should_deny in test_cases:
+            verdict = check_governance(
+                changed_files=[file_path],
+                pr_author="someone-else",
+                owner_login="hdot123",
+                protected_patterns=patterns,
+            )
+            if should_deny:
+                assert not verdict.allowed, f"Non-owner should be denied for {file_path}"
+            else:
+                assert verdict.allowed, f"Non-owner should be allowed for {file_path}"
+
+
 class TestBranchCleanupCompositeContextGuard:
     """复合 action 上下文守卫：vars/secrets context 在 composite action 内不可用。
 
