@@ -47,8 +47,6 @@ runs:
         TRIGGER_BRANCH: ${{ inputs.trigger-branch }}
         MODE: ${{ inputs.mode }}
         # Tiered thresholds: MERGED PR 1h / CLOSED PR 4h / ORPHAN 24h
-        # Values come from inputs (passed by caller at workflow level, where vars context is legal).
-        # Empty strings fall back to script defaults (1/4/24).
         BRANCH_AGE_MERGED_HOURS: ${{ inputs.branch-age-merged-hours }}
         BRANCH_AGE_CLOSED_HOURS: ${{ inputs.branch-age-closed-hours }}
         BRANCH_AGE_ORPHAN_HOURS: ${{ inputs.branch-age-orphan-hours }}
