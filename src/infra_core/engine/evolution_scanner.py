@@ -1313,6 +1313,10 @@ def resolve_rule_packs(config: dict[str, Any]) -> None:
             print(f"[evolution] Error: unknown rule pack '{pack_name}'.")
             print(f"[evolution] Available packs: {available}")
             sys.exit(1)
+        # Lazy-load pack tools on first reference
+        if not _PACKS_LOADED.get(pack_name):
+            KNOWN_RULE_PACKS[pack_name] = _load_pack_tools(pack_name)
+            _PACKS_LOADED[pack_name] = True
         pack_tools.extend(KNOWN_RULE_PACKS[pack_name])
 
     inline_tools = config.get("audit_tools", [])
