@@ -133,3 +133,60 @@ class TestGovernanceModuleDefaults:
             "src/infra_core/engine/**",
             "webhook-scripts/**",
         )
+
+
+class TestBranchCleanupCompositeContextGuard:
+    """复合 action 上下文守卫：vars/secrets context 在 composite action 内不可用。
+
+    根因（2026-08-27）：actions/branch-cleanup/action.yml 使用 ${{ vars.BRANCH_AGE_* }}
+    导致模板校验失败（Unrecognized named-value: vars）。vars/secrets context 仅在 workflow 层合法，
+    composite action 必须通过 inputs 接收值。actionlint 无法检出此问题，仅真实执行暴露。
+    本测试防止回退：解析 action.yml 断言全文无 vars./secrets. context 引用。
+    """
+
+    def test_action_yml_no_vars_context(self):
+        """action.yml 不得引用 vars.* context（composite action 内不合法）"""
+        content = _read("actions/branch-cleanup/action.yml")
+        # 搜索 vars. 模式（排除注释行）
+        lines = content.split("\n")
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            # 跳过注释
+            if stripped.startswith("#"):
+                continue
+            # 检查是否包含 vars. 引用（GitHub Actions 模板语法）
+            if "${{ vars." in line:
+                pytest.fail(
+                    f"action.yml 第 {i} 行包含 vars.* context 引用（composite action 内不合法）：{line}"
+                )
+
+    def test_action_yml_no_secrets_context(self):
+        """action.yml 不得直接引用 secrets.* context（必须通过 inputs 传入）"""
+        content = _read("actions/branch-cleanup/action.yml")
+        lines = content.split("\n")
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if "${{ secrets." in line:
+                pytest.fail(
+                    f"action.yml 第 {i} 行包含 secrets.* context 引用（应通过 inputs 传入）：{line}"
+                )
+
+    def test_action_yml_has_branch_age_inputs(self):
+        """action.yml 必须声明 branch-age-* inputs（接收阈值）"""
+        content = _read("actions/branch-cleanup/action.yml")
+        for input_name in (
+            "branch-age-merged-hours",
+            "branch-age-closed-hours",
+            "branch-age-orphan-hours",
+        ):
+            assert input_name in content, f"action.yml 缺少 input: {input_name}"
+
+    def test_action_yml_uses_inputs_for_branch_age(self):
+        """action.yml env 块必须使用 inputs.* 而非 vars.*"""
+        content = _read("actions/branch-cleanup/action.yml")
+        # 验证 env 块使用 inputs 传入
+        assert "${{ inputs.branch-age-merged-hours }}" in content
+        assert "${{ inputs.branch-age-closed-hours }}" in content
+        assert "${{ inputs.branch-age-orphan-hours }}" in content
