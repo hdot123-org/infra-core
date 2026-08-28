@@ -2133,3 +2133,93 @@ def test_script_documents_retirement_list() -> None:
     assert "BRANCH_RETIREMENT_FILE" in content, (
         "branch_cleanup.sh must support the BRANCH_RETIREMENT_FILE override"
     )
+
+
+# ============================================================================
+# 仓库上下文双重防线（2026-08-28，mirror memory PR #1060 / INFRA-597）
+# 自建 runner insteadOf 镜像重写使 gh 无法从 workspace remote 解析 host。
+# GITHUB_REPOSITORY 已设置（Actions 默认注入）→ gh pr list 显式 --repo；
+# 未设置（本地调试）→ 保持原命令形态。
+# ============================================================================
+def create_gh_arg_capture_mock(tmp_path: Path) -> Path:
+    """Create a mock gh CLI that records each invocation's argv to $CAPTURE_LOG.
+
+    Returns empty PR lists so branch_cleanup proceeds through its normal flow.
+    """
+    mock_dir = tmp_path / "capture_bin"
+    mock_dir.mkdir(exist_ok=True)
+    mock_gh = mock_dir / "gh"
+    script_content = """#!/bin/bash
+# Mock gh CLI for testing: capture argv, respond with empty PR list
+printf '%s\\n' "$*" >> "${CAPTURE_LOG:?CAPTURE_LOG must be set}"
+echo '[]'
+exit 0
+"""
+    mock_gh.write_text(script_content)
+    mock_gh.chmod(0o755)
+    return mock_gh
+
+
+def test_gh_pr_list_uses_explicit_repo_when_github_repository_set(tmp_path: Path):
+    """GITHUB_REPOSITORY 已设置（CI）→ gh pr list 必须显式 --repo。"""
+    now = datetime.now(UTC)
+    old_date = now - timedelta(days=2)
+
+    bare_repo, clone_dir = create_fixture_repo(tmp_path, [("feature-A", old_date, False)])
+
+    mock_gh = create_gh_arg_capture_mock(tmp_path)
+    capture_log = tmp_path / "gh-args.log"
+
+    exit_code, _stdout, _stderr = run_branch_cleanup(
+        "--immediate",
+        "feature-A",
+        cwd=clone_dir,
+        env_overrides={
+            "PATH": f"{mock_gh.parent}:{subprocess.os.environ['PATH']}",
+            "GITHUB_REPOSITORY": "hdot123-org/infra-core",
+            "CAPTURE_LOG": str(capture_log),
+        },
+    )
+    assert exit_code == 0
+    assert capture_log.exists(), "mock gh must have been invoked"
+    log_lines = capture_log.read_text().splitlines()
+    assert any(
+        "--repo hdot123-org/infra-core" in line and "pr list" in line for line in log_lines
+    ), f"gh pr list must carry explicit --repo, got: {log_lines}"
+    # 行为不回归：无 open PR 的过期分支仍被正常删除
+    remaining_branches = get_remote_branches(bare_repo)
+    assert "feature-A" not in remaining_branches, "feature-A should be deleted"
+
+
+def test_gh_pr_list_no_repo_flag_without_github_repository_env(tmp_path: Path):
+    """GITHUB_REPOSITORY 未设置（本地调试）→ 保持原命令形态（无 --repo）。"""
+    now = datetime.now(UTC)
+    old_date = now - timedelta(days=2)
+
+    bare_repo, clone_dir = create_fixture_repo(tmp_path, [("feature-A", old_date, False)])
+
+    mock_gh = create_gh_arg_capture_mock(tmp_path)
+    capture_log = tmp_path / "gh-args.log"
+
+    env_overrides = {
+        "PATH": f"{mock_gh.parent}:{subprocess.os.environ['PATH']}",
+        "CAPTURE_LOG": str(capture_log),
+    }
+    if "GITHUB_REPOSITORY" in subprocess.os.environ:
+        # 本地环境残留 GITHUB_REPOSITORY 时显式剥离，保证测的是无 env 分支
+        env_overrides["GITHUB_REPOSITORY"] = ""
+
+    exit_code, _stdout, _stderr = run_branch_cleanup(
+        "--immediate",
+        "feature-A",
+        cwd=clone_dir,
+        env_overrides=env_overrides,
+    )
+    assert exit_code == 0
+    log_lines = [line for line in capture_log.read_text().splitlines() if line.strip()]
+    assert log_lines, "mock gh must have been invoked"
+    assert not any("--repo" in line for line in log_lines), (
+        f"no --repo expected without GITHUB_REPOSITORY, got: {log_lines}"
+    )
+    remaining_branches = get_remote_branches(bare_repo)
+    assert "feature-A" not in remaining_branches, "feature-A should be deleted"
