@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # 契约：workflow 名（auto-merge workflow_run 依赖）
 CONTRACT_WORKFLOW_NAMES = {
     ".github/workflows/ci.yml": "CI",
+    ".github/workflows/qa.yml": "QA",
     ".github/workflows/evolution-governance.yml": "Evolution Governance",
 }
 
@@ -33,6 +34,10 @@ def _read(rel_path: str) -> str:
 class TestWorkflowNameContract:
     def test_ci_workflow_name(self):
         assert re.search(r"^name:\s*CI\s*$", _read(".github/workflows/ci.yml"), re.MULTILINE)
+
+    def test_qa_workflow_name(self):
+        """QA workflow 名字节级为 'QA'（VAL-GATE-101 家族，与 memory-core 对齐）"""
+        assert re.search(r"^name:\s*QA\s*$", _read(".github/workflows/qa.yml"), re.MULTILINE)
 
     def test_governance_workflow_name(self):
         assert re.search(
@@ -391,3 +396,134 @@ class TestBranchCleanupCompositeContextGuard:
         assert "${{ inputs.branch-age-merged-hours }}" in content
         assert "${{ inputs.branch-age-closed-hours }}" in content
         assert "${{ inputs.branch-age-orphan-hours }}" in content
+
+
+class TestQAWorkflowContract:
+    """QA workflow 结构契约测试（gate-infra-qa-workflow feature）
+
+    验证 infra-core qa.yml 满足 VAL-GATE-101 家族要求：
+    - workflow 名 "QA"（字节级与 memory-core 对齐）
+    - 三触发器（pull_request + schedule + workflow_dispatch）
+    - job 家族：cli-e2e / coverage-audit / security-tests / schema-tests /
+      boundary-security / full-regression / qa-ok
+    - cli-e2e 引用 scripts/cli_smoke_test.sh
+    - qa-ok needs 关系正确（full-regression 不在 needs 中——nightly 红不阻塞）
+    - schedule-only jobs（coverage-audit / full-regression）PR 时 skip
+    """
+
+    def test_qa_workflow_exists(self):
+        """qa.yml 必须存在"""
+        workflow_path = REPO_ROOT / ".github/workflows/qa.yml"
+        assert workflow_path.exists(), "qa.yml must exist"
+
+    def test_qa_workflow_name_byte_exact(self):
+        """workflow 名必须字节级为 'QA'（与 memory-core 对齐，VAL-GATE-101）"""
+        content = _read(".github/workflows/qa.yml")
+        assert re.search(r"^name:\s*QA\s*$", content, re.MULTILINE), (
+            "QA workflow name must be byte-exact 'QA'"
+        )
+
+    def test_qa_triggers(self):
+        """三触发器：pull_request + schedule + workflow_dispatch"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/qa.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        triggers = data.get(True, {})  # YAML parses 'on:' as True key
+        assert "pull_request" in triggers, "qa.yml must have pull_request trigger"
+        assert "schedule" in triggers, "qa.yml must have schedule trigger"
+        assert "workflow_dispatch" in triggers, "qa.yml must have workflow_dispatch trigger"
+
+    def test_qa_required_jobs_exist(self):
+        """QA workflow 必须包含所有必需 job"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/qa.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        jobs = data.get("jobs", {})
+        required_jobs = {
+            "cli-e2e",
+            "coverage-audit",
+            "security-tests",
+            "schema-tests",
+            "boundary-security",
+            "full-regression",
+            "qa-ok",
+        }
+        assert required_jobs.issubset(set(jobs.keys())), (
+            f"QA workflow missing required jobs: {required_jobs - set(jobs.keys())}"
+        )
+
+    def test_cli_e2e_runs_smoke_script(self):
+        """cli-e2e job 必须引用 scripts/cli_smoke_test.sh"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/qa.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        cli_e2e = data["jobs"]["cli-e2e"]
+        steps = cli_e2e.get("steps", [])
+        # 检查是否有任何步骤引用 cli_smoke_test.sh
+        found = False
+        for step in steps:
+            run_cmd = step.get("run", "")
+            if "cli_smoke_test.sh" in run_cmd:
+                found = True
+                break
+        assert found, "cli-e2e job must reference scripts/cli_smoke_test.sh"
+
+    def test_qa_ok_needs_excludes_full_regression(self):
+        """qa-ok needs 不包含 full-regression（nightly 红不阻塞 PR 合并）"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/qa.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        qa_ok = data["jobs"]["qa-ok"]
+        needs = qa_ok.get("needs", [])
+        assert "full-regression" not in needs, (
+            "qa-ok must NOT include full-regression in needs "
+            "(nightly job can be red without blocking PR merge)"
+        )
+
+    def test_qa_ok_needs_includes_required_jobs(self):
+        """qa-ok needs 必须包含所有 PR 时运行的 job"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/qa.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        qa_ok = data["jobs"]["qa-ok"]
+        needs = qa_ok.get("needs", [])
+        required_in_needs = {
+            "cli-e2e",
+            "coverage-audit",
+            "security-tests",
+            "schema-tests",
+            "boundary-security",
+        }
+        assert required_in_needs.issubset(set(needs)), (
+            f"qa-ok needs missing required jobs: {required_in_needs - set(needs)}"
+        )
+
+    def test_schedule_only_jobs_skip_on_pr(self):
+        """schedule-only jobs（coverage-audit / full-regression）PR 时必须 skip"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/qa.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        for job_name in ["coverage-audit", "full-regression"]:
+            job = data["jobs"][job_name]
+            if_expr = job.get("if", "")
+            # 必须包含事件门（schedule 或 workflow_dispatch）
+            assert "schedule" in if_expr or "workflow_dispatch" in if_expr, (
+                f"{job_name} must skip on PR events (schedule/dispatch only)"
+            )
+
+    def test_qa_ok_aggregation_logic(self):
+        """qa-ok 聚合逻辑必须检查所有 needs job 的结果"""
+        content = _read(".github/workflows/qa.yml")
+        # 检查 qa-ok job 的 run 步骤是否检查所有 needs job
+        qa_ok_section = content.split("qa-ok:")[1] if "qa-ok:" in content else ""
+        assert "needs.cli-e2e.result" in qa_ok_section
+        assert "needs.coverage-audit.result" in qa_ok_section
+        assert "needs.security-tests.result" in qa_ok_section
+        assert "needs.schema-tests.result" in qa_ok_section
+        assert "needs.boundary-security.result" in qa_ok_section
