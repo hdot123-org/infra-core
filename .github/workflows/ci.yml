@@ -65,8 +65,16 @@ jobs:
 
       - name: Run actionlint
         run: |
-          bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash)
-          ./actionlint -color
+          # Layer 1: 优先使用宿主预装的 actionlint（runner-tools.toml 锁定版本）
+          # 仅在宿主未预装时才 fallback 下载（2026-08-28 runner-hardening）
+          if command -v actionlint &> /dev/null; then
+            echo "✓ Using host actionlint: $(actionlint --version)"
+            actionlint -color
+          else
+            echo "::warning::actionlint not found on host, falling back to download"
+            bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash)
+            ./actionlint -color
+          fi
 
   mypy:
     name: mypy
@@ -235,17 +243,22 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install shellcheck to RUNNER_TEMP
+      - name: Detect host shellcheck (Layer 1)
         shell: bash
         run: |
-          if ! command -v shellcheck >/dev/null 2>&1; then
-            wget -q https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz
-            tar -xf shellcheck-v0.10.0.linux.x86_64.tar.xz -C "${RUNNER_TEMP}"
-            export PATH="${RUNNER_TEMP}/shellcheck-v0.10.0:$PATH"
-            echo "${RUNNER_TEMP}/shellcheck-v0.10.0" >> "$GITHUB_PATH"
-            rm -f shellcheck-v0.10.0.linux.x86_64.tar.xz
+          # Layer 1: 优先使用宿主预装的 shellcheck（runner-tools.toml 锁定版本）
+          # 仅在宿主未预装时才 fallback 下载到 RUNNER_TEMP（2026-08-28 runner-hardening）
+          if command -v shellcheck >/dev/null 2>&1; then
+            echo "✓ Using host shellcheck: $(shellcheck --version | head -2)"
+          else
+            echo "::warning::shellcheck not found on host, falling back to download"
+            wget -q https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
+            tar -xf shellcheck-v0.11.0.linux.x86_64.tar.xz -C "${RUNNER_TEMP}"
+            export PATH="${RUNNER_TEMP}/shellcheck-v0.11.0:$PATH"
+            echo "${RUNNER_TEMP}/shellcheck-v0.11.0" >> "$GITHUB_PATH"
+            rm -f shellcheck-v0.11.0.linux.x86_64.tar.xz
+            shellcheck --version | head -2
           fi
-          shellcheck --version | head -2
 
       - name: Shell lint (find *.sh -exec shellcheck -x)
         shell: bash

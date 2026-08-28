@@ -1,0 +1,27 @@
+# runner-tools.toml — 宿主机工具二进制版本单一事实源（Single Source of Truth）
+#
+# 三台 pve runner（ce-01 上 actions-runner/02/03）全局路径锁定以下固定版本工具。
+# CI 按 PATH 优先原则调用宿主预装二进制，零外网下载。
+# 被测包的 per-run venv 独立安装不受影响（2026-08-25 环境遮蔽教训）。
+#
+# 缓存目录（runner 服务用户属主）：
+#   UV_CACHE_DIR=/var/cache/uv
+#   PIP_CACHE_DIR=/var/cache/pip
+# 依赖版本经两仓 lockfile（uv.lock / pyproject.toml）锁定保证缓存命中。
+
+[tools]
+uv = "0.4.29"
+ruff = "0.16.1"
+mypy = "2.3.0"
+actionlint = "1.7.12"
+shellcheck = "0.11.0"
+jq = "1.7.1"
+
+# 缓存目录
+[cache]
+uv_cache_dir = "/var/cache/uv"
+pip_cache_dir = "/var/cache/pip"
+
+# runner 标签
+[runner]
+labels = ["self-hosted", "pve-linux"]
