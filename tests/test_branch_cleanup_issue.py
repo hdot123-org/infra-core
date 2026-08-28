@@ -938,3 +938,127 @@ def test_issue_create_uses_repo_context_guard():
     assert '--repo "${GITHUB_REPOSITORY}"' in content, (
         "branch_cleanup_issue.sh must append explicit --repo from GITHUB_REPOSITORY"
     )
+
+
+# ============================================================================
+# 仓库上下文守卫全量覆盖（INFRA-601）：tracking issue 管理脚本中所有
+# 依赖仓库解析的 gh 调用（search/view/close/edit/comment/label）都必须
+# 在 GITHUB_REPOSITORY 注入时追加显式 --repo。行为级断言：mock gh 捕获
+# argv，env 设置 → 每类子命令的调用都带 --repo；env 未设置 → 无 --repo。
+# ============================================================================
+class TestRepoContextGuardAllGhCalls:
+    """INFRA-601: every repo-resolving gh call in branch_cleanup_issue.sh
+    must carry explicit --repo when GITHUB_REPOSITORY is set (runner
+    insteadOf 镜像重写使 remote 推断失效), and keep the original shape
+    when unset (本地调试)."""
+
+    def test_view_close_comment_edit_all_carry_repo_when_env_set(self, tmp_path: Path):
+        """GITHUB_REPOSITORY 注入时：issue view/close/comment/edit 调用全带 --repo。
+
+        两个场景合并覆盖四类子命令：
+        - update 路径（deleted + 变化的 protected 集）→ view/edit/comment
+        - close 路径（无 actionable）→ view/close
+        """
+        # 场景 1：update 路径 → view/edit/comment
+        harness = GhMockHarness(
+            tmp_path,
+            issues={781: tracker_body(["branch-a (1 unique commits)"])},
+            env={"GITHUB_REPOSITORY": "example-org/memory"},
+        )
+        exit_code, stdout, _ = harness.run_script(
+            deleted=["feat/gone"],
+            protected=["branch-a (1 unique commits)", "branch-b (2 unique commits)"],
+        )
+        assert exit_code == 0, stdout
+        assert "issue_action=updated" in stdout
+        calls = harness.read_calls()
+        for prefix in (["issue", "view"], ["issue", "edit"], ["issue", "comment"]):
+            sub = [c for c in calls if c.args[: len(prefix)] == prefix]
+            assert sub, f"expected at least one {' '.join(prefix)} call (update path)"
+
+        # 场景 2：close 路径 → view/close
+        harness2 = GhMockHarness(
+            tmp_path,
+            issues={781: tracker_body(["branch-a (1 unique commits)"])},
+            env={"GITHUB_REPOSITORY": "example-org/memory"},
+        )
+        exit_code, stdout, _ = harness2.run_script()
+        assert exit_code == 0, stdout
+        assert "issue_action=closed" in stdout
+        calls2 = harness2.read_calls()
+
+        # 两场景的全部四类子命令都校验 --repo 注入
+        all_calls = calls + calls2
+        checked = {
+            "issue view": ["issue", "view"],
+            "issue close": ["issue", "close"],
+            "issue comment": ["issue", "comment"],
+            "issue edit": ["issue", "edit"],
+        }
+        seen = set()
+        for label, prefix in checked.items():
+            sub = [c for c in all_calls if c.args[: len(prefix)] == prefix]
+            assert sub, f"expected at least one {label} call across both scenarios"
+            seen.add(label)
+            for call in sub:
+                assert "--repo" in call.args, (
+                    f"{label} argv must carry --repo when GITHUB_REPOSITORY is set: {call.args}"
+                )
+                repo_idx = call.args.index("--repo")
+                assert call.args[repo_idx + 1] == "example-org/memory", (
+                    f"{label} --repo must equal GITHUB_REPOSITORY: {call.args}"
+                )
+        assert seen == set(checked), "all four subcommand classes must have been exercised"
+
+    def test_search_marker_query_carries_repo_when_env_set(self, tmp_path: Path):
+        """GITHUB_REPOSITORY 注入时：marker 搜索（无 --repo 参数形态的
+        gh search issues '"branch-cleanup-tracker"'）也必须带显式 --repo。"""
+        harness = GhMockHarness(
+            tmp_path,
+            env={"GITHUB_REPOSITORY": "example-org/memory"},
+        )
+
+        exit_code, stdout, _ = harness.run_script(deleted=["feat/gone"])
+        assert exit_code == 0, stdout
+
+        searches = [c for c in harness.read_calls() if c.args[:2] == ["search", "issues"]]
+        assert searches, "expected gh search issues calls"
+        marker_query = [c for c in searches if "branch-cleanup-tracker" in " ".join(c.args)]
+        assert marker_query, "expected the marker search call"
+        for call in marker_query:
+            assert "--repo" in call.args, (
+                f"marker search must carry --repo when env set: {call.args}"
+            )
+
+    def test_label_create_carries_repo_when_env_set(self, tmp_path: Path):
+        """GITHUB_REPOSITORY 注入时：gh label create（tracker 创建路径）带 --repo。"""
+        harness = GhMockHarness(
+            tmp_path,
+            env={"GITHUB_REPOSITORY": "example-org/memory"},
+        )
+
+        exit_code, stdout, _ = harness.run_script(deleted=["feat/gone"])
+        assert exit_code == 0, stdout
+        assert "issue_action=created" in stdout
+
+        labels = [c for c in harness.read_calls() if c.args[:2] == ["label", "create"]]
+        assert labels, "expected gh label create calls on the create path"
+        for call in labels:
+            assert "--repo" in call.args, (
+                f"label create must carry --repo when env set: {call.args}"
+            )
+
+    def test_no_repo_flag_when_env_unset(self, tmp_path: Path):
+        """GITHUB_REPOSITORY 未设置（本地调试）→ 所有 gh 调用保持原命令形态（无 --repo，
+        label 搜索调用本身的 --repo "$GH_REPO_KEY" 参数除外，那是查询语义的一部分）。"""
+        harness = GhMockHarness(tmp_path)  # env 不含 GITHUB_REPOSITORY
+
+        exit_code, stdout, _ = harness.run_script(deleted=["feat/gone"])
+        assert exit_code == 0, stdout
+
+        for call in harness.read_calls():
+            if call.args[:2] == ["search", "issues"] and "label:" in " ".join(call.args):
+                continue  # label 搜索原本就带 --repo "$GH_REPO_KEY"（查询参数）
+            assert "--repo" not in call.args, (
+                f"no --repo expected when GITHUB_REPOSITORY unset: {call.args}"
+            )

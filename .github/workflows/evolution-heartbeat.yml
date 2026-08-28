@@ -30,7 +30,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
         run: |
-          gh label create "evolution-heartbeat" --color D93F0B --description "Evolution heartbeat alert" --force || true
+          # INFRA-601: 显式仓库上下文，免疫 runner insteadOf 镜像重写
+          gh --repo "$GITHUB_REPOSITORY" label create "evolution-heartbeat" --color D93F0B --description "Evolution heartbeat alert" --force || true
       - name: Run heartbeat check
         run: python scripts/evolution_heartbeat.py
         env:
