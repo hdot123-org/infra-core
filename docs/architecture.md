@@ -69,6 +69,27 @@ infra-core 用自己的 governance 门禁保护自身（self-bootstrap）：
 | governance | `Evolution Governance` | 受保护路径 owner 门禁（pull_request_target，执行 shipped governance-check action） |
 | release | `Release Please` | 非门禁：发版管道（schedule/push(paths)/dispatch，DISPATCH_TOKEN，详见第 6 节） |
 
+## 5.1 QA 门禁（`QA` workflow）
+
+`QA` workflow 与 memory-core qa.yml 同构（三触发：pull_request + schedule + workflow_dispatch），job 家族按 infra-core 语义适配：
+
+| memory-core job | infra-core job | 说明 |
+|-----------------|----------------|------|
+| cli-e2e | cli-e2e | CLI 冒烟测试（`scripts/cli_smoke_test.sh` 接线） |
+| coverage-audit | coverage-audit | 分支级覆盖率审计（schedule/dispatch only，PR 时 skip） |
+| **hook-lifecycle** | **N/A** | **infra-core 无 hook/gateway/memory 协议栈**（消费仓 memory-core 专属），不适用 |
+| business-policy | security-tests | 安全与策略测试（`-m security`，143 用例） |
+| schema-migration | schema-tests | Schema 与迁移测试（`-m schema`，262 用例） |
+| boundary-security | boundary-security | 边界守卫（`check_boundary.py` + `-m security -k boundary`） |
+| full-regression | full-regression | 夜间全量 pytest（schedule/dispatch only，PR 时 skip） |
+| qa-ok | qa-ok | 聚合（full-regression 不在 needs 中——夜间红不阻塞 PR 合并） |
+
+### N/A 家族裁剪理由（不允许静默跳过）
+
+**hook-lifecycle（N/A）**：infra-core 是引擎库，不含 hook gateway / session lifecycle / PreToolUse guard / telemetry / integrity-manifest 等消费仓协议栈。这些模块全部在 memory-core `memory_core/` 下（`_gateway_handlers.py` / `_init_finalize.py` / `memory_hook_integrity_*`），infra-core 永不 import memory_core（依赖方向单一：消费仓 → infra-core）。QA 侧无对应测试对象。
+
+**boundary-security（复用而非 N/A）**：infra-core 自有 `scripts/check_boundary.py`（public 仓边界守卫：无 secrets 泄露、无本地绝对路径），已在 CI `guards` job 执行；QA 侧额外跑 `-m security -k boundary` 测试组，形成双重覆盖。
+
 ## 6. 发版管道（release-please）
 
 workflow：`Release Please`（`.github/workflows/release-please.yml`），配置 `release-please-config.json`（python release-type），版本权威源 `.release-please-manifest.json`。
