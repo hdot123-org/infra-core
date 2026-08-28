@@ -1,6 +1,13 @@
 # Self-hosted runner CI pipeline (pve-linux)
 # Per-run venv isolation per 2026-08-25-selfhosted-runner-env-shadowing.md
 #
+# Self-hosted 铁律（2026-08-28 auto-merge 污染事故）：共享持久工作区（_work）
+# 上禁止 sparse-checkout——actions/checkout 的 sparse-checkout 参数会把该
+# 工作区 .git/config 写成 core.sparseCheckout=true 并把工作树裁剪到极小
+# 集合，毒化同 runner 后续所有复用工作区的 CI job（"Can't find action.yml
+# under .github/actions/setup-venv"）。本文件所有 checkout 保持全量工作树；
+# auto-merge.yml 则整步禁 checkout（契约测试锁定）。
+#
 # Step2 wiring: structured jobs (guards / test groups / domain mypy / advisory)
 # Coverage ramp-up: 45% baseline, +5 per release, target 80%.
 # Existing 6 check names preserved (naming contract):
@@ -20,6 +27,21 @@ jobs:
     name: pytest
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -47,6 +69,21 @@ jobs:
     name: ruff
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -61,6 +98,21 @@ jobs:
     name: actionlint
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Run actionlint
@@ -72,6 +124,21 @@ jobs:
     name: mypy
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -86,6 +153,21 @@ jobs:
     name: guards
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0  # full history for PR diff analysis
@@ -120,6 +202,21 @@ jobs:
     name: security-tests
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -132,6 +229,21 @@ jobs:
     name: schema-tests
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -144,6 +256,21 @@ jobs:
     name: integration-tests
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -156,6 +283,21 @@ jobs:
     name: e2e-tests
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -173,6 +315,21 @@ jobs:
     name: "Enforce mypy --strict (src/)"
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -185,6 +342,21 @@ jobs:
     name: "Enforce mypy --strict (scripts/)"
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -199,6 +371,21 @@ jobs:
     name: "Advisory dependency security scan"
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -214,6 +401,21 @@ jobs:
     name: "Advisory deptry"
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -231,6 +433,21 @@ jobs:
     name: shellcheck
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Install shellcheck to RUNNER_TEMP
@@ -258,6 +475,21 @@ jobs:
     name: health-check
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -270,6 +502,21 @@ jobs:
     name: repo-consistency
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Run repo delivery consistency check
@@ -279,6 +526,21 @@ jobs:
     name: "Advisory telemetry coverage audit"
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Run telemetry coverage audit
@@ -288,6 +550,21 @@ jobs:
     name: business-policy-tests
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -382,6 +659,21 @@ jobs:
             exit 1
           fi
           echo "✅ All required jobs passed"
+
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
 
       - name: Checkout repository
         uses: actions/checkout@v5

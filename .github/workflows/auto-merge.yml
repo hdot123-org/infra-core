@@ -18,6 +18,19 @@ name: Auto Merge
 #   全绿判定 = PR head 全部 check-runs 零 fail（含 advisory 三 job）。
 #   triage 的 statusCheckRollup 全 SUCCESS/SKIPPED/NEUTRAL 判定 + shared-workflows
 #   auto-merge action 的全 check-runs 扫描双层保证。不得只查 required contexts。
+#
+# Self-hosted 共享工作区防毒铁律（2026-08-28 三 runner 污染事故，#48 回归）：
+#   auto-merge job 严禁 actions/checkout、严禁任何 sparse-checkout——在共享
+#   持久 _work 工作区上，checkout 的 sparse-checkout 参数会把该工作区
+#   .git/config 写成 core.sparseCheckout=true 并把工作树裁剪到极小集合，
+#   同一 runner 上后续所有复用该工作区的 CI job 将以 "Can't find action.yml
+#   under .github/actions/setup-venv" 失败，且每次 auto-merge 触发都会重新
+#   污染（排毒三次后仍复发实证）。本 job 只需 triage 脚本：脚本经 heredoc
+#   内联写入 RUNNER_TEMP（每 run 独立临时目录，与
+#   src/infra_core/shell/auto_merge_triage.sh 逐字节同步，
+#   tests/test_auto_merge_workflow_contract.py 锁定），对工作区零写入。
+#   本仓库其他 workflow 如需 checkout，一律保持全量工作树，禁止在共享
+#   _work 路径上使用 sparse-checkout 参数。
 
 on:
   workflow_run:
@@ -113,12 +126,29 @@ jobs:
       matrix:
         pr_number: ${{ fromJSON(needs.resolve.outputs.pr_numbers) }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          sparse-checkout: |
-            src/infra_core/shell/auto_merge_triage.sh
-          sparse-checkout-cone-mode: false
+      # 防毒铁律（self-hosted 共享持久工作区，2026-08-28 三 runner 污染事故）：
+      # 本 job 禁止 actions/checkout——其 sparse-checkout 参数会把共享工作区
+      # .git/config 写成 core.sparseCheckout=true 并把工作树裁剪到极小集合，
+      # 毒化同 runner 后续所有复用该工作区的 CI job（"Can't find action.yml
+      # under .github/actions/setup-venv"），且每次 auto-merge 触发都重新污染。
+      # triage 脚本经下方 heredoc 内联（与 src/ 原件逐字节同步，契约测试锁定），
+      # 对工作区零写入。本文件所有 job 均不得 checkout（契约测试锁定）。
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 自愈向量（2026-08-28 污染事故）：本 job 每 sweep 在三 runner 上轮转，
+          # 借此检测并清除工作区 sparse 残留——checkout 的 sparse-checkout
+          # disable 实证无法恢复被裁剪的工作树（仍缺 setup-venv/action.yml）
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
 
       - name: Triage PR mergeable state
         id: triage
@@ -163,6 +193,199 @@ jobs:
             echo "PR data after UNKNOWN retry: $PR_DATA"
           fi
 
+          # Self-hosted 共享工作区防毒：triage 脚本不经 checkout 取用，而是
+          # 内联写入 RUNNER_TEMP（每 run 独立临时目录，run 结束自动清理）。
+          # 下方 heredoc 与 src/infra_core/shell/auto_merge_triage.sh 逐字节
+          # 同步——修改分类逻辑时两处必须一起改，契约测试
+          # tests/test_auto_merge_workflow_contract.py 锁定字节一致。
+          cat > "$RUNNER_TEMP/auto_merge_triage.sh" <<'TRIAGE_EOF'
+          #!/usr/bin/env bash
+          # Auto-merge triage script (INFRA-416 / INFRA-428)
+          # Classifies PRs by mergeable state, mergeStateStatus and statusCheckRollup.
+          #
+          # Input:  JSON array of PRs via stdin (gh pr view/list --json
+          #         number,mergeable,mergeStateStatus,isDraft,statusCheckRollup)
+          # Output: JSON with 6 categories:
+          #           mergeable   (action: merge)
+          #           behind      (action: update-branch)
+          #           conflicting (action: notify)
+          #           pending     (action: wait)
+          #           stalled     (action: wait)
+          #           unknown     (action: skip)
+          # Exit:   always 0 (triage never fails workflow)
+          #
+          # Modes:
+          #   default            classify stdin, emit full JSON
+          #   --get-action N     classify stdin, emit the single action for PR number N
+          #                      (merge|update-branch|notify|wait|skip; exit 0; empty or
+          #                      invalid input also emits skip — triage must never fail
+          #                      the workflow)
+          #   --get-category N   classify stdin, emit the single category for PR number N
+          #                      (mergeable|behind|conflicting|pending|stalled|unknown;
+          #                      missing PR -> unknown). Workflow uses this to derive
+          #                      auxiliary outputs (e.g. stalled flag) without
+          #                      duplicating classification logic.
+          #
+          # Classification precedence (one PR falls into exactly one category,
+          # decided by classify_pr in a single pass — categories are exclusive by
+          # construction, no cross-select races):
+          #   mergeable=UNKNOWN    -> unknown     (skip; GitHub still computing)
+          #   mergeable=CONFLICTING-> conflicting (notify)
+          #   mergeStateStatus=BEHIND -> behind   (update-branch)
+          #   isDraft / DRAFT / BLOCKED -> pending (wait)
+          #   rollup empty or has incomplete checks -> pending (wait; early-fire guard)
+          #   rollup all reported, some not SUCCESS -> stalled (wait + escalate)
+          #   otherwise (MERGEABLE + green rollup)  -> mergeable (merge)
+          #
+          # Why these categories exist (INFRA-428):
+          # - BLOCKED/DRAFT previously fell into "mergeable" → every 10-min sweep fired
+          #   a merge attempt at an un-mergeable PR → red leg + the shared action's own
+          #   failure check run poisoned the head SHA (2026-08-18 self-poisoning
+          #   deadlock, PR #779 mechanism). wait = benign skip, schedule re-sweeps.
+          # - early-fire: pull_request_target(opened) / workflow_run of one workflow
+          #   can arrive before all required checks reported. mergeStateStatus alone is
+          #   async/cached and can be stale-CLEAN in that window; cross-checking
+          #   statusCheckRollup makes merge fire only when every check run reports
+          #   conclusion=SUCCESS. Rollup empty = no checks reported yet → fail-closed
+          #   wait (CI runs on every PR without paths filter, so an empty rollup is
+          #   always "checks not reported yet", never "no checks configured").
+          # - CONFLICTING wins over BEHIND: a conflicting PR must never be
+          #   update-branched into a blind merge.
+          
+          set -euo pipefail
+          
+          GET_ACTION_PR=""
+          GET_CATEGORY_PR=""
+          
+          MODE="default"
+          if [[ "${1:-}" == "--get-action" || "${1:-}" == "--get-category" ]]; then
+            MODE="$1"
+            if [[ $# -lt 2 ]]; then
+              echo "Usage: $0 [--get-action PR_NUMBER | --get-category PR_NUMBER]" >&2
+              echo '{"mergeable":[],"behind":[],"conflicting":[],"pending":[],"stalled":[],"unknown":[]}'
+              exit 0
+            fi
+            if [[ "$MODE" == "--get-action" ]]; then
+              GET_ACTION_PR="$2"
+            else
+              GET_CATEGORY_PR="$2"
+            fi
+          elif [[ $# -gt 0 ]]; then
+            echo "Usage: $0 [--get-action PR_NUMBER | --get-category PR_NUMBER]" >&2
+            echo '{"mergeable":[],"behind":[],"conflicting":[],"pending":[],"stalled":[],"unknown":[]}'
+            exit 0
+          fi
+          
+          EMPTY_RESULT='{"mergeable":[],"behind":[],"conflicting":[],"pending":[],"stalled":[],"unknown":[]}'
+          
+          # Classify PRs and add action fields.
+          # `jq -e` would swallow the classification on unexpected shapes; plain jq
+          # with a fallback keeps triage total (empty result on any malformed input).
+          classify() {
+            jq '
+              def rollup(pr): (pr.statusCheckRollup // []);
+              # green = at least one SUCCESS (防假绿下限) AND all checks are SUCCESS/SKIPPED/NEUTRAL.
+              # Three-layer semantics:
+              #   1. SKIPPED/NEUTRAL = branch protection alignment (non-blocking checks)
+              #   2. any(SUCCESS) = anti-fake-green lower bound (all-SKIPPED rollup requires human review)
+              #   3. null conclusion = still queued/in-progress (not counted as reported)
+              # Failure conclusions: FAILURE, TIMED_OUT, CANCELLED, ACTION_REQUIRED.
+              # Rationale (INFRA-428 + scrutiny R2 + scrutiny R1 blocking): qa.yml #830 added two
+              # nightly jobs (Coverage Audit / Full Regression) that report SKIPPED on PR events.
+              # PR #862 fixed the deadlock by accepting SKIPPED/NEUTRAL as non-failures. However,
+              # the all() check without any(SUCCESS) allowed all-SKIPPED rollups to pass as mergeable,
+              # creating a fake-green hole (reviewer-verified). The any(SUCCESS) guard ensures at
+              # least one real success exists before allowing merge.
+              def checks_green(pr):
+                (rollup(pr) | length) > 0
+                and (any(rollup(pr)[]; .conclusion == "SUCCESS"))
+                and all(rollup(pr)[]; .conclusion == "SUCCESS" or .conclusion == "SKIPPED" or .conclusion == "NEUTRAL");
+              # complete = every check run has reported a non-null conclusion.
+              # has("conclusion") alone is not enough: the rollup of a queued/
+              # in_progress check contains "conclusion": null, and jq has() would
+              # treat it as reported. A reported check has a conclusion STRING.
+              def checks_complete(pr):
+                (rollup(pr) | length) > 0
+                and all(rollup(pr)[]; (.conclusion // "") | type == "string" and length > 0);
+          
+              def classify_pr(pr):
+                if pr.mergeable == "UNKNOWN" then "unknown"
+                elif pr.mergeable == "CONFLICTING" then "conflicting"
+                elif pr.mergeStateStatus == "BEHIND" then "behind"
+                elif (pr.isDraft // false) or pr.mergeStateStatus == "DRAFT" or pr.mergeStateStatus == "BLOCKED" then "pending"
+                elif (rollup(pr) | length) == 0 then "pending"
+                elif checks_green(pr) then "mergeable"
+                elif checks_complete(pr) then "stalled"
+                else "pending"
+                end;
+          
+              def action_for(cat):
+                if cat == "mergeable" then "merge"
+                elif cat == "behind" then "update-branch"
+                elif cat == "conflicting" then "notify"
+                elif cat == "pending" then "wait"
+                elif cat == "stalled" then "wait"
+                else "skip"
+                end;
+          
+              map(. as $pr | {pr: $pr, cat: classify_pr($pr)})
+              | {
+                  mergeable: [.[] | select(.cat == "mergeable") | .pr + {action: action_for(.cat)}],
+                  behind: [.[] | select(.cat == "behind") | .pr + {action: action_for(.cat)}],
+                  conflicting: [.[] | select(.cat == "conflicting") | .pr + {action: action_for(.cat)}],
+                  pending: [.[] | select(.cat == "pending") | .pr + {action: action_for(.cat)}],
+                  stalled: [.[] | select(.cat == "stalled") | .pr + {action: action_for(.cat)}],
+                  unknown: [.[] | select(.cat == "unknown") | .pr + {action: action_for(.cat)}]
+                }
+            ' 2>/dev/null || echo "$EMPTY_RESULT"
+          }
+          
+          # Read JSON from stdin
+          input=$(cat)
+          
+          # Handle empty or invalid JSON
+          if ! echo "$input" | jq empty 2>/dev/null; then
+            echo "Invalid or empty JSON input, returning empty triage result" >&2
+            if [[ -n "$GET_ACTION_PR" ]]; then
+              echo "skip"
+            elif [[ -n "$GET_CATEGORY_PR" ]]; then
+              echo "unknown"
+            else
+              echo "$EMPTY_RESULT"
+            fi
+            exit 0
+          fi
+          
+          TRIAGE_RESULT=$(echo "$input" | classify)
+          
+          if [[ -n "$GET_ACTION_PR" || -n "$GET_CATEGORY_PR" ]]; then
+            # 每类只含互斥子集，按类别优先级查一次即可得到该 PR 的唯一归属
+            CATEGORY=$(echo "$TRIAGE_RESULT" | jq -r --argjson pr "${GET_ACTION_PR:-$GET_CATEGORY_PR}" '
+              if ([.behind[] | select(.number == $pr)] | length) > 0 then "behind"
+              elif ([.conflicting[] | select(.number == $pr)] | length) > 0 then "conflicting"
+              elif ([.pending[] | select(.number == $pr)] | length) > 0 then "pending"
+              elif ([.stalled[] | select(.number == $pr)] | length) > 0 then "stalled"
+              elif ([.mergeable[] | select(.number == $pr)] | length) > 0 then "mergeable"
+              else "unknown"
+              end
+            ')
+            if [[ -n "$GET_CATEGORY_PR" ]]; then
+              echo "$CATEGORY"
+            else
+              case "$CATEGORY" in
+                behind) echo "update-branch" ;;
+                conflicting) echo "notify" ;;
+                pending|stalled) echo "wait" ;;
+                mergeable) echo "merge" ;;
+                *) echo "skip" ;;
+              esac
+            fi
+            exit 0
+          fi
+          
+          echo "$TRIAGE_RESULT"
+          TRIAGE_EOF
+
           # 分类并提取该 PR 的类别与动作（单 PR 输入，--get-category 即其
           # 类别，workflow 内再映射为 action）。
           # INFRA-428：取数扩展 isDraft + statusCheckRollup，分类新增
@@ -170,7 +393,7 @@ jobs:
           # action=merge 仅在 rollup 全绿时发出，杜绝 early-fire 盲合并。
           # 零红铁律：triage 的 checks_green 判定要求 all() SUCCESS/SKIPPED/NEUTRAL
           # 且 any(SUCCESS)——含 advisory 层全部 check-runs 零 fail。
-          CATEGORY=$(echo "$PR_DATA" | jq -s '.[0:1]' | bash src/infra_core/shell/auto_merge_triage.sh --get-category "$PR_NUMBER")
+          CATEGORY=$(echo "$PR_DATA" | jq -s '.[0:1]' | bash "$RUNNER_TEMP/auto_merge_triage.sh" --get-category "$PR_NUMBER")
           case "$CATEGORY" in
             behind) ACTION="update-branch" ;;
             conflicting) ACTION="notify" ;;
