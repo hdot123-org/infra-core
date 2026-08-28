@@ -1,5 +1,6 @@
 """Contract tests for scripts/check_fix_has_test.py (INFRA-569)."""
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -111,3 +112,87 @@ def test_cli_json_output(tmp_path):
     )
     # Should not crash with --json flag
     assert result.returncode in (0, 1), f"Unexpected exit code: {result.returncode}"
+
+
+# ============================================================================
+# 仓库上下文双重防线（2026-08-28，mirror memory PR #1060 / INFRA-597）
+# 自建 runner 配置 git url.<mirror>.insteadOf 全局重写后，gh 基于 workspace
+# remote 的仓库推断误判 "no known GitHub host"，guard 以 exit 2 阻塞一切 PR。
+# GITHUB_REPOSITORY 已设置（CI）→ gh pr view 显式 --repo；
+# GH_REPO 存在 → _run 透传完整 env（gh 原生识别）；
+# 未设置（本地调试）→ 保持原命令形态。
+# ============================================================================
+
+
+def test_get_pr_data_uses_repo_flag_from_github_repository_env(monkeypatch):
+    """CI 环境（GITHUB_REPOSITORY 已设置）→ gh pr view 显式 --repo。"""
+    mod = load_script_module(SCRIPT_PATH, "check_fix_has_test_repo_env")
+    captured = {}
+
+    def fake_run(cmd, *args, **kwargs):
+        captured["cmd"] = list(cmd)
+
+        class R:
+            stdout = json.dumps({"commits": [], "files": [], "author": "x"})
+            stderr = ""
+
+        return R()
+
+    monkeypatch.setenv("GITHUB_REPOSITORY", "hdot123-org/infra-core")
+    monkeypatch.setattr(mod, "_run", fake_run)
+    data = mod.get_pr_data(42)
+    assert data == {"commits": [], "files": [], "author": "x"}
+    assert captured["cmd"] == [
+        "gh",
+        "pr",
+        "view",
+        "42",
+        "--repo",
+        "hdot123-org/infra-core",
+        "--json",
+        "commits,files,author",
+    ]
+
+
+def test_get_pr_data_no_repo_flag_without_github_repository_env(monkeypatch):
+    """GITHUB_REPOSITORY 未设置（本地调试）→ 保持原命令形态（无 --repo）。"""
+    mod = load_script_module(SCRIPT_PATH, "check_fix_has_test_no_env")
+    captured = {}
+
+    def fake_run(cmd, *args, **kwargs):
+        captured["cmd"] = list(cmd)
+
+        class R:
+            stdout = json.dumps({"commits": [], "files": [], "author": "x"})
+            stderr = ""
+
+        return R()
+
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.setattr(mod, "_run", fake_run)
+    mod.get_pr_data(42)
+    assert captured["cmd"] == ["gh", "pr", "view", "42", "--json", "commits,files,author"]
+
+
+def test_get_pr_data_passes_full_env_when_gh_repo_set(monkeypatch):
+    """GH_REPO 存在 → _run 透传完整 env（gh 原生识别 GH_REPO）。"""
+    mod = load_script_module(SCRIPT_PATH, "check_fix_has_test_gh_repo")
+    captured = {}
+
+    def fake_run(cmd, *args, **kwargs):
+        captured["cmd"] = list(cmd)
+        captured["kwargs"] = dict(kwargs)
+
+        class R:
+            stdout = json.dumps({"commits": [], "files": [], "author": "x"})
+            stderr = ""
+
+        return R()
+
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.setenv("GH_REPO", "hdot123-org/infra-core")
+    monkeypatch.setattr(mod, "_run", fake_run)
+    mod.get_pr_data(42)
+    # 无 --repo（GITHUB_REPOSITORY 未设置），但 env 必须透传（非 None）
+    assert captured["cmd"] == ["gh", "pr", "view", "42", "--json", "commits,files,author"]
+    assert captured["kwargs"].get("env") is not None

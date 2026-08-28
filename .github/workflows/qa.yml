@@ -35,6 +35,21 @@ jobs:
     name: CLI End-to-End Smoke Tests
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -55,6 +70,21 @@ jobs:
     runs-on: [self-hosted, pve-linux]
     timeout-minutes: 45
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
         with:
           fetch-depth: 1
@@ -90,6 +120,21 @@ jobs:
     name: Security & Policy Tests
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -106,6 +151,21 @@ jobs:
     name: Schema & Migration Tests
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -122,6 +182,21 @@ jobs:
     name: Boundary & Security Guard Tests
     runs-on: [self-hosted, pve-linux]
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup venv (per-run isolation)
@@ -145,6 +220,21 @@ jobs:
     runs-on: [self-hosted, pve-linux]
     timeout-minutes: 60
     steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - uses: actions/checkout@v5
         with:
           fetch-depth: 1

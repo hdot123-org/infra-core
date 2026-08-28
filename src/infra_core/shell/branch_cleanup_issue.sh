@@ -314,10 +314,16 @@ $REPORT
 *This tracking issue is managed by the [Branch Cleanup]($RUN_URL) workflow; it is updated in place instead of one issue per run ($MARKER).*"
   gh label create automation --force >/dev/null 2>&1 || true
   gh label create branch-cleanup --force >/dev/null 2>&1 || true
-  gh issue create \
-    --title "Branch cleanup tracking" \
-    --body "$BODY" \
-    --label "$LABELS" >/dev/null
+  # 仓库上下文双重防线（2026-08-28）：自建 runner insteadOf 镜像重写使 gh 无法
+  # 从 remote 解析 host。GITHUB_REPOSITORY env（Actions 默认注入）→ 追加 --repo。
+  GH_ISSUE_CREATE_CMD=(gh issue create
+    --title "Branch cleanup tracking"
+    --body "$BODY"
+    --label "$LABELS")
+  if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+    GH_ISSUE_CREATE_CMD+=(--repo "${GITHUB_REPOSITORY}")
+  fi
+  "${GH_ISSUE_CREATE_CMD[@]}" >/dev/null
   echo "issue_action=created"
   # Sync to Linear project (VAL-GATE-118)
   sync_linear_project
