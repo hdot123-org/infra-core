@@ -1,6 +1,13 @@
 # Self-hosted runner CI pipeline (pve-linux)
 # Per-run venv isolation per 2026-08-25-selfhosted-runner-env-shadowing.md
 #
+# Self-hosted 铁律（2026-08-28 auto-merge 污染事故）：共享持久工作区（_work）
+# 上禁止 sparse-checkout——actions/checkout 的 sparse-checkout 参数会把该
+# 工作区 .git/config 写成 core.sparseCheckout=true 并把工作树裁剪到极小
+# 集合，毒化同 runner 后续所有复用工作区的 CI job（"Can't find action.yml
+# under .github/actions/setup-venv"）。本文件所有 checkout 保持全量工作树；
+# auto-merge.yml 则整步禁 checkout（契约测试锁定）。
+#
 # Step2 wiring: structured jobs (guards / test groups / domain mypy / advisory)
 # Coverage ramp-up: 45% baseline, +5 per release, target 80%.
 # Existing 6 check names preserved (naming contract):
