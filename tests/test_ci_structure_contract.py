@@ -121,14 +121,20 @@ class TestCiOkEnforcement:
             )
             assert expected in script, f"ci-ok 未显式阻断 {job}（缺失逐项判定行）"
 
-    def test_advisory_never_blocks(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
-        """advisory 结果行只允许 echo 透出，禁止出现在判定/FAIL 行中。"""
+    def test_advisory_blocks_merge(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """用户铁律（2026-08-28）：写死不允许红色合并，一个都不允许。
+
+        advisory jobs 必须被接入 ci-ok 阻断判定，任一红则不可合并。
+        这是零红机制的核心：advisory 虽有 continue-on-error（数据产出优先），
+        但 ci-ok 的零红聚合（含 GitHub API 全 check-runs 扫描）会阻断合并。
+        """
         script = _job_run_script(ci_jobs, "ci-ok")
-        for line in script.splitlines():
-            for job in ADVISORY_JOBS:
-                if f"needs.{job}.result" in line:
-                    assert "FAIL" not in line, f"advisory {job} 被接入阻断判定"
-                    assert "[[" not in line, f"advisory {job} 被接入条件判定"
+        for job in ADVISORY_JOBS:
+            expected = (
+                f'[[ "${{{{ needs.{job}.result }}}}" == "success" ]]'
+                f' || {{ echo "FAIL: {job}"; FAILED=1; }}'
+            )
+            assert expected in script, f"advisory {job} 未接入阻断判定（违反零红铁律）"
 
 
 class TestAdvisorySemantics:
