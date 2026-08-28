@@ -67,6 +67,9 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+exclude = [
+    "scripts/**/*.sh",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
@@ -90,6 +93,27 @@ warn_unused_configs = true
 module = [
     "evolution_adapters",
     "evolution_utils",
+    "evolution_heartbeat",
+    "evolution_scanner",
+    "evolution_self_audit",
+    "anchor_gate",
+    "extract_anchor",
+    "guard_cli",
+]
+ignore_missing_imports = true
+
+# Allow scripts/ to import from infra_core.engine without strict type checking
+# (engine modules are transplanted from memory-core without full type annotations)
+[[tool.mypy.overrides]]
+module = [
+    "infra_core.engine.*",
+]
+follow_imports = "skip"
+
+# Allow untyped imports from infra_core.engine (installed package without stubs)
+[[tool.mypy.overrides]]
+module = [
+    "infra_core.engine.droid_review.*",
 ]
 ignore_missing_imports = true
 
