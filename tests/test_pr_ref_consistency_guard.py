@@ -74,8 +74,12 @@ def test_extract_linkback_three_tiers():
     assert mod.extract_linkback_from_comments(no_linkback) is None
 
 
-def test_resolve_repo_owner_name():
+def test_resolve_repo_owner_name(monkeypatch):
     """Must parse owner/name from git remote URL."""
+    # 环境隔离：GITHUB_REPOSITORY（Actions 运行器默认注入）优先级高于 remote
+    # 解析，不 delenv 会在 CI 上短路 remote fallback 分支（repo-context 双重
+    # 防线引入，2026-08-28）。
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
     mod = load_script_module(SCRIPT_PATH, "check_pr_ref_resolve")
 
     # Test both HTTPS and SSH formats
@@ -130,3 +134,93 @@ def test_cli_no_args():
     )
     assert result.returncode == 2, f"Should exit 2 without args: {result.stderr}"
     assert "Usage" in result.stderr or "usage" in result.stderr
+
+
+# ============================================================================
+# 仓库上下文双重防线（2026-08-28，mirror memory PR #1060 / INFRA-597）
+# 自建 runner insteadOf 镜像重写使 git remote get-url 返回镜像 URL（解析出
+# 错误 owner/repo）或 gh 无法从 remote 解析 host。GITHUB_REPOSITORY（Actions
+# 默认注入）优先；未设置时保持原命令形态（本地调试）。
+# ============================================================================
+
+
+def test_resolve_repo_owner_name_prefers_github_repository_env(monkeypatch):
+    """GITHUB_REPOSITORY 已设置 → env 优先，不咨询 git remote。"""
+    mod = load_script_module(SCRIPT_PATH, "check_pr_ref_resolve_env")
+
+    def forbidden_run(cmd, *args, **kwargs):
+        raise AssertionError(
+            f"git remote must not be consulted when GITHUB_REPOSITORY is set: {cmd}"
+        )
+
+    monkeypatch.setenv("GITHUB_REPOSITORY", "hdot123-org/infra-core")
+    monkeypatch.setattr(subprocess, "run", forbidden_run)
+    owner, name = mod._resolve_repo_owner_name()
+    assert (owner, name) == ("hdot123-org", "infra-core")
+
+
+def test_resolve_repo_owner_name_still_falls_back_to_remote(monkeypatch):
+    """GITHUB_REPOSITORY 未设置 → origin remote fallback 语义不变。"""
+    mod = load_script_module(SCRIPT_PATH, "check_pr_ref_resolve_fallback")
+
+    original_run = subprocess.run
+
+    def mock_run(cmd, *args, **kwargs):
+        if cmd[0] == "git" and "get-url" in cmd:
+            return type("Result", (), {"stdout": "https://github.com/owner/repo.git"})()
+        return original_run(cmd, *args, **kwargs)
+
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.setattr(subprocess, "run", mock_run)
+    owner, name = mod._resolve_repo_owner_name()
+    assert (owner, name) == ("owner", "repo")
+
+
+def test_fetch_issue_comments_adds_repo_when_github_repository_set(monkeypatch):
+    """GITHUB_REPOSITORY 已设置（CI）→ gh issue view 必须显式 --repo。"""
+    mod = load_script_module(SCRIPT_PATH, "check_pr_ref_comments_env")
+    captured = {}
+
+    def fake_run(cmd, *args, **kwargs):
+        captured["cmd"] = list(cmd)
+        return type("Result", (), {"stdout": ""})()
+
+    monkeypatch.setenv("GITHUB_REPOSITORY", "hdot123-org/infra-core")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    mod.fetch_issue_comments(5)
+    assert captured["cmd"] == [
+        "gh",
+        "issue",
+        "view",
+        "5",
+        "--repo",
+        "hdot123-org/infra-core",
+        "--json",
+        "comments",
+        "--jq",
+        ".comments[].body",
+    ]
+
+
+def test_fetch_issue_comments_original_form_without_env(monkeypatch):
+    """GITHUB_REPOSITORY 未设置（本地调试）→ 保持原命令形态（无 --repo）。"""
+    mod = load_script_module(SCRIPT_PATH, "check_pr_ref_comments_no_env")
+    captured = {}
+
+    def fake_run(cmd, *args, **kwargs):
+        captured["cmd"] = list(cmd)
+        return type("Result", (), {"stdout": ""})()
+
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    mod.fetch_issue_comments(5)
+    assert captured["cmd"] == [
+        "gh",
+        "issue",
+        "view",
+        "5",
+        "--json",
+        "comments",
+        "--jq",
+        ".comments[].body",
+    ]

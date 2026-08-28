@@ -148,7 +148,13 @@ for BRANCH in $BRANCHES; do
   fi
 
   # Fetch all PRs for this branch in one API call
-  if ! ALL_PRS=$(gh pr list --head "$BRANCH" --state all --json number,state 2>/dev/null); then
+  # 仓库上下文双重防线（2026-08-28）：自建 runner insteadOf 镜像重写使 gh 无法
+  # 从 remote 解析 host。GITHUB_REPOSITORY env（Actions 默认注入）→ 追加 --repo。
+  GH_PR_LIST_CMD=(gh pr list --head "$BRANCH" --state all --json "number,state")
+  if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+    GH_PR_LIST_CMD+=(--repo "${GITHUB_REPOSITORY}")
+  fi
+  if ! ALL_PRS=$("${GH_PR_LIST_CMD[@]}" 2>/dev/null); then
     echo "  API error checking PRs for $BRANCH, skipping (fail-closed)."
     continue
   fi
