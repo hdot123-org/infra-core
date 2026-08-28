@@ -24,7 +24,8 @@ infra-core（public 引擎仓库）
 |------|-----|--------|
 | workflow 名 | `CI` | auto-merge workflow_run |
 | workflow 名 | `Evolution Governance` | auto-merge workflow_run |
-| workflow 名（未来） | `Droid Auto Review` / `QA` | auto-merge、watchdog |
+| workflow 名 | `Droid Auto Review` / `QA` | auto-merge、watchdog、ci-ok 零红扫描 |
+| check 名（job key） | `qa-ok` | QA workflow 聚合门禁（ci-ok 零红扫描 + auto-merge rollup 消费，见 §5.1） |
 | check 名（job key） | `ci-ok` | branch protection required check |
 | check 显示名（job name） | `Block non-owner governance modifications` | branch protection required check |
 | artifact 前缀（未来） | `droid-review-debug-` | watchdog quota-sweep |
@@ -61,6 +62,7 @@ infra-core 用自己的 governance 门禁保护自身（self-bootstrap）：
 | integration-tests / e2e-tests | `CI` | 独立专项组（`-m <marker> -n 4 --no-cov`）；e2e 附 CLI 冒烟 |
 | health-check | `CI` | CI 健康自检（`scripts/ci_health_check.sh`） |
 | ci-ok | `CI` | 聚合（branch protection required check），逐项显式阻断全部 9 个前置 job（含 advisory-bundle，按 `.result`；INFRA-595），另有 GitHub API 全 check-runs 零红扫描双保险 |
+| qa-ok | `QA` | QA 聚合门禁：PR 子集（cli-e2e / security / schema / boundary）+ 夜间全量（coverage-audit / full-regression），job 家族映射见 §5.1；非 required check，由 ci-ok 零红扫描（`scripts/check_zero_red.sh`，全 check-runs success/skipped/neutral）与 auto-merge rollup 全绿判定纳入合并门禁 |
 | governance | `Evolution Governance` | 受保护路径 owner 门禁（pull_request_target，执行 shipped governance-check action） |
 | release | `Release Please` | 非门禁：发版管道（schedule/push(paths)/dispatch，DISPATCH_TOKEN，详见第 6 节） |
 
