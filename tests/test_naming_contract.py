@@ -527,3 +527,111 @@ class TestQAWorkflowContract:
         assert "needs.security-tests.result" in qa_ok_section
         assert "needs.schema-tests.result" in qa_ok_section
         assert "needs.boundary-security.result" in qa_ok_section
+
+
+class TestAutoMergeTriggerContract:
+    """auto-merge workflow 触发器契约测试（gate-infra-auto-merge-enable feature）
+
+    验证 infra-core 自仓 auto-merge.yml 恢复 memory-core 同构触发面：
+    - workflow 名 "Auto Merge"（字节级）
+    - 四触发器：workflow_run(CI/QA/Droid Auto Review/Evolution Governance completed)
+      + pull_request_target(opened/synchronize/reopened) + schedule */10 + workflow_dispatch
+    - INFRA-428 concurrency 组级排队：group=auto-merge-pipeline, cancel-in-progress=false
+    - triage 脚本路径必须真实存在（M2 桩引用旧 scripts/ 路径的 exit-127 回归守卫）
+    - 合并动作钉住 shared-workflows action + DISPATCH_TOKEN（GITHUB_TOKEN 递归防护铁律）
+    - runner 铁律：jobs 一律 [self-hosted, pve-linux]
+    """
+
+    def _load_workflow(self) -> dict:
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/auto-merge.yml"
+        return yaml.safe_load(workflow_path.read_text())
+
+    def test_auto_merge_workflow_name_byte_exact(self):
+        """workflow 名字节级为 'Auto Merge'"""
+        content = _read(".github/workflows/auto-merge.yml")
+        assert re.search(r"^name:\s*Auto Merge\s*$", content, re.MULTILINE)
+
+    def test_auto_merge_four_triggers(self):
+        """四触发器：workflow_run + pull_request_target + schedule + workflow_dispatch"""
+        data = self._load_workflow()
+        triggers = data.get(True, {})  # YAML parses 'on:' as True key
+        for name in ("workflow_run", "pull_request_target", "schedule", "workflow_dispatch"):
+            assert name in triggers, f"auto-merge must have {name} trigger"
+
+    def test_auto_merge_workflow_run_names_byte_exact(self):
+        """workflow_run 监听名与 memory-core 字节级同构（任一改名静默杀死快速路径）"""
+        data = self._load_workflow()
+        wr = data[True]["workflow_run"]
+        assert sorted(wr["workflows"]) == sorted(
+            ["CI", "QA", "Droid Auto Review", "Evolution Governance"]
+        ), f"workflow_run names drifted: {wr['workflows']}"
+        assert wr["types"] == ["completed"]
+
+    def test_auto_merge_schedule_cron_10min(self):
+        """schedule 兜底扫描节奏为 */10（全绿 PR ≤10min 收敛的契约来源）"""
+        data = self._load_workflow()
+        assert data[True]["schedule"] == [{"cron": "*/10 * * * *"}]
+
+    def test_auto_merge_pr_target_types(self):
+        """pull_request_target 类型：opened/synchronize/reopened"""
+        data = self._load_workflow()
+        assert data[True]["pull_request_target"]["types"] == [
+            "opened",
+            "synchronize",
+            "reopened",
+        ]
+
+    def test_auto_merge_dispatch_pr_number_optional(self):
+        """workflow_dispatch 的 pr_number 输入可选（缺省扫描全部 open PR）"""
+        data = self._load_workflow()
+        inputs = data[True]["workflow_dispatch"]["inputs"]
+        assert "pr_number" in inputs
+        assert inputs["pr_number"]["required"] is False
+        assert inputs["pr_number"]["type"] == "string"
+
+    def test_auto_merge_concurrency_group_queueing(self):
+        """INFRA-428：组级排队设计保持（group=auto-merge-pipeline，不取消进行中腿）"""
+        data = self._load_workflow()
+        concurrency = data["concurrency"]
+        assert concurrency["group"] == "auto-merge-pipeline"
+        assert concurrency["cancel-in-progress"] is False
+
+    def test_auto_merge_triage_script_path_exists(self):
+        """workflow 引用的 triage 脚本必须在仓库树中真实存在。
+
+        M2 桩引用旧 scripts/auto_merge_triage.sh（引擎移植后该路径已不存在），
+        首个需要 triage 的真实 PR 会 exit 127。回归守卫：引用必须是
+        src/infra_core/shell/auto_merge_triage.sh 且文件存在。
+        """
+        content = _read(".github/workflows/auto-merge.yml")
+        assert "src/infra_core/shell/auto_merge_triage.sh" in content, (
+            "auto-merge.yml must reference src/infra_core/shell/auto_merge_triage.sh"
+        )
+        assert "scripts/auto_merge_triage.sh" not in content, (
+            "auto-merge.yml must not reference the retired scripts/ path (exit 127)"
+        )
+        assert (REPO_ROOT / "src/infra_core/shell/auto_merge_triage.sh").exists()
+
+    def test_auto_merge_merge_step_pins_shared_action_and_dispatch_token(self):
+        """合并动作钉住 shared-workflows action（M6 前不动）且用 DISPATCH_TOKEN。
+
+        GITHUB_TOKEN 必须绑定 DISPATCH_TOKEN：GitHub 递归防护会抑制
+        GITHUB_TOKEN 产生的 push 事件，导致 release-please push 触发器断链。
+        """
+        content = _read(".github/workflows/auto-merge.yml")
+        assert (
+            "hdot123-org/shared-workflows/auto-merge@5a0fc1b8946a170a12687d8614d56189e1f8dab5"
+            in content
+        )
+        assert "${{ secrets.DISPATCH_TOKEN }}" in content
+
+    def test_auto_merge_jobs_run_on_self_hosted(self):
+        """runner 铁律（2026-08-26）：jobs 一律 [self-hosted, pve-linux]"""
+        data = self._load_workflow()
+        for job_name, job in data["jobs"].items():
+            runs_on = job.get("runs-on", [])
+            assert "self-hosted" in runs_on and "pve-linux" in runs_on, (
+                f"job {job_name} must run on [self-hosted, pve-linux], got {runs_on}"
+            )
