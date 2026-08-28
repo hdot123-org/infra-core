@@ -921,3 +921,20 @@ class TestLinearProjectSync:
         tagged = [c for c in mutations if "lin-own" in c["data"]]
         assert len(tagged) == 2, "本仓新旧两个 tracking issue 都应挂上 project"
         assert all("lin-foreign" not in c["data"] for c in mutations)
+
+
+# ============================================================================
+# 仓库上下文双重防线（2026-08-28，mirror memory PR #1060 / INFRA-597）
+# 自建 runner insteadOf 镜像重写使 gh 无法从 workspace remote 解析 host，
+# tracking issue 创建会静默失败。GITHUB_REPOSITORY（Actions 默认注入）→
+# gh issue create 显式 --repo；未设置（本地调试）→ 保持原命令形态。
+# ============================================================================
+def test_issue_create_uses_repo_context_guard():
+    """gh issue create 必须带 GITHUB_REPOSITORY 条件 --repo 守卫。"""
+    content = get_script_path().read_text()
+    assert "${GITHUB_REPOSITORY:-}" in content, (
+        "branch_cleanup_issue.sh must read GITHUB_REPOSITORY (with :- default)"
+    )
+    assert '--repo "${GITHUB_REPOSITORY}"' in content, (
+        "branch_cleanup_issue.sh must append explicit --repo from GITHUB_REPOSITORY"
+    )
