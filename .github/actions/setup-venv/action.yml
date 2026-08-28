@@ -4,6 +4,24 @@ description: "Create and activate a Python virtual environment for CI jobs"
 runs:
   using: "composite"
   steps:
+    - name: Fast-fail on incomplete checkout
+      shell: bash
+      run: |
+        set -e
+        # 预装环境锁定第 3 层：checkout 残缺（半死 checkout）时立即失败，
+        # 不让下游报迷惑性错误（2026-08-27 runner-02/03 工作区中毒事件）。
+        missing=0
+        for f in .git pyproject.toml .github/actions/setup-venv/action.yml; do
+          if [ ! -e "$f" ]; then
+            echo "::error::仓库关键文件缺失：$f —— checkout 残缺（半死 checkout），请 rerun 本 job 或清理 runner 工作区后重试"
+            missing=1
+          fi
+        done
+        if [ "$missing" -ne 0 ]; then
+          exit 1
+        fi
+        echo "✓ checkout 完整性检查通过（.git / pyproject.toml / setup-venv action.yml）"
+
     - name: Create venv
       shell: bash
       run: |
