@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # 契约：workflow 名（auto-merge workflow_run 依赖）
 CONTRACT_WORKFLOW_NAMES = {
     ".github/workflows/ci.yml": "CI",
+    ".github/workflows/qa.yml": "QA",
     ".github/workflows/evolution-governance.yml": "Evolution Governance",
 }
 
@@ -33,6 +34,10 @@ def _read(rel_path: str) -> str:
 class TestWorkflowNameContract:
     def test_ci_workflow_name(self):
         assert re.search(r"^name:\s*CI\s*$", _read(".github/workflows/ci.yml"), re.MULTILINE)
+
+    def test_qa_workflow_name(self):
+        """QA workflow 名字节级为 'QA'（VAL-GATE-101 家族，与 memory-core 对齐）"""
+        assert re.search(r"^name:\s*QA\s*$", _read(".github/workflows/qa.yml"), re.MULTILINE)
 
     def test_governance_workflow_name(self):
         assert re.search(
@@ -391,3 +396,242 @@ class TestBranchCleanupCompositeContextGuard:
         assert "${{ inputs.branch-age-merged-hours }}" in content
         assert "${{ inputs.branch-age-closed-hours }}" in content
         assert "${{ inputs.branch-age-orphan-hours }}" in content
+
+
+class TestQAWorkflowContract:
+    """QA workflow 结构契约测试（gate-infra-qa-workflow feature）
+
+    验证 infra-core qa.yml 满足 VAL-GATE-101 家族要求：
+    - workflow 名 "QA"（字节级与 memory-core 对齐）
+    - 三触发器（pull_request + schedule + workflow_dispatch）
+    - job 家族：cli-e2e / coverage-audit / security-tests / schema-tests /
+      boundary-security / full-regression / qa-ok
+    - cli-e2e 引用 scripts/cli_smoke_test.sh
+    - qa-ok needs 关系正确（full-regression 不在 needs 中——nightly 红不阻塞）
+    - schedule-only jobs（coverage-audit / full-regression）PR 时 skip
+    """
+
+    def test_qa_workflow_exists(self):
+        """qa.yml 必须存在"""
+        workflow_path = REPO_ROOT / ".github/workflows/qa.yml"
+        assert workflow_path.exists(), "qa.yml must exist"
+
+    def test_qa_workflow_name_byte_exact(self):
+        """workflow 名必须字节级为 'QA'（与 memory-core 对齐，VAL-GATE-101）"""
+        content = _read(".github/workflows/qa.yml")
+        assert re.search(r"^name:\s*QA\s*$", content, re.MULTILINE), (
+            "QA workflow name must be byte-exact 'QA'"
+        )
+
+    def test_qa_triggers(self):
+        """三触发器：pull_request + schedule + workflow_dispatch"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/qa.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        triggers = data.get(True, {})  # YAML parses 'on:' as True key
+        assert "pull_request" in triggers, "qa.yml must have pull_request trigger"
+        assert "schedule" in triggers, "qa.yml must have schedule trigger"
+        assert "workflow_dispatch" in triggers, "qa.yml must have workflow_dispatch trigger"
+
+    def test_qa_required_jobs_exist(self):
+        """QA workflow 必须包含所有必需 job"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/qa.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        jobs = data.get("jobs", {})
+        required_jobs = {
+            "cli-e2e",
+            "coverage-audit",
+            "security-tests",
+            "schema-tests",
+            "boundary-security",
+            "full-regression",
+            "qa-ok",
+        }
+        assert required_jobs.issubset(set(jobs.keys())), (
+            f"QA workflow missing required jobs: {required_jobs - set(jobs.keys())}"
+        )
+
+    def test_cli_e2e_runs_smoke_script(self):
+        """cli-e2e job 必须引用 scripts/cli_smoke_test.sh"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/qa.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        cli_e2e = data["jobs"]["cli-e2e"]
+        steps = cli_e2e.get("steps", [])
+        # 检查是否有任何步骤引用 cli_smoke_test.sh
+        found = False
+        for step in steps:
+            run_cmd = step.get("run", "")
+            if "cli_smoke_test.sh" in run_cmd:
+                found = True
+                break
+        assert found, "cli-e2e job must reference scripts/cli_smoke_test.sh"
+
+    def test_qa_ok_needs_excludes_full_regression(self):
+        """qa-ok needs 不包含 full-regression（nightly 红不阻塞 PR 合并）"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/qa.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        qa_ok = data["jobs"]["qa-ok"]
+        needs = qa_ok.get("needs", [])
+        assert "full-regression" not in needs, (
+            "qa-ok must NOT include full-regression in needs "
+            "(nightly job can be red without blocking PR merge)"
+        )
+
+    def test_qa_ok_needs_includes_required_jobs(self):
+        """qa-ok needs 必须包含所有 PR 时运行的 job"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/qa.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        qa_ok = data["jobs"]["qa-ok"]
+        needs = qa_ok.get("needs", [])
+        required_in_needs = {
+            "cli-e2e",
+            "coverage-audit",
+            "security-tests",
+            "schema-tests",
+            "boundary-security",
+        }
+        assert required_in_needs.issubset(set(needs)), (
+            f"qa-ok needs missing required jobs: {required_in_needs - set(needs)}"
+        )
+
+    def test_schedule_only_jobs_skip_on_pr(self):
+        """schedule-only jobs（coverage-audit / full-regression）PR 时必须 skip"""
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/qa.yml"
+        data = yaml.safe_load(workflow_path.read_text())
+        for job_name in ["coverage-audit", "full-regression"]:
+            job = data["jobs"][job_name]
+            if_expr = job.get("if", "")
+            # 必须包含事件门（schedule 或 workflow_dispatch）
+            assert "schedule" in if_expr or "workflow_dispatch" in if_expr, (
+                f"{job_name} must skip on PR events (schedule/dispatch only)"
+            )
+
+    def test_qa_ok_aggregation_logic(self):
+        """qa-ok 聚合逻辑必须检查所有 needs job 的结果"""
+        content = _read(".github/workflows/qa.yml")
+        # 检查 qa-ok job 的 run 步骤是否检查所有 needs job
+        qa_ok_section = content.split("qa-ok:")[1] if "qa-ok:" in content else ""
+        assert "needs.cli-e2e.result" in qa_ok_section
+        assert "needs.coverage-audit.result" in qa_ok_section
+        assert "needs.security-tests.result" in qa_ok_section
+        assert "needs.schema-tests.result" in qa_ok_section
+        assert "needs.boundary-security.result" in qa_ok_section
+
+
+class TestAutoMergeTriggerContract:
+    """auto-merge workflow 触发器契约测试（gate-infra-auto-merge-enable feature）
+
+    验证 infra-core 自仓 auto-merge.yml 恢复 memory-core 同构触发面：
+    - workflow 名 "Auto Merge"（字节级）
+    - 四触发器：workflow_run(CI/QA/Droid Auto Review/Evolution Governance completed)
+      + pull_request_target(opened/synchronize/reopened) + schedule */10 + workflow_dispatch
+    - INFRA-428 concurrency 组级排队：group=auto-merge-pipeline, cancel-in-progress=false
+    - triage 脚本路径必须真实存在（M2 桩引用旧 scripts/ 路径的 exit-127 回归守卫）
+    - 合并动作钉住 shared-workflows action + DISPATCH_TOKEN（GITHUB_TOKEN 递归防护铁律）
+    - runner 铁律：jobs 一律 [self-hosted, pve-linux]
+    """
+
+    def _load_workflow(self) -> dict:
+        import yaml
+
+        workflow_path = REPO_ROOT / ".github/workflows/auto-merge.yml"
+        return yaml.safe_load(workflow_path.read_text())
+
+    def test_auto_merge_workflow_name_byte_exact(self):
+        """workflow 名字节级为 'Auto Merge'"""
+        content = _read(".github/workflows/auto-merge.yml")
+        assert re.search(r"^name:\s*Auto Merge\s*$", content, re.MULTILINE)
+
+    def test_auto_merge_four_triggers(self):
+        """四触发器：workflow_run + pull_request_target + schedule + workflow_dispatch"""
+        data = self._load_workflow()
+        triggers = data.get(True, {})  # YAML parses 'on:' as True key
+        for name in ("workflow_run", "pull_request_target", "schedule", "workflow_dispatch"):
+            assert name in triggers, f"auto-merge must have {name} trigger"
+
+    def test_auto_merge_workflow_run_names_byte_exact(self):
+        """workflow_run 监听名与 memory-core 字节级同构（任一改名静默杀死快速路径）"""
+        data = self._load_workflow()
+        wr = data[True]["workflow_run"]
+        assert sorted(wr["workflows"]) == sorted(
+            ["CI", "QA", "Droid Auto Review", "Evolution Governance"]
+        ), f"workflow_run names drifted: {wr['workflows']}"
+        assert wr["types"] == ["completed"]
+
+    def test_auto_merge_schedule_cron_10min(self):
+        """schedule 兜底扫描节奏为 */10（全绿 PR ≤10min 收敛的契约来源）"""
+        data = self._load_workflow()
+        assert data[True]["schedule"] == [{"cron": "*/10 * * * *"}]
+
+    def test_auto_merge_pr_target_types(self):
+        """pull_request_target 类型：opened/synchronize/reopened"""
+        data = self._load_workflow()
+        assert data[True]["pull_request_target"]["types"] == [
+            "opened",
+            "synchronize",
+            "reopened",
+        ]
+
+    def test_auto_merge_dispatch_pr_number_optional(self):
+        """workflow_dispatch 的 pr_number 输入可选（缺省扫描全部 open PR）"""
+        data = self._load_workflow()
+        inputs = data[True]["workflow_dispatch"]["inputs"]
+        assert "pr_number" in inputs
+        assert inputs["pr_number"]["required"] is False
+        assert inputs["pr_number"]["type"] == "string"
+
+    def test_auto_merge_concurrency_group_queueing(self):
+        """INFRA-428：组级排队设计保持（group=auto-merge-pipeline，不取消进行中腿）"""
+        data = self._load_workflow()
+        concurrency = data["concurrency"]
+        assert concurrency["group"] == "auto-merge-pipeline"
+        assert concurrency["cancel-in-progress"] is False
+
+    def test_auto_merge_triage_script_path_exists(self):
+        """workflow 引用的 triage 脚本必须在仓库树中真实存在。
+
+        M2 桩引用旧 scripts/auto_merge_triage.sh（引擎移植后该路径已不存在），
+        首个需要 triage 的真实 PR 会 exit 127。回归守卫：引用必须是
+        src/infra_core/shell/auto_merge_triage.sh 且文件存在。
+        """
+        content = _read(".github/workflows/auto-merge.yml")
+        assert "src/infra_core/shell/auto_merge_triage.sh" in content, (
+            "auto-merge.yml must reference src/infra_core/shell/auto_merge_triage.sh"
+        )
+        assert "scripts/auto_merge_triage.sh" not in content, (
+            "auto-merge.yml must not reference the retired scripts/ path (exit 127)"
+        )
+        assert (REPO_ROOT / "src/infra_core/shell/auto_merge_triage.sh").exists()
+
+    def test_auto_merge_merge_step_pins_shared_action_and_dispatch_token(self):
+        """合并动作钉住 shared-workflows action（M6 前不动）且用 DISPATCH_TOKEN。
+
+        GITHUB_TOKEN 必须绑定 DISPATCH_TOKEN：GitHub 递归防护会抑制
+        GITHUB_TOKEN 产生的 push 事件，导致 release-please push 触发器断链。
+        """
+        content = _read(".github/workflows/auto-merge.yml")
+        assert (
+            "hdot123-org/shared-workflows/auto-merge@5a0fc1b8946a170a12687d8614d56189e1f8dab5"
+            in content
+        )
+        assert "${{ secrets.DISPATCH_TOKEN }}" in content
+
+    def test_auto_merge_jobs_run_on_self_hosted(self):
+        """runner 铁律（2026-08-26）：jobs 一律 [self-hosted, pve-linux]"""
+        data = self._load_workflow()
+        for job_name, job in data["jobs"].items():
+            runs_on = job.get("runs-on", [])
+            assert "self-hosted" in runs_on and "pve-linux" in runs_on, (
+                f"job {job_name} must run on [self-hosted, pve-linux], got {runs_on}"
+            )

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "infra-core"
-version = "0.2.0"
+version = "0.3.0"
 description = "组织级演进引擎：自进化/审计/门禁体系的共享基础设施"
 readme = "README.md"
 license = {text = "MIT"}
@@ -67,6 +67,9 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+exclude = [
+    "scripts/**/*.sh",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
@@ -90,6 +93,27 @@ warn_unused_configs = true
 module = [
     "evolution_adapters",
     "evolution_utils",
+    "evolution_heartbeat",
+    "evolution_scanner",
+    "evolution_self_audit",
+    "anchor_gate",
+    "extract_anchor",
+    "guard_cli",
+]
+ignore_missing_imports = true
+
+# Allow scripts/ to import from infra_core.engine without strict type checking
+# (engine modules are transplanted from memory-core without full type annotations)
+[[tool.mypy.overrides]]
+module = [
+    "infra_core.engine.*",
+]
+follow_imports = "skip"
+
+# Allow untyped imports from infra_core.engine (installed package without stubs)
+[[tool.mypy.overrides]]
+module = [
+    "infra_core.engine.droid_review.*",
 ]
 ignore_missing_imports = true
 
@@ -116,7 +140,7 @@ DEP001 = [
 DEP003 = ["packaging", "tomli", "infra_core"]
 
 # Coverage ramp-up plan (orchestrator ruling 2026-08-27):
-# Current baseline: 46% (step2-wiring snapshot)
+# Current level: 73% (step2-wiring PR #21 measured)
 # Threshold: 45% (enforced by --cov-fail-under=45 in CI)
 # Ramp-up: +5% per release
 # Target: 80% (sustainable quality floor)

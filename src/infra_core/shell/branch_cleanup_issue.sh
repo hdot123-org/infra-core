@@ -19,6 +19,16 @@
 #       - removed protected items -> comment (+ auto-close when empty)
 #   * At most ONE open tracking issue exists at any time; pre-INFRA-385
 #     duplicate open issues are closed with a pointer to the active tracker.
+#   * After create/update/close, sync the Linear issue to the correct project
+#     (VAL-GATE-118, INFRA-586): Linear GitHub integration does not sync the
+#     project field, so we do it explicitly via LINEAR_API_KEY + LINEAR_PROJECT_ID.
+#
+# Environment variables for Linear project sync (VAL-GATE-118):
+#   LINEAR_API_KEY        — Linear personal API key (secret)
+#   LINEAR_PROJECT_ID     — Linear project UUID to link the issue to (from
+#                           workflow vars: LINEAR_PROJECT_INFRA_CORE_ID or
+#                           LINEAR_PROJECT_MEMORY_CORE_ID)
+#   Both are optional; when absent the sync step is skipped silently.
 #
 # Usage (from the branch-cleanup workflow):
 #   bash scripts/branch_cleanup_issue.sh \
@@ -174,6 +184,75 @@ $MARKER"
 TRACKER_NUMBER=$(issue_number_of "$TRACKER_URL")
 
 # ---------------------------------------------------------------------------
+# Linear project sync (VAL-GATE-118, INFRA-586)
+# The Linear GitHub integration does not sync the project field, so we must
+# explicitly link the GitHub issue to the correct Linear project after
+# create/update/close. This is idempotent and fails silently if credentials
+# are missing or the sync fails (notification failures must not fail workflow).
+# ---------------------------------------------------------------------------
+sync_linear_project() {
+  # Skip if credentials or project ID not provided
+  if [[ -z "${LINEAR_API_KEY:-}" || -z "${LINEAR_PROJECT_ID:-}" ]]; then
+    echo "linear_sync=skipped (missing LINEAR_API_KEY or LINEAR_PROJECT_ID)"
+    return 0
+  fi
+
+  # Skip if no tracker issue exists (nothing to sync)
+  if [[ -z "$TRACKER_URL" ]]; then
+    echo "linear_sync=skipped (no tracker issue)"
+    return 0
+  fi
+
+  echo "Attempting to sync Linear project for issue $TRACKER_URL..."
+
+  # Extract the GitHub issue URL and search for matching Linear issue
+  # The Linear-GitHub integration creates a Linear issue with the same title
+  # We'll search by the issue title and link it to the project
+
+  ISSUE_TITLE="Branch cleanup tracking"
+
+  # Query Linear for tracking issues scoped to THIS repository. The
+  # Linear-GitHub integration mirrors the GitHub issue body into the Linear
+  # description, which embeds the per-repo workflow run URL
+  # (github.com/<owner>/<repo>/actions/runs/<id>). Title alone is ambiguous
+  # across repos (memory and infra-core both track "Branch cleanup tracking"
+  # in the same Linear workspace), so we filter on GH_REPO_KEY client-side;
+  # otherwise one repo's run would tag the other repo's Linear issue.
+  LINEAR_MATCHES=$(curl -s -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: ${LINEAR_API_KEY}" \
+    -d "{\"query\": \"query { issues(filter: { title: { eq: \\\"${ISSUE_TITLE}\\\" } }, first: 50) { nodes { id description } } }\"}" \
+    https://api.linear.app/graphql 2>/dev/null)
+
+  LINEAR_ISSUE_IDS=$(echo "$LINEAR_MATCHES" | jq -r --arg repo "github.com/${GH_REPO_KEY}/" \
+    '[.data.issues.nodes[]? | select((.description // "") | contains($repo)) | .id] | join("\n")')
+
+  if [[ -z "$LINEAR_ISSUE_IDS" ]]; then
+    echo "linear_sync=skipped (Linear issue not found or not yet synced)"
+    return 0
+  fi
+
+  # Sync every same-repo match (current + historical trackers); the
+  # issueAddProjectRelation mutation is idempotent.
+  while IFS= read -r LINEAR_ISSUE_ID; do
+    [[ -z "$LINEAR_ISSUE_ID" ]] && continue
+
+    MUTATION_RESULT=$(curl -s -X POST \
+      -H "Content-Type: application/json" \
+      -H "Authorization: ${LINEAR_API_KEY}" \
+      -d "{\"query\": \"mutation { issueAddProjectRelation(input: { issueId: \\\"${LINEAR_ISSUE_ID}\\\", projectId: \\\"${LINEAR_PROJECT_ID}\\\" }) { success } }\"}" \
+      https://api.linear.app/graphql 2>/dev/null)
+
+    if echo "$MUTATION_RESULT" | jq -e '.data.issueAddProjectRelation.success' >/dev/null; then
+      echo "linear_sync=success (issue=${LINEAR_ISSUE_ID} project=${LINEAR_PROJECT_ID})"
+    else
+      # Fail silently - sync failures must not break the workflow
+      echo "linear_sync=failed (mutation unsuccessful)"
+    fi
+  done <<< "$LINEAR_ISSUE_IDS"
+}
+
+# ---------------------------------------------------------------------------
 # Nothing actionable: close the tracking issue as resolved, if any.
 # ---------------------------------------------------------------------------
 if [[ "$DELETED_COUNT" -eq 0 && "$PROTECTED_COUNT" -eq 0 ]]; then
@@ -184,6 +263,7 @@ if [[ "$DELETED_COUNT" -eq 0 && "$PROTECTED_COUNT" -eq 0 ]]; then
 
 $MARKER"
     echo "issue_action=closed"
+    sync_linear_project
   else
     echo "No actionable branches and no open tracking issue. Nothing to do."
     echo "issue_action=none"
@@ -239,6 +319,8 @@ $REPORT
     --body "$BODY" \
     --label "$LABELS" >/dev/null
   echo "issue_action=created"
+  # Sync to Linear project (VAL-GATE-118)
+  sync_linear_project
   exit 0
 fi
 
@@ -301,6 +383,8 @@ gh issue edit "$TRACKER_NUMBER" --body "$NEW_BODY" >/dev/null 2>&1 || true
 # Deletions are also reportable state changes; comment whenever we got here.
 if gh issue comment "$TRACKER_NUMBER" --body "$COMMENT_BODY" >/dev/null 2>&1; then
   echo "issue_action=updated"
+  # Sync to Linear project (VAL-GATE-118)
+  sync_linear_project
 else
   echo "issue_action=update-failed"
 fi
