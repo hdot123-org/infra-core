@@ -133,6 +133,23 @@ jobs:
       # under .github/actions/setup-venv"），且每次 auto-merge 触发都重新污染。
       # triage 脚本经下方 heredoc 内联（与 src/ 原件逐字节同步，契约测试锁定），
       # 对工作区零写入。本文件所有 job 均不得 checkout（契约测试锁定）。
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 自愈向量（2026-08-28 污染事故）：本 job 每 sweep 在三 runner 上轮转，
+          # 借此检测并清除工作区 sparse 残留——checkout 的 sparse-checkout
+          # disable 实证无法恢复被裁剪的工作树（仍缺 setup-venv/action.yml）
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
       - name: Triage PR mergeable state
         id: triage
         env:
