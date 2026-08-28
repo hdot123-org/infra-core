@@ -381,6 +381,9 @@ jobs:
           fi
           echo "✅ All required jobs passed"
 
+      - name: Setup jq
+        uses: ./.github/actions/ensure-jq
+
       - name: Checkout repository
         uses: actions/checkout@v5
 
@@ -398,3 +401,17 @@ jobs:
 
           # Use the standalone zero-red check script
           bash scripts/check_zero_red.sh "${{ github.repository }}" "$COMMIT_SHA"
+
+      - name: Check droid-review status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Poll for droid-review check run (separate workflow, not a ci.yml job).
+          # droid-review runs as a parallel workflow (Droid Auto Review) and produces
+          # its own check run. ci-ok must wait for it to complete before declaring
+          # the full CI suite green.
+          bash scripts/check_droid_review.sh \
+            "${{ github.event_name }}" \
+            "${{ github.repository }}" \
+            "${{ github.event.pull_request.head.sha }}" \
+            "$GH_TOKEN"
