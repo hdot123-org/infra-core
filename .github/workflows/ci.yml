@@ -313,6 +313,10 @@ jobs:
         run: pytest -q -m business_policy -n 4 --no-cov
 
   # ─── ci-ok: aggregation gate (naming contract: DO NOT RENAME) ───
+  # Zero-red enforcement: scans ALL check-runs via GitHub API and fails if any
+  # has a non-success conclusion (including advisory jobs with continue-on-error).
+  # This makes ci-ok the single source of truth for merge eligibility.
+  # User mandate (2026-08-28): "写死不允许红色合并，一个都不允许"
 
   ci-ok:
     name: ci-ok
@@ -378,14 +382,32 @@ jobs:
           [[ "${{ needs.repo-consistency.result }}" == "success" ]] || { echo "FAIL: repo-consistency"; FAILED=1; }
           [[ "${{ needs.business-policy-tests.result }}" == "success" ]] || { echo "FAIL: business-policy-tests"; FAILED=1; }
 
-          # Advisory (non-blocking, for visibility only)
-          echo "Advisory jobs (non-blocking):"
-          echo "  advisory-dependency-security-scan: ${{ needs.advisory-dependency-security-scan.result }}"
-          echo "  advisory-deptry: ${{ needs.advisory-deptry.result }}"
-          echo "  advisory-telemetry-audit: ${{ needs.advisory-telemetry-audit.result }}"
+          # Advisory jobs (zero-red enforcement: all checks must pass)
+          echo "Checking advisory jobs (zero-red policy)..."
+          [[ "${{ needs.advisory-dependency-security-scan.result }}" == "success" ]] || { echo "FAIL: advisory-dependency-security-scan"; FAILED=1; }
+          [[ "${{ needs.advisory-deptry.result }}" == "success" ]] || { echo "FAIL: advisory-deptry"; FAILED=1; }
+          [[ "${{ needs.advisory-telemetry-audit.result }}" == "success" ]] || { echo "FAIL: advisory-telemetry-audit"; FAILED=1; }
 
           if [[ "$FAILED" -eq 1 ]]; then
             echo "❌ One or more required jobs failed"
             exit 1
           fi
           echo "✅ All required jobs passed"
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Zero-red aggregation (scan ALL check-runs via GitHub API)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Zero-red enforcement: fetch all check-runs for this commit and fail if any
+          # has a conclusion other than success/skipped/neutral. This catches advisory
+          # jobs with continue-on-error that would otherwise pass through.
+          # User mandate (2026-08-28): "写死不允许红色合并，一个都不允许"
+
+          COMMIT_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          echo "Scanning all check-runs for commit: $COMMIT_SHA"
+
+          # Use the standalone zero-red check script
+          bash scripts/check_zero_red.sh "${{ github.repository }}" "$COMMIT_SHA"

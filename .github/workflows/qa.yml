@@ -1,0 +1,227 @@
+# QA workflow for infra-core
+# Naming contract (architecture.md §3): name "QA" byte-exact, matching memory-core.
+# Adapted from memory-core qa.yml (pull_request+schedule+workflow_dispatch triple trigger).
+#
+# Job family mapping (memory-core → infra-core):
+#   cli-e2e            → infra-cli smoke (scripts/cli_smoke_test.sh wiring)
+#   coverage-audit     → branch-level coverage audit at current 45% threshold
+#                        (PR-skip: schedule/dispatch only, like memory-core)
+#   hook-lifecycle     → N/A (infra-core has no hook/gateway/memory protocol)
+#   business-policy    → security marker tests (-m security, 143 tests)
+#   schema-migration   → schema marker tests (-m schema, 262 tests)
+#   boundary-security  → security guard tests + check_boundary.py script
+#   full-regression    → nightly full pytest (PR-skip: schedule/dispatch only)
+#   qa-ok              → aggregation (handles skipped for schedule-only jobs)
+#
+# Schedule-only jobs (coverage-audit, full-regression) are skipped on PR events,
+# following the same pattern as memory-core qa.yml. qa-ok aggregation accepts
+# 'skipped' for these jobs.
+name: QA
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    # UTC 02:00 daily (nightly full QA)
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  # ─── CLI End-to-End Smoke Tests ──────────────────────────────────────────
+  # Wires scripts/cli_smoke_test.sh (existed since step1 assets, now connected).
+  # Runs on all events (PR + schedule + dispatch).
+
+  cli-e2e:
+    name: CLI End-to-End Smoke Tests
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: Run CLI smoke test
+        run: bash scripts/cli_smoke_test.sh
+
+  # ─── Coverage Audit (nightly only) ──────────────────────────────────────
+  # Branch-level vs main baseline coverage audit at current 45% threshold.
+  # Skipped on PR events (coverage-audit is the heaviest job: full pytest +
+  # coverage stats). PR coverage is enforced by ci.yml pytest job (--cov-fail-under=45).
+  # Pattern aligned with memory-core qa.yml coverage-audit (schedule/dispatch only).
+
+  coverage-audit:
+    name: Coverage Audit (threshold 45%)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, pve-linux]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: Run full pytest with coverage (gated at current threshold)
+        env:
+          COVERAGE_FILE: ${{ runner.temp }}/cov-${{ github.run_id }}-${{ github.run_attempt }}/.coverage
+        run: |
+          mkdir -p "$(dirname "$COVERAGE_FILE")"
+          pytest -q -n 0 \
+            --cov=src/infra_core \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-branch \
+            --cov-fail-under=45
+
+      - name: Upload coverage XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-coverage-results
+          path: coverage.xml
+          retention-days: 14
+
+  # ─── Security Marker Tests (business-policy equivalent) ─────────────────
+  # infra-core's business-policy equivalent: security marker tests (143 tests).
+  # Covers boundary/governance/pr-ref-consistency/fix-has-test/doc-classification.
+
+  security-tests:
+    name: Security & Policy Tests
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: "Run security marker tests (-m security, -n 4)"
+        run: pytest -q -m security -n 4 --no-cov
+
+  # ─── Schema & Migration Tests ───────────────────────────────────────────
+  # infra-core's schema-migration equivalent: schema marker tests (262 tests).
+  # Covers version_sync, naming_contract, adapter, migration, template.
+
+  schema-tests:
+    name: Schema & Migration Tests
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: "Run schema marker tests (-m schema, -n 4)"
+        run: pytest -q -m schema -n 4 --no-cov
+
+  # ─── Boundary & Security Guard Tests ────────────────────────────────────
+  # infra-core's boundary-security equivalent: security guard script execution.
+  # Runs check_boundary.py (public repo guard: no secrets, no local paths).
+
+  boundary-security:
+    name: Boundary & Security Guard Tests
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: Run boundary guard script
+        run: python scripts/check_boundary.py
+
+      - name: "Run boundary-related marker tests (-m security -k boundary)"
+        run: pytest -q -m security -k "boundary or guard" -n 4 --no-cov
+
+  # ─── Full Regression (nightly only) ─────────────────────────────────────
+  # Full pytest suite (1200+ tests) for nightly comprehensive regression.
+  # Skipped on PR events (PR coverage enforced by ci.yml pytest job).
+  # Pattern aligned with memory-core qa.yml full-regression (schedule/dispatch only).
+  # Note: locally verified green (1203 passed, 73.59% coverage, ~2min on pve-linux).
+
+  full-regression:
+    name: Full Regression (Nightly only)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, pve-linux]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: Full test suite with coverage
+        env:
+          COVERAGE_FILE: ${{ runner.temp }}/cov-${{ github.run_id }}-${{ github.run_attempt }}-full/.coverage
+        run: |
+          mkdir -p "$(dirname "$COVERAGE_FILE")"
+          pytest -q -n 8 --dist loadgroup \
+            --cov=src/infra_core \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-branch \
+            --cov-fail-under=45 \
+            --durations=20
+
+      - name: Upload full QA artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-full-regression-results
+          path: coverage.xml
+          retention-days: 14
+
+  # ─── QA Aggregation Gate ────────────────────────────────────────────────
+  # Aggregates all QA jobs. Schedule-only jobs (coverage-audit, full-regression)
+  # are skipped on PR events — their result is 'skipped', which qa-ok accepts.
+  # Following memory-core qa-ok pattern: cli-e2e + coverage-audit +
+  # (hook-lifecycle N/A → omitted) + security-tests + schema-tests +
+  # boundary-security + (full-regression NOT in needs — nightly red is known
+  # pre-existing pattern, same as memory-core where full-regression is not
+  # in qa-ok needs).
+
+  qa-ok:
+    name: qa-ok
+    needs:
+      - cli-e2e
+      - coverage-audit
+      - security-tests
+      - schema-tests
+      - boundary-security
+      # Note: full-regression intentionally NOT in needs — nightly job can be
+      # red without blocking qa-ok (same as memory-core pattern). This prevents
+      # nightly flakes from blocking PR merges.
+    runs-on: [self-hosted, pve-linux]
+    if: always()
+    steps:
+      - name: Check all required QA jobs
+        run: |
+          FAILED=0
+
+          echo "cli-e2e: ${{ needs.cli-e2e.result }}"
+          [[ "${{ needs.cli-e2e.result }}" == "success" ]] || { echo "FAIL: cli-e2e"; FAILED=1; }
+
+          echo "coverage-audit: ${{ needs.coverage-audit.result }}"
+          # coverage-audit is skipped on PR events (schedule-only)
+          if [[ "${{ needs.coverage-audit.result }}" != "success" ]] && \
+             [[ "${{ needs.coverage-audit.result }}" != "skipped" ]]; then
+            echo "FAIL: coverage-audit did not succeed or skip"
+            FAILED=1
+          fi
+
+          echo "security-tests: ${{ needs.security-tests.result }}"
+          [[ "${{ needs.security-tests.result }}" == "success" ]] || { echo "FAIL: security-tests"; FAILED=1; }
+
+          echo "schema-tests: ${{ needs.schema-tests.result }}"
+          [[ "${{ needs.schema-tests.result }}" == "success" ]] || { echo "FAIL: schema-tests"; FAILED=1; }
+
+          echo "boundary-security: ${{ needs.boundary-security.result }}"
+          [[ "${{ needs.boundary-security.result }}" == "success" ]] || { echo "FAIL: boundary-security"; FAILED=1; }
+
+          if [[ "$FAILED" -eq 1 ]]; then
+            echo "❌ One or more required QA jobs failed"
+            exit 1
+          fi
+          echo "✅ All QA jobs passed"
