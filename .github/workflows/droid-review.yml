@@ -312,6 +312,14 @@ jobs:
           "$HOME/.local/bin/droid" --version
 
       - name: Write BYOM settings file
+        # LLM 链路：ts 内网直达 Kong（tailscale serve, tailnet only, LE 证书）。
+        # 原 https://ai.exa.edu.kg/v1 需经 CF → node-22(东京) → 隧道回 node-01，
+        # 4 段网络且暴露公网端点；github 可达性已由 CF Worker 反代解决后，
+        # 境外跳板失去必要性（Bailian 是国内服务，杭州 Kong 出网即最短路径）。
+        # 前置依赖：runner 机 /etc/hosts 有 node1.tail5e888.ts.net 静态条目
+        # （runner 的 tailscale accept-dns=false，MagicDNS 不可用）。
+        # apiKey 字段仅为 provider 格式占位——内网 Kong 无认证（request-transformer
+        # 会注入真实上游 key），且 heredoc 为单引号模式，变量从不展开。
         run: |
           mkdir -p ~/.factory
           cat > ~/.factory/settings.json << 'SETTINGS_EOF'
@@ -320,7 +328,7 @@ jobs:
               {
                 "model": "qwen3.7-plus",
                 "displayName": "Bailian Qwen 3.7 Plus",
-                "baseUrl": "https://ai.exa.edu.kg/v1",
+                "baseUrl": "https://node1.tail5e888.ts.net/v1",
                 "apiKey": "${NVIDIA_KONG_PROXY_KEY}",
                 "provider": "generic-chat-completion-api",
                 "maxOutputTokens": 65536,
