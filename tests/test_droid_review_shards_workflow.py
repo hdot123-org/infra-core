@@ -161,7 +161,8 @@ class TestEngineSelfContainment:
             assert engine_steps[0]["with"].get("ref") == "${{ inputs.engine_ref }}"
 
     def test_review_shard_dual_checkout_of_consumer_repo(self, shards_data):
-        """安全模型保持：BASE checkout（脚本/prompt）+ HEAD checkout（head-src/）"""
+        """安全模型保持：BASE checkout（脚本/prompt）+ HEAD checkout（head-src/）
+        （VAL-SHARD-006，自 memory-core test_07 迁入）"""
         review_job = shards_data["jobs"]["review-shard"]
         head_checkout = [
             s
@@ -170,6 +171,59 @@ class TestEngineSelfContainment:
             and s.get("with", {}).get("path") == "head-src"
         ]
         assert head_checkout, "review-shard 必须保留 HEAD checkout（head-src/）"
+
+    def test_shard_env_reads_setup_outputs(self, shards_data):
+        """VAL-SHARD（自 memory-core test_10c 迁入）：shard_env 必须从
+        needs.setup.outputs 读 sha（workflow_dispatch 触发时
+        github.event.pull_request.*.sha 为空，读 event 会让 shard 永远进不了流水线）。"""
+        review_job = shards_data["jobs"]["review-shard"]
+        shard_env = next((s for s in review_job["steps"] if s.get("id") == "shard_env"), None)
+        assert shard_env is not None, "review-shard must have a shard_env step"
+        env = shard_env.get("env", {})
+        assert "needs.setup.outputs" in str(env.get("BASE_SHA", ""))
+        assert "needs.setup.outputs" in str(env.get("HEAD_SHA", ""))
+        assert "github.event.pull_request" not in str(env.get("BASE_SHA", ""))
+        assert "github.event.pull_request" not in str(env.get("HEAD_SHA", ""))
+
+    def test_no_depth_1_in_base_fetch(self, shards_data):
+        """VAL-SHARD-002（自 memory-core test_10d 迁入）：base SHA fetch 禁止
+        --depth=1（shallow graft 阻断 merge-base 历史遍历，base 前进过的 PR 全部 fail-close）。"""
+        review_job = shards_data["jobs"]["review-shard"]
+        shard_env = next((s for s in review_job["steps"] if s.get("id") == "shard_env"), None)
+        run_block = shard_env["run"]
+        assert 'git fetch origin "$BASE_SHA"' in run_block
+        # 只检查实际 git fetch 命令行，忽略注释行（run_block 含「禁止 --depth=1」
+        # 提示注释，全文匹配会误报命中注释文本）
+        fetch_lines = [
+            line
+            for line in (raw.strip() for raw in run_block.splitlines())
+            if line.startswith("git fetch")
+        ]
+        assert fetch_lines, "run_block 必须包含实际的 git fetch 命令行"
+        for line in fetch_lines:
+            assert "--depth=1" not in line, f"git fetch 命令行禁止 --depth=1: {line}"
+
+    def test_artifact_includes_debug_transcripts_and_error_logs(self, shards_data):
+        """VAL-SHARD-012（自 memory-core test_10e 迁入）：debug artifact 必须含
+        session transcripts 与执行错误日志（watchdog quota-sweep 与失败诊断依赖）。"""
+        review_job = shards_data["jobs"]["review-shard"]
+        upload_step = next(
+            (
+                s
+                for s in review_job["steps"]
+                if s.get("uses", "").startswith("actions/upload-artifact")
+            ),
+            None,
+        )
+        paths = upload_step["with"]["path"]
+        for fragment in (
+            "findings-shard-*.json",
+            "shard-*.diff",
+            "shard-exec-error.log",
+            "droid-exec-stdout.json",
+            ".factory/sessions/**",
+        ):
+            assert fragment in paths, f"artifact path 缺少 {fragment}"
 
     def test_run_shard_schema_validation_is_self_locating(self):
         """引擎 run_shard.sh 的 validate_findings 导入从脚本自身目录解析。
