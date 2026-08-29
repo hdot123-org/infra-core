@@ -11,7 +11,7 @@
 # Step2 wiring: structured jobs (guards / test groups / domain mypy / advisory)
 # 2026-08-29 容量收敛（runner-capacity-one-shot）：19 job → 10 job——
 #   lint-bundle（ruff/shellcheck/actionlint/repo-consistency 四合一）、
-#   type-bundle（mypy×3）、advisory-bundle（advisory×3）、
+#   type-bundle（mypy×2）、advisory-bundle（advisory×3）、
 #   test-groups（schema/security/business_policy 三段顺序跑），
 #   pytest / integration-tests / e2e-tests / guards / health-check / ci-ok
 #   六个独立保持。branch protection required check 仅 ci-ok（聚合零红已
@@ -189,9 +189,6 @@ jobs:
 
       - name: Setup venv (per-run isolation)
         uses: ./.github/actions/setup-venv
-
-      - name: Run mypy
-        run: mypy --strict src/infra_core
 
       - name: "Enforce mypy --strict (src/)"
         run: mypy --strict src/infra_core

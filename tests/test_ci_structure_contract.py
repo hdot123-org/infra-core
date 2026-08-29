@@ -12,7 +12,7 @@ runner 标签漂移、concurrency 语义漂移。
 
 2026-08-29 容量收敛（runner-capacity-one-shot）：19 job → 10 job——
 lint-bundle（ruff/shellcheck/actionlint/repo-consistency）、type-bundle
-（mypy×3）、advisory-bundle（advisory×3）、test-groups（schema/security/
+（mypy×2）、advisory-bundle（advisory×3）、test-groups（schema/security/
 business_policy 三段顺序）；pytest / integration-tests / e2e-tests /
 guards / health-check / ci-ok 六个独立保持。
 """
@@ -199,10 +199,11 @@ class TestBundles:
         assert "shellcheck -x" in script
         assert "repo_health_check.sh --ci" in script
 
-    def test_type_bundle_mypy_x3(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
-        """type-bundle 必须 mypy×3：基础 src 两份语义 + scripts 分域。"""
+    def test_type_bundle_mypy_x2(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """type-bundle 必须 mypy×2：src 与 scripts 分域各跑一次
+        （#61 bundle 化遗留的 Run mypy 重复步骤已去重，src 域禁止双跑）。"""
         script = _job_run_script(ci_jobs, "type-bundle")
-        assert script.count("mypy --strict src/infra_core") == 2
+        assert script.count("mypy --strict src/infra_core") == 1
         assert "mypy --strict scripts/" in script
 
     def test_advisory_bundle_three_in_one(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
