@@ -1,0 +1,87 @@
+name: 'Droid Review Aggregate'
+description: >-
+  Aggregate droid-review shard findings and publish to the PR.
+  必须在 caller 仓库的本地 `droid-review` job 内运行（composite 不改 check 名），
+  这是 check 名 `droid-review` 精确契约的承载体——绝不改为 reusable workflow 调用
+  （那会产生 `droid-review / <inner>` 嵌套 check 名，杀死 check_droid_review.sh /
+  ci-ok / branch protection 的精确名匹配）。
+
+inputs:
+  github-token:
+    description: 'GitHub token for PR comments（composite 内 secrets context 不可用，由 caller 显式传入）'
+    required: true
+  pr-number:
+    description: 'PR number（来自 shards call job 输出）'
+    required: true
+  head-sha:
+    description: 'PR head SHA（inline comment 的 commit_id）'
+    required: true
+  docs-only:
+    description: "'true' 当 PR 只改 *.md（跳过发布，check 仍 success）"
+    required: true
+  shards:
+    description: '分片计划 JSON 数组或空（[] / 空 = 无分片，跳过发布）'
+    required: true
+  shards-result:
+    description: "shards call job 的 needs 结果（success/failure/...；非 success/skipped → fail-closed）"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Check shard results
+      id: check_results
+      shell: bash
+      env:
+        DOCS_ONLY: ${{ inputs.docs-only }}
+        SHARDS: ${{ inputs.shards }}
+        SHARDS_RESULT: ${{ inputs.shards-result }}
+      run: |
+        set -eu
+
+        if [ "$DOCS_ONLY" = "true" ]; then
+          echo "docs-only PR — skipping aggregation"
+          echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        if [ "$SHARDS" = "[]" ] || [ -z "$SHARDS" ]; then
+          echo "no shards planned — skipping aggregation"
+          echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Check if the shard pipeline failed（caller 传入 needs.<call-job>.result）
+        if [ "$SHARDS_RESULT" != "success" ] && [ "$SHARDS_RESULT" != "skipped" ]; then
+          echo "::error::shard pipeline failed ($SHARDS_RESULT) — fail-closed"
+          exit 1
+        fi
+
+        echo "should_publish=true" >> "$GITHUB_OUTPUT"
+
+    - name: Download findings artifacts
+      if: steps.check_results.outputs.should_publish == 'true'
+      uses: actions/download-artifact@v4
+      with:
+        # artifact 前缀契约：droid-review-debug-（watchdog quota-sweep startswith 消费）
+        pattern: droid-review-debug-${{ github.run_id }}-shard-*
+        path: findings/
+
+    - name: Publish findings
+      if: steps.check_results.outputs.should_publish == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        REPOSITORY: ${{ github.repository }}
+        COMMIT_ID: ${{ inputs.head-sha }}
+      run: |
+        set -eu
+        # 自包含发布脚本（$GITHUB_ACTION_PATH 解析，禁止相对路径越出 action 目录）；
+        # 与 src/infra_core/engine/droid_review/publish_findings.py 字节一致
+        # （tests/test_droid_review_aggregate_action.py 锁定）。
+        python3 "$GITHUB_ACTION_PATH/publish_findings.py" \
+          --pattern "findings/*/findings-shard-*.json" \
+          --pr-number "$PR_NUMBER" \
+          --repository "$REPOSITORY" \
+          --commit-id "$COMMIT_ID"

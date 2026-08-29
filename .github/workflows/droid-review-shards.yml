@@ -1,0 +1,446 @@
+# Droid Review Shards — reusable shard pipeline (M4 门禁切换，TD-DR-01)
+#
+# 被 memory-core 等 droid-review thin caller 调用，承接原 3-job 流水线中的
+# setup / plan-shards / review-shard 三个 job。聚合发布（check 名 `droid-review`
+# 的 job）**不在本文件**——reusable workflow 内部 job 的 check 名会变成
+# `外层/内层` 嵌套格式，精确名契约必须由 caller 本地 job 跑 composite action
+# （hdot123-org/infra-core/actions/droid-review-aggregate）保持。
+#
+# 三个契约（本文件承载其中两个，NEVER break）：
+#   1. Workflow 名 "Droid Auto Review"（caller 侧，本文件只承接分片流水线）
+#   2. Artifact 前缀 "droid-review-debug-"（watchdog quota-sweep 依赖，本文件上传）
+#   3. 聚合 job key `droid-review`（caller 本地 job，绝不进本文件）
+#
+# 与 infra-core 自仓 droid-review.yml 的差异（reusable 化适配，行为等价）：
+#   - 预算参数（SHARD_MAX_* / SHARD_TIMEOUT_MINUTES）由 caller 以 inputs 转发
+#     （vars context 在 caller 文件引用，显式传递避免隐式依赖）
+#   - 引擎脚本（plan_shards.py / run_shard.sh）checkout 自本仓
+#     src/infra_core/engine/droid_review/（engine_ref 输入，默认 main），
+#     不依赖消费仓本地 scripts/droid_review/ 副本（消除副本同步债）
+#   - 不引用仓库本地 venv composite（消费仓没有该文件；分片流水线
+#     仅依赖 python3 stdlib + jq + gh + droid CLI，无需 venv）
+#   - workspace guard 的残缺探针用 pyproject.toml（消费仓共有文件，避免
+#     用本仓特有路径做探针导致每 run 全量重克隆）
+#   - BYOM 走 ts 内网直达 Kong（与自仓 workflow 一致，test_droid_review_byom_tailnet 钉住）
+
+name: Droid Review Shards
+
+on:
+  workflow_call:
+    inputs:
+      engine_ref:
+        description: 'infra-core ref for engine scripts (plan_shards.py / run_shard.sh)'
+        required: false
+        type: string
+        default: 'main'
+      pr_number:
+        description: 'PR number (workflow_dispatch passthrough; empty for pull_request_target)'
+        required: false
+        type: string
+        default: ''
+      head_sha:
+        description: 'Head SHA override (workflow_dispatch passthrough)'
+        required: false
+        type: string
+        default: ''
+      shard-max-files:
+        description: 'Layer 3: shard size cap in files (caller 转发 vars.SHARD_MAX_FILES)'
+        required: false
+        type: string
+        default: '25'
+      shard-max-count:
+        description: 'Layer 3: shard count cap (caller 转发 vars.SHARD_MAX_COUNT)'
+        required: false
+        type: string
+        default: '6'
+      shard-timeout-minutes:
+        description: 'Layer 1: shard job timeout in minutes (caller 转发 vars.SHARD_TIMEOUT_MINUTES)'
+        required: false
+        type: string
+        default: '45'
+      shard-max-parallel:
+        description: 'Layer 4: matrix concurrency cap (caller 转发 vars.SHARD_MAX_PARALLEL)'
+        required: false
+        type: string
+        default: '3'
+    outputs:
+      pr_number:
+        description: 'Resolved PR number'
+        value: ${{ jobs.setup.outputs.pr_number }}
+      base_sha:
+        description: 'PR base SHA'
+        value: ${{ jobs.setup.outputs.base_sha }}
+      head_sha:
+        description: 'PR head SHA'
+        value: ${{ jobs.setup.outputs.head_sha }}
+      docs_only:
+        description: 'true 当 PR 只改 *.md（skip 模型 review）'
+        value: ${{ jobs.plan-shards.outputs.docs_only }}
+      shards:
+        description: '分片计划 JSON 数组（docs-only 或空计划时为 [] / 空）'
+        value: ${{ jobs.plan-shards.outputs.shards }}
+      plan_shards_ok:
+        description: "plan-shards job 是否 success（caller 聚合 job 的 if 门；skipped/failure → 空，保持 `needs.plan-shards.result == 'success'` 语义）"
+        value: ${{ jobs.plan-shards.outputs.plan_ok }}
+    secrets:
+      FACTORY_API_KEY:
+        description: 'Factory API key（droid exec 凭证）'
+        required: true
+      NVIDIA_KONG_PROXY_KEY:
+        description: 'Kong proxy key（BYOM provider 格式占位；内网 Kong 无认证，保留注入面）'
+        required: false
+
+jobs:
+  # ── Job 0: Setup - resolve PR context for both caller trigger types ──
+  # github context 关联 caller 事件：pull_request_target / workflow_dispatch 原样可用
+  setup:
+    runs-on: [self-hosted, pve-linux]
+    outputs:
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
+      draft: ${{ steps.resolve.outputs.draft }}
+      user_login: ${{ steps.resolve.outputs.user_login }}
+    steps:
+      - name: Resolve PR context
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+            # pull_request_target trigger: use event context
+            {
+              echo "pr_number=${{ github.event.pull_request.number }}"
+              echo "base_sha=${{ github.event.pull_request.base.sha }}"
+              echo "head_sha=${{ github.event.pull_request.head.sha }}"
+              echo "draft=${{ github.event.pull_request.draft }}"
+              echo "user_login=${{ github.event.pull_request.user.login }}"
+            } >> "$GITHUB_OUTPUT"
+            echo "Resolved PR context from pull_request_target event"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # workflow_dispatch trigger: fetch PR data via API
+            PR_NUMBER="${{ inputs.pr_number }}"
+            echo "Fetching PR #$PR_NUMBER data via API..."
+
+            PR_DATA=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")
+            BASE_SHA=$(echo "$PR_DATA" | jq -r '.base.sha')
+            HEAD_SHA="${{ inputs.head_sha }}"
+            if [ -z "$HEAD_SHA" ] || [ "$HEAD_SHA" = "null" ]; then
+              HEAD_SHA=$(echo "$PR_DATA" | jq -r '.head.sha')
+            fi
+            DRAFT=$(echo "$PR_DATA" | jq -r '.draft')
+            USER_LOGIN=$(echo "$PR_DATA" | jq -r '.user.login')
+
+            {
+              echo "pr_number=$PR_NUMBER"
+              echo "base_sha=$BASE_SHA"
+              echo "head_sha=$HEAD_SHA"
+              echo "draft=$DRAFT"
+              echo "user_login=$USER_LOGIN"
+            } >> "$GITHUB_OUTPUT"
+            echo "Resolved PR context from workflow_dispatch (PR #$PR_NUMBER, head=$HEAD_SHA)"
+          else
+            echo "::error::Unsupported event name: ${{ github.event_name }}"
+            exit 1
+          fi
+
+  # ── Job 1: Plan shards (no model call, ~1min) ──
+  plan-shards:
+    needs: setup
+    if: needs.setup.outputs.draft == 'false' && needs.setup.outputs.user_login != 'dependabot[bot]'
+    runs-on: [self-hosted, pve-linux]
+    timeout-minutes: 5
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+      docs_only: ${{ steps.docs_only.outputs.skip }}
+      plan_ok: ${{ steps.plan_gate.outputs.plan_ok }}
+    steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 无法恢复被裁剪的工作树。reusable 版探针用 pyproject.toml
+          # （两仓及一般消费仓共有；用本仓特有路径做探针会造成消费仓
+          # 每 run 全量重克隆）。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/pyproject.toml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
+      - name: Checkout engine (infra-core)
+        uses: actions/checkout@v5
+        with:
+          repository: hdot123-org/infra-core
+          ref: ${{ inputs.engine_ref }}
+          fetch-depth: 1
+          path: engine
+
+      - name: Detect docs-only PR
+        id: docs_only
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ needs.setup.outputs.pr_number }}
+        run: |
+          set -eu
+          echo "Detecting whether PR #$PR_NUMBER changes only docs files (*.md)..."
+          FILES=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')
+          if [ -z "$FILES" ]; then
+            echo "File list empty or API failure — fail-closed, run full review"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          NON_MD=$(echo "$FILES" | grep -v '\.md$' || true)
+          if [ -z "$NON_MD" ]; then
+            echo "docs-only=true — all changed files are *.md, skipping model review"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs-only=false — non-md files present:"
+            echo "$NON_MD"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Plan shards
+        id: plan
+        if: steps.docs_only.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ needs.setup.outputs.pr_number }}
+          MAX_FILES: ${{ inputs.shard-max-files }}
+          MAX_COUNT: ${{ inputs.shard-max-count }}
+        run: |
+          set -eu
+          # Get changed files from PR (with status for deleted-file handling)
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" \
+            --paginate --jq '.[] | .filename + "\t" + .status' > changed_files_with_status.txt
+          # Extract just filenames for planner
+          cut -f1 changed_files_with_status.txt > changed_files.txt
+          # Filter out docs-only files
+          grep -v '\.md$' changed_files.txt > code_files.txt || true
+          # Run planner（引擎副本；CWD 为消费仓工作区，文件清单落在此处）
+          if [ -s code_files.txt ]; then
+            PLAN=$(python3 engine/src/infra_core/engine/droid_review/plan_shards.py "$MAX_FILES" "$MAX_COUNT" < code_files.txt)
+            echo "Plan output: $PLAN"
+            echo "shards=$(echo "$PLAN" | jq -c '.shards')" >> "$GITHUB_OUTPUT"
+          else
+            echo "shards=[]" >> "$GITHUB_OUTPUT"
+          fi
+          # Save file statuses for shard scripts (deleted files need special handling)
+          cp changed_files_with_status.txt /tmp/file_statuses.txt
+
+      - name: Upload file statuses
+        if: always() && steps.docs_only.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: file-statuses-${{ github.run_id }}
+          path: /tmp/file_statuses.txt
+          retention-days: 1
+
+      - name: Mark plan gate ok
+        # 末步置位（无 if，正常完成才执行）：job skipped/failure 时该输出为空，
+        # caller 以 plan_shards_ok == 'true' 判定，等价旧 `needs.plan-shards.result == 'success'`
+        id: plan_gate
+        run: echo "plan_ok=true" >> "$GITHUB_OUTPUT"
+
+  # ── Job 2: Review shard matrix (parallel, model call) ──
+  review-shard:
+    needs: [setup, plan-shards]
+    if: >-
+      needs.plan-shards.outputs.docs_only != 'true' &&
+      needs.plan-shards.outputs.shards != '[]' &&
+      needs.plan-shards.outputs.shards != ''
+    runs-on: [self-hosted, pve-linux]
+    timeout-minutes: ${{ fromJSON(inputs.shard-timeout-minutes) }}
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.shard-max-parallel) }}
+      matrix:
+        shard: ${{ fromJSON(needs.plan-shards.outputs.shards) }}
+    env:
+      NVIDIA_KONG_PROXY_KEY: ${{ secrets.NVIDIA_KONG_PROXY_KEY }}
+    permissions:
+      contents: read
+      actions: write
+      id-token: write
+    steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒（探针同 plan-shards：pyproject.toml）
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/pyproject.toml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
+      - name: Checkout repository (BASE)
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.setup.outputs.base_sha }}
+          fetch-depth: 0
+
+      - name: Checkout PR head (HEAD → head-src/)
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.setup.outputs.head_sha }}
+          fetch-depth: 0
+          path: head-src
+
+      - name: Checkout engine (infra-core)
+        uses: actions/checkout@v5
+        with:
+          repository: hdot123-org/infra-core
+          ref: ${{ inputs.engine_ref }}
+          fetch-depth: 1
+          path: engine
+
+      - name: Set shard environment
+        id: shard_env
+        env:
+          SHARD_FILE_JSON: ${{ toJson(matrix.shard.files) }}
+          SHARD_ID_VAL: ${{ matrix.shard.shard_id }}
+          BASE_SHA: ${{ needs.setup.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.setup.outputs.head_sha }}
+        run: |
+          set -eu
+
+          # (A) Fix: Use GITHUB_ENV multi-line delimiter for SHARD_FILES.
+          # The runner reads the literal value between delimiters — no quote
+          # stripping. Previous version used echo "SHARD_FILES='$JSON'" which
+          # embedded literal single quotes into the env var, breaking jq.
+          {
+            echo "SHARD_ID=$SHARD_ID_VAL"
+            echo "BASE_REF=$BASE_SHA"
+            echo "HEAD_REF=$HEAD_SHA"
+            echo "RUN_ID=${{ github.run_id }}"
+            printf 'SHARD_FILES<<EOF_SHARD\n%s\nEOF_SHARD\n' "$SHARD_FILE_JSON"
+          } >> "$GITHUB_ENV"
+
+          # Compute merge-base within head-src after fetching base SHA
+          cd head-src
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/head-src"
+
+          # Fetch the base SHA explicitly so merge-base can resolve it
+          # NOTE: Do NOT use --depth=1 here! Shallow fetch writes the base SHA
+          # into .git/shallow, causing merge-base to return empty when the base
+          # branch has advanced past the PR's fork point. This would fail-close
+          # every PR where base moved forward. Full fetch is required.
+          git fetch origin "$BASE_SHA" || {
+            echo "::error::Failed to fetch base SHA $BASE_SHA"
+            exit 1
+          }
+
+          # Compute merge-base — fail-closed (no || true)
+          MERGE_BASE=$(git merge-base HEAD "$BASE_SHA")
+          if [ -z "$MERGE_BASE" ]; then
+            echo "::error::Failed to compute merge-base between HEAD and $BASE_SHA"
+            exit 1
+          fi
+          echo "MERGE_BASE=$MERGE_BASE" >> "$GITHUB_ENV"
+          echo "Merge base: $MERGE_BASE"
+          cd "$GITHUB_WORKSPACE"
+
+      - name: Install Droid CLI
+        run: |
+          set -eu
+          # (B) Fix: Install droid CLI binary (runner doesn't have it by default).
+          # Copied from droid-action@e5ae502's install step.
+          curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://app.factory.ai/cli | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/droid" --version
+
+      - name: Write BYOM settings file
+        # LLM 链路：ts 内网直达 Kong（tailscale serve, tailnet only, LE 证书）。
+        # 原 https://ai.exa.edu.kg/v1 需经 CF → node-22(东京) → 隧道回 node-01，
+        # 4 段网络且暴露公网端点；github 可达性已由 CF Worker 反代解决后，
+        # 境外跳板失去必要性（Bailian 是国内服务，杭州 Kong 出网即最短路径）。
+        # 前置依赖：runner 机 /etc/hosts 有 node1.tail5e888.ts.net 静态条目
+        # （runner 的 tailscale accept-dns=false，MagicDNS 不可用）。
+        # apiKey 字段仅为 provider 格式占位——内网 Kong 无认证（request-transformer
+        # 会注入真实上游 key），且 heredoc 为单引号模式，变量从不展开。
+        run: |
+          mkdir -p ~/.factory
+          cat > ~/.factory/settings.json << 'SETTINGS_EOF'
+          {
+            "customModels": [
+              {
+                "model": "qwen3.7-plus",
+                "displayName": "Bailian Qwen 3.7 Plus",
+                "baseUrl": "https://node1.tail5e888.ts.net/v1",
+                "apiKey": "${NVIDIA_KONG_PROXY_KEY}",
+                "provider": "generic-chat-completion-api",
+                "maxOutputTokens": 65536,
+                "noImageSupport": true
+              }
+            ]
+          }
+          SETTINGS_EOF
+          echo "BYOM settings written to ~/.factory/settings.json"
+          python3 -c "import json; json.load(open('$HOME/.factory/settings.json')); print('JSON validation passed')"
+
+      - name: Pre-check credentials
+        env:
+          FACTORY_API_KEY: ${{ secrets.FACTORY_API_KEY }}
+        run: |
+          echo "Verifying Factory API credentials before review..."
+          if [ -z "$FACTORY_API_KEY" ]; then
+            echo "::error::FACTORY_API_KEY secret is empty or not configured."
+            exit 1
+          fi
+          echo "Secret is present (length: ${#FACTORY_API_KEY} chars)."
+
+      - name: Run shard review
+        env:
+          FACTORY_API_KEY: ${{ secrets.FACTORY_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          # 引擎副本（engine checkout）；CWD 保持消费仓 BASE 工作区：
+          # run_shard.sh 从 CWD 读取 .github/review/shard-review-prompt.md、
+          # head-src/ diff 上下文，并把 findings 写到工作区根目录。
+          # schema 校验的 validate_findings 由脚本自身目录解析（引擎自包含）。
+          bash engine/src/infra_core/engine/droid_review/run_shard.sh
+
+      - name: Collect debug transcripts
+        if: always()
+        run: |
+          set -eu
+          # upload-artifact v4 rejects hidden directories (.factory/).
+          # Copy Factory session transcripts into the workspace as .factory/sessions/
+          # so the watchdog's quota-sweep grep can find them in the artifact.
+          # Also collect run_shard.sh execution logs for diagnosing droid exec failures.
+          mkdir -p .factory/sessions
+          if [ -d "$HOME/.factory/sessions" ]; then
+            echo "Copying session transcripts from $HOME/.factory/sessions/"
+            if [ -n "$(ls -A "$HOME/.factory/sessions" 2>/dev/null)" ]; then
+              cp -r "$HOME/.factory/sessions/"* .factory/sessions/ 2>/dev/null || \
+                echo "Warning: Failed to copy some session files"
+            else
+              echo "Warning: $HOME/.factory/sessions is empty, no transcripts to upload"
+            fi
+          else
+            echo "Warning: $HOME/.factory/sessions does not exist, no transcripts to upload"
+          fi
+          # shard-exec-error.log and droid-exec-stdout.json are written by
+          # run_shard.sh in the workspace root — upload-artifact will pick them
+          # up directly (no copy needed).
+
+      - name: Upload findings artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: droid-review-debug-${{ github.run_id }}-shard-${{ matrix.shard.shard_id }}
+          include-hidden-files: true
+          path: |
+            findings-shard-*.json
+            shard-*.diff
+            shard-exec-error.log
+            droid-exec-stdout.json
+            prompt.md
+            shard-env.log
+            .factory/sessions/**
+          retention-days: 7
