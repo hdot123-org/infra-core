@@ -1,0 +1,498 @@
+# Auto Merge Pipeline — reusable resolve+triage+merge pipeline（M4 门禁切换，gate-watchdog-automerge）
+#
+# 被 memory-core 等 auto-merge thin caller 调用，承接 resolve / auto-merge
+# （triage + behind/conflicting/stalled 分支处理 + merge）两个 job 的执行体。
+#
+# 触发面归 caller（VAL-GATE-106 契约）：
+#   - workflow_run 名单 ["CI", "QA", "Droid Auto Review", "Evolution Governance"]
+#   - pull_request_target / schedule / workflow_dispatch
+#   - 事件门控（workflow_run 仅 conclusion==success 才尝试合并）在 caller 的
+#     调用 job if 求值（github 事件上下文只在 caller 存在）——本文件不引用
+#     具体事件守卫，防止双份守卫漂移。
+#   - workflow 级 concurrency（group: auto-merge-pipeline）同样归 caller。
+#
+# INFRA-212（为什么是 workflow_run + schedule 而非 check_run）：GitHub 为防止
+# 递归调用，不会把 check_run/check_suite 事件投递给 GitHub Actions 产生的
+# check——全绿自动合并只能靠 workflow_run 快路径 + schedule 兜底 + 两个
+# 即时事件收敛。语义解释保留在 caller 文件。
+#
+# 零红铁律（2026-08-28 用户裁定）：
+#   全绿判定 = PR head 全部 check-runs 零 fail（含 advisory 层）。
+#   triage 的 statusCheckRollup 全 SUCCESS/SKIPPED/NEUTRAL 判定 + shared-workflows
+#   auto-merge action 的全 check-runs 扫描双层保证。不得只查 required contexts。
+#
+# Self-hosted 共享工作区防毒铁律（2026-08-28 三 runner 污染事故）：
+#   本 workflow 所有 job 严禁 actions/checkout、严禁任何 sparse-checkout——
+#   共享持久 _work 工作区上 checkout 的 sparse 参数会把该工作区写成
+#   core.sparseCheckout=true 并裁剪工作树，同一 runner 后续所有复用该工作区
+#   的 job 将以 "Can't find action.yml under .github/actions/setup-venv" 失败。
+#   triage 脚本经 heredoc 内联写入 RUNNER_TEMP（每 run 独立临时目录，与
+#   src/infra_core/shell/auto_merge_triage.sh 逐字节同步，
+#   tests/test_auto_merge_workflow_contract.py 锁定两份载体字节一致）。
+#   workspace guard 残缺探针用 pyproject.toml（消费仓共有文件，避免本仓
+#   特有路径探针导致消费仓每 run 全量重克隆——droid-review-shards 先例）。
+#
+# 与 infra-core 自仓 auto-merge.yml（本仓 caller，暂保留内联形态）的差异：
+#   合并凭证改经 workflow_call secrets（dispatch-token）显式传入——reusable
+#   不隐式继承 caller secrets，caller 以 `dispatch-token: ${{ secrets.DISPATCH_TOKEN }}`
+#   传入；自仓 caller 直接引用本仓 secrets.DISPATCH_TOKEN。
+#   shared-workflows auto-merge action 引用 pin 在 M4 冻结不动（M6 才合并）。
+
+name: Auto Merge Pipeline
+
+on:
+  workflow_call:
+    secrets:
+      dispatch-token:
+        description: '合并/更新分支/评论凭证（caller 侧 DISPATCH_TOKEN PAT，不受 GITHUB_TOKEN 递归抑制）'
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  resolve:
+    name: Resolve candidate PRs
+    runs-on: [self-hosted, pve-linux]
+    outputs:
+      pr_numbers: ${{ steps.resolve.outputs.pr_numbers }}
+    steps:
+      - id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          WR_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          MANUAL_PR: ${{ github.event.inputs.pr_number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          echo "Event: $EVENT_NAME"
+          case "$EVENT_NAME" in
+            pull_request_target)
+              if [ -n "$PR_NUMBER" ]; then
+                echo "pr_numbers=[\"$PR_NUMBER\"]" >> "$GITHUB_OUTPUT"
+              fi
+              ;;
+            workflow_dispatch)
+              if [ -n "$MANUAL_PR" ]; then
+                echo "pr_numbers=[\"$MANUAL_PR\"]" >> "$GITHUB_OUTPUT"
+              else
+                # 未指定 PR 号：扫描所有 open PR
+                PRS=$(gh pr list --repo "$REPO" --state open --json number --jq '[.[].number]')
+                echo "pr_numbers=$PRS" >> "$GITHUB_OUTPUT"
+              fi
+              ;;
+            workflow_run)
+              # 按完成工作流的 head SHA 反查关联的 open PR
+              PRS=$(gh pr list --repo "$REPO" --state open --json number,headRefOid \
+                    --jq "[.[] | select(.headRefOid == \"$WR_HEAD_SHA\") | .number]")
+              echo "pr_numbers=$PRS" >> "$GITHUB_OUTPUT"
+              ;;
+            schedule)
+              PRS=$(gh pr list --repo "$REPO" --state open --json number --jq '[.[].number]')
+              echo "pr_numbers=$PRS" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+  auto-merge:
+    name: Auto-merge PR
+    needs: resolve
+    if: needs.resolve.outputs.pr_numbers != '' && needs.resolve.outputs.pr_numbers != '[]'
+    runs-on: [self-hosted, pve-linux]
+    # INFRA-416：限定单腿时长。triage 各分支都是有界 API 调用，10 分钟
+    # 足够；防止 gh/网络挂死导致 matrix 腿永久占位（schedule 周期轮换，
+    # 旧腿不退出会与新腿堆叠）。
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        pr_number: ${{ fromJSON(needs.resolve.outputs.pr_numbers) }}
+    steps:
+      # 防毒铁律（self-hosted 共享持久工作区，2026-08-28 三 runner 污染事故）：
+      # 本 job 禁止 actions/checkout——triage 脚本经下方 heredoc 内联（与 src/
+      # 原件逐字节同步，契约测试锁定），对工作区零写入。本文件所有 job 均不得
+      # checkout（契约测试锁定）。
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 自愈向量（2026-08-28 污染事故）：本 job 每 sweep 在 runner 池上轮转，
+          # 借此检测并清除工作区 sparse 残留——checkout 自带的 sparse-checkout
+          # disable 实证无法恢复被裁剪的工作树（仍缺关键文件）。本步检测残留
+          # 并删除 .git 强制全新克隆；必须内联 run——工作树残缺时本地
+          # composite action 同样无法解析。探针用 pyproject.toml（消费仓共有）。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/pyproject.toml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
+      - name: Triage PR mergeable state
+        id: triage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ matrix.pr_number }}
+        run: |
+          set -eu
+          # 获取 PR 的 mergeable 状态。
+          # mergeable 由 GitHub 异步计算：push 后短暂为 UNKNOWN 属正常。
+          # INFRA-416 竞态守卫：resolve 与本步之间 PR 可能已被并行腿合并
+          # （matrix max-parallel=5），gh pr view 失败（NotFound）时降级为
+          # skip 而非红腿；仅凭状态取不到（非 NotFound 的 API 故障）才 fail。
+          PR_DATA=""
+          for attempt in 1 2 3; do
+            if PR_DATA=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json number,mergeable,mergeStateStatus,isDraft,statusCheckRollup 2>&1); then
+              break
+            fi
+            if echo "$PR_DATA" | grep -q "not found\|Could not resolve"; then
+              echo "PR #$PR_NUMBER no longer accessible (merged/closed by a parallel leg). Skipping."
+              echo "action=skip" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "gh pr view attempt $attempt failed: $PR_DATA"
+            PR_DATA=""
+            sleep 5
+          done
+          if [ -z "$PR_DATA" ]; then
+            echo "::error::Could not fetch PR #$PR_NUMBER state after 3 attempts"
+            exit 1
+          fi
+          echo "PR data: $PR_DATA"
+
+          # mergeable=UNKNOWN：GitHub 尚未算完。等待后重取一次（通常几秒
+          # 内出结果）；仍 UNKNOWN 则 skip，交给 schedule 兜底收敛，
+          # 绝不在未知状态猜测动作。
+          MERGEABLE=$(echo "$PR_DATA" | jq -r '.mergeable')
+          if [ "$MERGEABLE" = "UNKNOWN" ]; then
+            sleep 10
+            PR_DATA=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json number,mergeable,mergeStateStatus,isDraft,statusCheckRollup)
+            echo "PR data after UNKNOWN retry: $PR_DATA"
+          fi
+
+          # Self-hosted 共享工作区防毒：triage 脚本不经 checkout 取用，而是
+          # 内联写入 RUNNER_TEMP（每 run 独立临时目录，run 结束自动清理）。
+          # 下方 heredoc 与 src/infra_core/shell/auto_merge_triage.sh 逐字节
+          # 同步——修改分类逻辑时两处必须一起改，契约测试
+          # tests/test_auto_merge_workflow_contract.py 锁定字节一致。
+          cat > "$RUNNER_TEMP/auto_merge_triage.sh" <<'TRIAGE_EOF'
+          #!/usr/bin/env bash
+          # Auto-merge triage script (INFRA-416 / INFRA-428)
+          # Classifies PRs by mergeable state, mergeStateStatus and statusCheckRollup.
+          #
+          # Input:  JSON array of PRs via stdin (gh pr view/list --json
+          #         number,mergeable,mergeStateStatus,isDraft,statusCheckRollup)
+          # Output: JSON with 6 categories:
+          #           mergeable   (action: merge)
+          #           behind      (action: update-branch)
+          #           conflicting (action: notify)
+          #           pending     (action: wait)
+          #           stalled     (action: wait)
+          #           unknown     (action: skip)
+          # Exit:   always 0 (triage never fails workflow)
+          #
+          # Modes:
+          #   default            classify stdin, emit full JSON
+          #   --get-action N     classify stdin, emit the single action for PR number N
+          #                      (merge|update-branch|notify|wait|skip; exit 0; empty or
+          #                      invalid input also emits skip — triage must never fail
+          #                      the workflow)
+          #   --get-category N   classify stdin, emit the single category for PR number N
+          #                      (mergeable|behind|conflicting|pending|stalled|unknown;
+          #                      missing PR -> unknown). Workflow uses this to derive
+          #                      auxiliary outputs (e.g. stalled flag) without
+          #                      duplicating classification logic.
+          #
+          # Classification precedence (one PR falls into exactly one category,
+          # decided by classify_pr in a single pass — categories are exclusive by
+          # construction, no cross-select races):
+          #   mergeable=UNKNOWN    -> unknown     (skip; GitHub still computing)
+          #   mergeable=CONFLICTING-> conflicting (notify)
+          #   mergeStateStatus=BEHIND -> behind   (update-branch)
+          #   isDraft / DRAFT / BLOCKED -> pending (wait)
+          #   rollup empty or has incomplete checks -> pending (wait; early-fire guard)
+          #   rollup all reported, some not SUCCESS -> stalled (wait + escalate)
+          #   otherwise (MERGEABLE + green rollup)  -> mergeable (merge)
+          #
+          # Why these categories exist (INFRA-428):
+          # - BLOCKED/DRAFT previously fell into "mergeable" → every 10-min sweep fired
+          #   a merge attempt at an un-mergeable PR → red leg + the shared action's own
+          #   failure check run poisoned the head SHA (2026-08-18 self-poisoning
+          #   deadlock, PR #779 mechanism). wait = benign skip, schedule re-sweeps.
+          # - early-fire: pull_request_target(opened) / workflow_run of one workflow
+          #   can arrive before all required checks reported. mergeStateStatus alone is
+          #   async/cached and can be stale-CLEAN in that window; cross-checking
+          #   statusCheckRollup makes merge fire only when every check run reports
+          #   conclusion=SUCCESS. Rollup empty = no checks reported yet → fail-closed
+          #   wait (CI runs on every PR without paths filter, so an empty rollup is
+          #   always "checks not reported yet", never "no checks configured").
+          # - CONFLICTING wins over BEHIND: a conflicting PR must never be
+          #   update-branched into a blind merge.
+          
+          set -euo pipefail
+          
+          GET_ACTION_PR=""
+          GET_CATEGORY_PR=""
+          
+          MODE="default"
+          if [[ "${1:-}" == "--get-action" || "${1:-}" == "--get-category" ]]; then
+            MODE="$1"
+            if [[ $# -lt 2 ]]; then
+              echo "Usage: $0 [--get-action PR_NUMBER | --get-category PR_NUMBER]" >&2
+              echo '{"mergeable":[],"behind":[],"conflicting":[],"pending":[],"stalled":[],"unknown":[]}'
+              exit 0
+            fi
+            if [[ "$MODE" == "--get-action" ]]; then
+              GET_ACTION_PR="$2"
+            else
+              GET_CATEGORY_PR="$2"
+            fi
+          elif [[ $# -gt 0 ]]; then
+            echo "Usage: $0 [--get-action PR_NUMBER | --get-category PR_NUMBER]" >&2
+            echo '{"mergeable":[],"behind":[],"conflicting":[],"pending":[],"stalled":[],"unknown":[]}'
+            exit 0
+          fi
+          
+          EMPTY_RESULT='{"mergeable":[],"behind":[],"conflicting":[],"pending":[],"stalled":[],"unknown":[]}'
+          
+          # Classify PRs and add action fields.
+          # `jq -e` would swallow the classification on unexpected shapes; plain jq
+          # with a fallback keeps triage total (empty result on any malformed input).
+          classify() {
+            jq '
+              def rollup(pr): (pr.statusCheckRollup // []);
+              # green = at least one SUCCESS (防假绿下限) AND all checks are SUCCESS/SKIPPED/NEUTRAL.
+              # Three-layer semantics:
+              #   1. SKIPPED/NEUTRAL = branch protection alignment (non-blocking checks)
+              #   2. any(SUCCESS) = anti-fake-green lower bound (all-SKIPPED rollup requires human review)
+              #   3. null conclusion = still queued/in-progress (not counted as reported)
+              # Failure conclusions: FAILURE, TIMED_OUT, CANCELLED, ACTION_REQUIRED.
+              # Rationale (INFRA-428 + scrutiny R2 + scrutiny R1 blocking): qa.yml #830 added two
+              # nightly jobs (Coverage Audit / Full Regression) that report SKIPPED on PR events.
+              # PR #862 fixed the deadlock by accepting SKIPPED/NEUTRAL as non-failures. However,
+              # the all() check without any(SUCCESS) allowed all-SKIPPED rollups to pass as mergeable,
+              # creating a fake-green hole (reviewer-verified). The any(SUCCESS) guard ensures at
+              # least one real success exists before allowing merge.
+              def checks_green(pr):
+                (rollup(pr) | length) > 0
+                and (any(rollup(pr)[]; .conclusion == "SUCCESS"))
+                and all(rollup(pr)[]; .conclusion == "SUCCESS" or .conclusion == "SKIPPED" or .conclusion == "NEUTRAL");
+              # complete = every check run has reported a non-null conclusion.
+              # has("conclusion") alone is not enough: the rollup of a queued/
+              # in_progress check contains "conclusion": null, and jq has() would
+              # treat it as reported. A reported check has a conclusion STRING.
+              def checks_complete(pr):
+                (rollup(pr) | length) > 0
+                and all(rollup(pr)[]; (.conclusion // "") | type == "string" and length > 0);
+          
+              def classify_pr(pr):
+                if pr.mergeable == "UNKNOWN" then "unknown"
+                elif pr.mergeable == "CONFLICTING" then "conflicting"
+                elif pr.mergeStateStatus == "BEHIND" then "behind"
+                elif (pr.isDraft // false) or pr.mergeStateStatus == "DRAFT" or pr.mergeStateStatus == "BLOCKED" then "pending"
+                elif (rollup(pr) | length) == 0 then "pending"
+                elif checks_green(pr) then "mergeable"
+                elif checks_complete(pr) then "stalled"
+                else "pending"
+                end;
+          
+              def action_for(cat):
+                if cat == "mergeable" then "merge"
+                elif cat == "behind" then "update-branch"
+                elif cat == "conflicting" then "notify"
+                elif cat == "pending" then "wait"
+                elif cat == "stalled" then "wait"
+                else "skip"
+                end;
+          
+              map(. as $pr | {pr: $pr, cat: classify_pr($pr)})
+              | {
+                  mergeable: [.[] | select(.cat == "mergeable") | .pr + {action: action_for(.cat)}],
+                  behind: [.[] | select(.cat == "behind") | .pr + {action: action_for(.cat)}],
+                  conflicting: [.[] | select(.cat == "conflicting") | .pr + {action: action_for(.cat)}],
+                  pending: [.[] | select(.cat == "pending") | .pr + {action: action_for(.cat)}],
+                  stalled: [.[] | select(.cat == "stalled") | .pr + {action: action_for(.cat)}],
+                  unknown: [.[] | select(.cat == "unknown") | .pr + {action: action_for(.cat)}]
+                }
+            ' 2>/dev/null || echo "$EMPTY_RESULT"
+          }
+          
+          # Read JSON from stdin
+          input=$(cat)
+          
+          # Handle empty or invalid JSON
+          if ! echo "$input" | jq empty 2>/dev/null; then
+            echo "Invalid or empty JSON input, returning empty triage result" >&2
+            if [[ -n "$GET_ACTION_PR" ]]; then
+              echo "skip"
+            elif [[ -n "$GET_CATEGORY_PR" ]]; then
+              echo "unknown"
+            else
+              echo "$EMPTY_RESULT"
+            fi
+            exit 0
+          fi
+          
+          TRIAGE_RESULT=$(echo "$input" | classify)
+          
+          if [[ -n "$GET_ACTION_PR" || -n "$GET_CATEGORY_PR" ]]; then
+            # 每类只含互斥子集，按类别优先级查一次即可得到该 PR 的唯一归属
+            CATEGORY=$(echo "$TRIAGE_RESULT" | jq -r --argjson pr "${GET_ACTION_PR:-$GET_CATEGORY_PR}" '
+              if ([.behind[] | select(.number == $pr)] | length) > 0 then "behind"
+              elif ([.conflicting[] | select(.number == $pr)] | length) > 0 then "conflicting"
+              elif ([.pending[] | select(.number == $pr)] | length) > 0 then "pending"
+              elif ([.stalled[] | select(.number == $pr)] | length) > 0 then "stalled"
+              elif ([.mergeable[] | select(.number == $pr)] | length) > 0 then "mergeable"
+              else "unknown"
+              end
+            ')
+            if [[ -n "$GET_CATEGORY_PR" ]]; then
+              echo "$CATEGORY"
+            else
+              case "$CATEGORY" in
+                behind) echo "update-branch" ;;
+                conflicting) echo "notify" ;;
+                pending|stalled) echo "wait" ;;
+                mergeable) echo "merge" ;;
+                *) echo "skip" ;;
+              esac
+            fi
+            exit 0
+          fi
+          
+          echo "$TRIAGE_RESULT"
+          TRIAGE_EOF
+
+          # 分类并提取该 PR 的类别与动作（单 PR 输入，--get-category 即其
+          # 类别，workflow 内再映射为 action）。
+          # INFRA-428：取数扩展 isDraft + statusCheckRollup，分类新增
+          # pending（draft/blocked/checks 未报齐）与 stalled（有 check 失败），
+          # action=merge 仅在 rollup 全绿时发出，杜绝 early-fire 盲合并。
+          # 零红铁律：triage 的 checks_green 判定要求 all() SUCCESS/SKIPPED/NEUTRAL
+          # 且 any(SUCCESS)——含 advisory 层全部 check-runs 零 fail。
+          CATEGORY=$(echo "$PR_DATA" | jq -s '.[0:1]' | bash "$RUNNER_TEMP/auto_merge_triage.sh" --get-category "$PR_NUMBER")
+          case "$CATEGORY" in
+            behind) ACTION="update-branch" ;;
+            conflicting) ACTION="notify" ;;
+            pending|stalled) ACTION="wait" ;;
+            mergeable) ACTION="merge" ;;
+            *) ACTION="skip" ;;
+          esac
+          STALLED="false"
+          if [ "$CATEGORY" = "stalled" ]; then STALLED="true"; fi
+          {
+            echo "action=$ACTION"
+            echo "category=$CATEGORY"
+            echo "stalled=$STALLED"
+          } >> "$GITHUB_OUTPUT"
+          echo "Action: $ACTION (category: $CATEGORY)"
+
+      - name: Handle BEHIND PR (update-branch self-heal)
+        if: steps.triage.outputs.action == 'update-branch'
+        env:
+          GH_TOKEN: ${{ secrets.dispatch-token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ matrix.pr_number }}
+        run: |
+          set -eu
+          echo "::warning::PR #$PR_NUMBER is BEHIND main, attempting update-branch self-heal"
+          # 幂等操作：更新 PR 分支以包含最新 main
+          # INFRA-428 竞态守卫：并发腿可能刚完成 update-branch（或 main 又
+          # 前进使分支重新 BEHIND）。本腿观察到 BEHIND 但 GitHub 侧已变化
+          # 时，gh pr update-branch 会以错误退出（如 "not behind"）——这是
+          # 竞态的正常收敛而非故障，降级为绿腿 skip，交给下一轮 sweep。
+          if ! gh pr update-branch "$PR_NUMBER" --repo "$REPO"; then
+            echo "::warning::update-branch failed for PR #$PR_NUMBER (likely raced with a parallel leg or main moved again). Skipping; next sweep will retry."
+            exit 0
+          fi
+          echo "PR #$PR_NUMBER branch updated, CI will re-run and trigger new workflow_run event"
+
+      - name: Handle CONFLICTING PR (notify)
+        if: steps.triage.outputs.action == 'notify'
+        env:
+          GH_TOKEN: ${{ secrets.dispatch-token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ matrix.pr_number }}
+        run: |
+          set -eu
+          echo "::error::PR #$PR_NUMBER has merge conflicts (CONFLICTING state)"
+          # 幂等通知（INFRA-416）：按 head SHA 粒度去重——同一 head SHA 只发
+          # 一次冲突评论，避免 schedule 周期重复刷屏（INFRA-292 教训）。
+          # sentinel 随冲突解决后的新 push 自然轮换，无需人工清理。
+          # INFRA-428：去重命中后 exit 0——通知已送达即本腿职责完成；此前
+          # 的 exit 1 会让未解决冲突的 PR 每轮产生一条永久红腿
+          # （失败 run + 注解噪音，且失败 check 落在 head SHA 上持续毒化
+          # shared action 的全绿判定）。首次评论失败仍保持 exit 1 红色告警。
+          HEAD_SHA=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefOid --jq '.headRefOid')
+          SENTINEL="<!-- auto-merge-conflict-${HEAD_SHA} -->"
+          EXISTING=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json comments --jq '[.comments[].body | select(contains("'"$SENTINEL"'"))] | length')
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "::warning::Conflict comment already posted for $HEAD_SHA (count: $EXISTING). Skipping duplicate notification."
+            exit 0
+          fi
+          # 添加评论通知 PR 作者（用 heredoc 避免多行中文字符串破坏 YAML）
+          read -r -d '' COMMENT_BODY <<'COMMENT_EOF' || true
+          ⚠️ **Auto-merge: PR 存在合并冲突（CONFLICTING 状态）**
+
+          此 PR 无法自动合并，需要手动解决冲突：
+          1. 拉取最新 main 并合并
+          2. 解决冲突并推送
+          3. 推送后 auto-merge 会自动重试
+
+          COMMENT_EOF
+          COMMENT_BODY="${COMMENT_BODY}${SENTINEL}"
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$COMMENT_BODY"
+          # 评论送达后仍以非零退出，让 workflow 显示一次红色告警（仅首次；
+          # 后续 sweep 由上方去重分支短路为绿腿）
+          exit 1
+
+      - name: Handle stalled PR (checks reported non-success)
+        if: steps.triage.outputs.action == 'wait' && steps.triage.outputs.stalled == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.dispatch-token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ matrix.pr_number }}
+        run: |
+          set -eu
+          # INFRA-428：rollup 已报齐但存在非 SUCCESS 结论（典型：某个 check
+          # 失败/取消，或 shared action 自身毒化的 check 卡住 head SHA）。
+          # 首次发现时以 head SHA sentinel 幂等留一条评论（可见、可追溯、
+          # 天然随新 push 轮换），绿腿退出——修复由 PR 作者/droid-review
+          # 流程负责，auto-merge 不反复重试也不产生红腿噪音。
+          echo "::warning::PR #$PR_NUMBER checks are not all successful (stalled). Not attempting merge."
+          HEAD_SHA=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefOid --jq '.headRefOid')
+          SENTINEL="<!-- auto-merge-stalled-${HEAD_SHA} -->"
+          EXISTING=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json comments --jq '[.comments[].body | select(contains("'"$SENTINEL"'"))] | length')
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "Stalled comment already posted for $HEAD_SHA (count: $EXISTING). Skipping duplicate notification."
+            exit 0
+          fi
+          read -r -d '' COMMENT_BODY <<'COMMENT_EOF' || true
+          ⏸️ **Auto-merge: PR 的检查未全部通过（stalled）**
+
+          此 PR 的 check rollup 存在非 SUCCESS 结论，auto-merge 暂停合并并等待：
+          - 若 CI/droid-review 失败：请修复后推送，auto-merge 会自动重试
+          - 若你认为是残留的失败 check 卡住（如历史毒化）：推送新 commit 或重跑失败 check 即可解除
+
+          COMMENT_EOF
+          COMMENT_BODY="${COMMENT_BODY}${SENTINEL}"
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$COMMENT_BODY"
+          exit 0
+
+      - name: Run auto-merge
+        if: steps.triage.outputs.action == 'merge'
+        uses: hdot123-org/shared-workflows/auto-merge@5a0fc1b8946a170a12687d8614d56189e1f8dab5
+        with:
+          pr-number: ${{ matrix.pr_number }}
+        env:
+          # 铁律：合并必须用 DISPATCH_TOKEN（caller 经 workflow_call secrets
+          # 显式传入），不能用 GITHUB_TOKEN。GitHub 递归防护会抑制
+          # GITHUB_TOKEN 操作产生的 push 事件，导致 release-please 的
+          # push(paths: .release-please-manifest.json) 触发器失效 → release PR
+          # 合并后 tag/Release 不创建、Release Pipeline 断链。
+          # 2026-08-15 两次事故（v0.29.0 / v0.30.0 均靠手动 dispatch 补救）。
+          GITHUB_TOKEN: ${{ secrets.dispatch-token }}
