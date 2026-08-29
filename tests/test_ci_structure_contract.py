@@ -186,3 +186,45 @@ class TestExistingJobInvariants:
 
     def test_e2e_includes_cli_smoke(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
         assert "scripts/cli_smoke_test.sh" in _job_run_script(ci_jobs, "e2e-tests")
+
+
+class TestActionlintHostFirst:
+    """actionlint job 宿主优先契约（2026-08-29 node-00 raw 直连黑洞修复）。
+
+    旧实现每 run 无条件 ``bash <(curl raw.githubusercontent.com/.../download-actionlint.bash)``
+    ——curl 是非 git 直连，不走 runner insteadOf 镜像，node-00 出口对该域间歇黑洞
+    （2026-08-29 03:23 实证 134s timeout，main CI run 33225582434/33231155505
+    连续三轮红，仅剩此一条非镜像路径）。ce-01 runner 已预装
+    /usr/local/bin/actionlint 1.7.11（Layer 1 就绪），契约：版本 ≥1.7 的宿主
+    二进制直接使用，仅缺失/过旧时才允许 fallback 下载（GitHub-hosted 兼容）。
+    """
+
+    def test_host_binary_probe_present(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """actionlint job 必须先探测宿主二进制（PATH 优先）。"""
+        script = _job_run_script(ci_jobs, "actionlint")
+        assert "command -v actionlint" in script, "缺少宿主二进制探测（PATH 优先分支）"
+
+    def test_host_version_gate(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """宿主版本必须 ≥1.7 才直接使用（防过旧宿主二进制误用）。"""
+        script = _job_run_script(ci_jobs, "actionlint")
+        assert "-ge 7" in script, "缺少宿主版本 ≥1.7 门限判断"
+
+    def test_fallback_download_warns(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """宿主缺失时 fallback 下载必须打 ::warning（异常态要显式暴露）。"""
+        script = _job_run_script(ci_jobs, "actionlint")
+        assert "::warning::actionlint not found on host" in script, "fallback 分支缺少 ::warning"
+
+    def test_download_only_after_host_probe(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """curl 下载只允许存在于宿主探测之后（禁止恢复每 run 无条件首下载）。"""
+        script = _job_run_script(ci_jobs, "actionlint")
+        assert "download-actionlint.bash" in script, (
+            "fallback 下载路径必须保留（GitHub-hosted 兼容）"
+        )
+        probe_at = script.index("command -v actionlint")
+        download_at = script.index("download-actionlint.bash")
+        assert probe_at < download_at, "下载路径出现在宿主探测之前（退化为无条件下载）"
+
+    def test_invocation_keeps_color_flag(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """lint 调用保持 actionlint -color（宿主与 fallback 两条路径一致）。"""
+        script = _job_run_script(ci_jobs, "actionlint")
+        assert "actionlint -color" in script
