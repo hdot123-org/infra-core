@@ -59,13 +59,13 @@ infra-core 用自己的 governance 门禁保护自身（self-bootstrap）：
 | guards | `CI` | 4 个守卫脚本：边界污染 / 文档分类 / fix-has-test / PR 引用一致性（后两个 PR-only，依赖 GH_TOKEN） |
 | security-tests / schema-tests / integration-tests / e2e-tests | `CI` | 专项测试组，按 pytest marker 分组（`-m <marker> -n 4 --no-cov`）；e2e 附 CLI 冒烟 |
 | mypy-src-strict / mypy-scripts-strict | `CI` | 分域 `mypy --strict`（src/infra_core 与 scripts/） |
-| advisory-dependency-security-scan / advisory-deptry | `CI` | advisory 扫描（pip-audit / deptry），`continue-on-error` 非阻塞，ci-ok 仅透出结果 |
-| advisory-telemetry-audit | `CI` | advisory：遥测覆盖率审计（`scripts/audit_telemetry_coverage.sh`），`continue-on-error` 非阻塞，ci-ok 仅透出结果 |
+| advisory-dependency-security-scan / advisory-deptry | `CI` | advisory 扫描（pip-audit / deptry），INFRA-595 零红：无 `continue-on-error`，失败即红 check-run，ci-ok 按 `.result` 阻断（曾有 `continue-on-error` 时 `.result` 恒为 success，判定空转，run 33129232081 实证） |
+| advisory-telemetry-audit | `CI` | advisory：遥测覆盖率审计（`scripts/audit_telemetry_coverage.sh`），INFRA-595 零红：无 `continue-on-error`，失败即红，ci-ok 按 `.result` 阻断（同上） |
 | shellcheck | `CI` | shell 脚本静态检查 |
 | health-check | `CI` | CI 健康自检（`scripts/ci_health_check.sh`） |
 | repo-consistency | `CI` | 仓库交付一致性检查（`scripts/repo_health_check.sh --ci`） |
 | business-policy-tests | `CI` | 业务策略测试组（`-m business_policy -n 4 --no-cov`） |
-| ci-ok | `CI` | 聚合（branch protection required check），逐项显式阻断全部阻塞 job，advisory 不阻断 |
+| ci-ok | `CI` | 聚合（branch protection required check），逐项显式阻断全部 18 个前置 job（含 advisory，按 `.result`；INFRA-595），另有 GitHub API 全 check-runs 零红扫描双保险 |
 | governance | `Evolution Governance` | 受保护路径 owner 门禁（pull_request_target，执行 shipped governance-check action） |
 | release | `Release Please` | 非门禁：发版管道（schedule/push(paths)/dispatch，DISPATCH_TOKEN，详见第 6 节） |
 
