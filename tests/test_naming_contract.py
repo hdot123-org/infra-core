@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = [pytest.mark.schema, pytest.mark.business_policy]
 
@@ -44,6 +45,52 @@ class TestWorkflowNameContract:
             r"^name:\s*Evolution Governance\s*$",
             _read(".github/workflows/evolution-governance.yml"),
             re.MULTILINE,
+        )
+
+
+class TestReusableNoTopLevelConcurrency:
+    """INFRA-626：全部 workflow_call reusable 禁止顶层 concurrency。
+
+    caller 顶层 concurrency.group 与被调 reusable 内组名同名（或跨仓组合撞名）
+    时，GitHub run 级自死锁检测直接取消 run、零 job——2026-08-29 memory #1071
+    切换首 tick 实测（'Canceling since a deadlock was detected for concurrency
+    group: evolution-scan between a top level workflow and scan'）。
+    串行化/去重一律归 caller 顶层 concurrency（消费仓模板测试锁定）。
+
+    覆盖全部 workflow_call 文件（新增 reusable 自动纳入），防下一个
+    droid-review-shards 式残留。
+    """
+
+    @staticmethod
+    def _workflow_call_files() -> list[str]:
+        workflows_dir = REPO_ROOT / ".github" / "workflows"
+        files: list[str] = []
+        for path in sorted(workflows_dir.glob("*.yml")):
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                continue
+            triggers = data.get("on") or data.get(True) or {}
+            if "workflow_call" in triggers:
+                files.append(str(path.relative_to(REPO_ROOT)))
+        return files
+
+    def test_reusable_files_discovered(self):
+        files = self._workflow_call_files()
+        assert files, "workflow_call 文件发现逻辑失效（glob/YAML 解析异常）"
+        # 当前全部 reusable 清单——新文件自动纳入，此处仅防发现逻辑静默失效
+        assert ".github/workflows/evolution-scan.yml" in files
+        assert ".github/workflows/evolution-heartbeat.yml" in files
+        assert ".github/workflows/droid-review-shards.yml" in files
+
+    def test_no_reusable_carries_top_level_concurrency(self):
+        offenders = [
+            f
+            for f in self._workflow_call_files()
+            if "concurrency" in (yaml.safe_load((REPO_ROOT / f).read_text(encoding="utf-8")) or {})
+        ]
+        assert not offenders, (
+            f"reusable 顶层 concurrency 禁令违反（INFRA-626，与 caller 组名组合"
+            f"可触发 GitHub 自死锁）：{offenders}"
         )
 
 
