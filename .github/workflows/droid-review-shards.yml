@@ -383,7 +383,12 @@ jobs:
           if [ "$HOST_OK" -eq 1 ]; then
             droid --version
           else
-            curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://app.factory.ai/cli | sh
+            # --max-time 300：INFRA-613 运维插曲——pve-runner-06 两次 Install
+            # Droid CLI 45min 挂死（rerun 沿用旧定义快照走 fallback 下载，curl
+            # 无总超时直落到 runner shutdown）。retry 只管连接级，管不住传输出
+            # 半吊子后停摆；max-time 兜底整条命令，配合 --retry 在 5×300s 窗口
+            # 内自救，仍失败则快速红灯而非挂死。
+            curl --retry 5 --retry-delay 2 --retry-all-errors --max-time 300 -fsSL https://app.factory.ai/cli | sh
             echo "$HOME/.local/bin" >> "$GITHUB_PATH"
             # GITHUB_PATH 对本步不生效，就地自检走全路径（后续步骤已含 ~/.local/bin）
             "$HOME/.local/bin/droid" --version
