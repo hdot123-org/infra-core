@@ -1,11 +1,20 @@
-# HOTFIX (M2): Triggers disabled — workflow_dispatch only.
-# M2 scrutiny: scripts/ paths do not exist (engine in src/infra_core/engine).
-# Scheduled cron 0 */2 caused persistent red ticks.
-# M4 will rewrite as formal reusable/caller form.
+# Evolution Heartbeat reusable workflow（M4 抽离，architecture.md §6）
+# heartbeat 主体在本 reusable；schedule/workflow_dispatch 触发面与命名契约
+# （名 'Evolution Heartbeat'）留在消费仓 thin caller。引擎内
+# SCANNER_WORKFLOW = "evolution-scan.yml" 指消费仓本仓文件名不变，
+# gh run list 按该文件名解析扫描器是否存活。
+#
+# INFRA-578/588 自愈闭环：heartbeat stale → trigger_scanner_dispatch 拉起
+# 扫描器；扫描器 watch_heartbeat_channel 反向拉起 heartbeat。
 
-name: Evolution Heartbeat
+name: Evolution Heartbeat Reusable
 
 on:
+  workflow_call:
+    secrets:
+      dispatch-token:
+        required: true
+        description: PAT (hdot123) for issue/label writes and self-heal dispatch
   workflow_dispatch: {}
 
 concurrency:
@@ -28,12 +37,13 @@ jobs:
         run: pip install -e .
       - name: Ensure labels exist
         env:
-          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ secrets.dispatch-token }}
         run: |
           # INFRA-601: 显式仓库上下文，免疫 runner insteadOf 镜像重写
           gh --repo "$GITHUB_REPOSITORY" label create "evolution-heartbeat" --color D93F0B --description "Evolution heartbeat alert" --force || true
       - name: Run heartbeat check
-        run: python scripts/evolution_heartbeat.py
+        run: python -m infra_core.engine.evolution_heartbeat
         env:
-          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ secrets.dispatch-token }}
+          # P1-A: Prevent module poisoning — blocks automatic insertion of scripts/ into sys.path.
           PYTHONSAFEPATH: '1'

@@ -2286,12 +2286,16 @@ def test_check_isolation_does_not_swallow_unexpected_exceptions(tmp_path):
 
 
 def test_workflow_generates_error_patterns():
-    """INFRA-81: CI workflow has a step generating registry.jsonl before scanning."""
+    """INFRA-81: CI workflow has a step generating registry.jsonl before scanning.
+
+    M4: 步骤命令改 infra-core 入口（memory-error-patterns 随 M5 修剪），
+    顺序契约不变（Generate error patterns 先于 Run evolution scanner）。
+    """
     workflow_path = Path(__file__).parent.parent / ".github" / "workflows" / "evolution-scan.yml"
     with workflow_path.open() as f:
         content = f.read()
 
-    assert "memory-error-patterns --all-projects" in content
+    assert "infra-error-patterns --all-projects" in content
     # The generate step must come before the scan step
     gen_idx = content.index("Generate error patterns")
     scan_idx = content.index("Run evolution scanner")
@@ -6318,8 +6322,11 @@ def test_heartbeat_workflow_yaml_exists():
 
 
 def test_heartbeat_workflow_has_independent_cron():
-    """M2 HOTFIX: 触发器已禁用为 workflow_dispatch-only 桩。
-    原 cron 调度待 M4 reusable/caller 重写时恢复。
+    """M4: heartbeat 载体为 reusable（workflow_call + workflow_dispatch 桩保留）。
+
+    原 cron 调度随 M4 切换迁回消费仓 thin caller（per-repo 定时，本期不
+    中央化）——reusable 本体禁止携带 schedule；触发面契约由消费仓命名
+    契约测试锁定。
     """
     import yaml
 
@@ -6334,8 +6341,10 @@ def test_heartbeat_workflow_has_independent_cron():
     # YAML 1.1 parses bare 'on' as boolean True
     on_triggers = data.get("on") or data.get(True)
     assert on_triggers is not None, "Workflow must have 'on' triggers"
-    # M2 HOTFIX: 只有 workflow_dispatch，不再触发自动运行
     assert "workflow_dispatch" in on_triggers, "Workflow must have workflow_dispatch trigger"
+    # M4: reusable 必须暴露 workflow_call；schedule 归消费仓 caller
+    assert "workflow_call" in on_triggers, "Reusable must expose workflow_call trigger"
+    assert "schedule" not in on_triggers, "Reusable must NOT carry schedule (per-repo scheduling)"
 
 
 def test_heartbeat_freshness_check_stale():

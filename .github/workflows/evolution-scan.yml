@@ -1,29 +1,30 @@
-# Evolution Scanner Workflow
-# Runs the evolution scanner on a cron schedule to detect regressions and create Issues.
+# Evolution Scanner reusable workflow（M4 抽离，architecture.md §6）
+# scan 主体在本 reusable；schedule/workflow_dispatch 触发面与命名契约留在
+# 消费仓 thin caller（per-repo 定时，本期不中央化；caller 文件名必须保留
+# evolution-scan.yml——heartbeat 按 gh run list --workflow 文件名解析）。
 #
 # CRITICAL TOKEN STRATEGY:
-# This workflow MUST use DISPATCH_TOKEN (a PAT), NOT GITHUB_TOKEN.
-# Reason: DISPATCH_TOKEN is a PAT belonging to @hdot123 (OWNER). Issues created
-# with it have author=hdot123, which satisfies CODEOWNERS and governance checks.
-# The trigger chain is:
-#   GitHub Issue (DISPATCH_TOKEN, author=hdot123) → Linear 原生 GitHub Issue Sync
-#   → Linear webhook → n8n → trigger-droid.sh → droid exec --tag linear-gateway
-#   → PR → CI → 合并
+# 本 workflow 必须用 DISPATCH_TOKEN（PAT），不能用 GITHUB_TOKEN。
+# 原因：DISPATCH_TOKEN 属 @hdot123（OWNER），创建的 Issue author=hdot123，
+# 满足 CODEOWNERS 与 governance 检查。触发链：
+#   GitHub Issue (DISPATCH_TOKEN) → Linear 同步 → n8n → trigger-droid.sh
+#   → droid exec --tag linear-gateway → PR → CI → 合并
 #
-# Fallback options if DISPATCH_TOKEN is unavailable:
-# 1. Use a GitHub App installation token (finer-grained, auditable)
-# 2. Use workflow_dispatch chain: scanner creates Issue with GITHUB_TOKEN, then
-#    a second workflow with a PAT comments on the Issue (workaround)
+# 引擎来源：消费仓 `pip install -e .` 连带安装其 pyproject 锁定的
+# infra-core tag，scanner/heartbeat 以 `python -m infra_core.engine.*` 运行
+# （单一依赖方向 memory-core → infra-core，版本由消费仓 pin 决定）。
 
-# HOTFIX (M2): Triggers disabled — workflow_dispatch only.
-# M2 scrutiny: scripts/ paths referenced by this workflow do not exist
-# (engine lives in src/infra_core/engine, shell in src/infra_core/shell).
-# Scheduled cron */30 caused persistent red ticks (exit 127).
-# M4 will rewrite as formal reusable/caller form.
-
-name: Evolution Scan
+name: Evolution Scan Reusable
 
 on:
+  workflow_call:
+    secrets:
+      dispatch-token:
+        required: true
+        description: PAT (hdot123) for issue/label writes and self-heal dispatch
+      linear-api-key:
+        required: false
+        description: LINEAR_API_KEY for auto_close_resolved Linear state verification
   workflow_dispatch: {}
 
 concurrency:
@@ -45,7 +46,7 @@ jobs:
       - name: Install package
         run: pip install -e .
       - name: Generate error patterns
-        run: memory-error-patterns --all-projects
+        run: infra-error-patterns --all-projects
       - name: Validate registry.jsonl exists
         run: |
           if [ ! -f "memory/kb/patterns/registry.jsonl" ]; then
@@ -63,19 +64,19 @@ jobs:
           restore-keys: evolution-history-
       - name: Ensure labels exist
         env:
-          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ secrets.dispatch-token }}
         run: |
           # INFRA-601: 显式仓库上下文，免疫 runner insteadOf 镜像重写
           gh --repo "$GITHUB_REPOSITORY" label create "evolution-found" --color FBCA04 --description "Evolution scanner finding" --force || true
           gh --repo "$GITHUB_REPOSITORY" label create "evolution-isolated" --color B60205 --description "Stuck 3+ ticks" --force || true
       - name: Run evolution scanner
-        run: python scripts/evolution_scanner.py
+        run: python -m infra_core.engine.evolution_scanner
         env:
-          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ secrets.dispatch-token }}
           # LINEAR_API_KEY enables Linear issue state verification in auto_close_resolved.
           # Without it, the scanner cannot verify Linear terminal state and will
           # fail-closed (block close) for Linear-linked issues to prevent churn.
-          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_API_KEY: ${{ secrets.linear-api-key }}
           # P1-A: Prevent module poisoning — blocks automatic insertion of scripts/ into sys.path.
           # The scanner explicitly re-adds its own directory via sys.path.insert.
           PYTHONSAFEPATH: '1'
