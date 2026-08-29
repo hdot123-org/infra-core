@@ -25,6 +25,18 @@
 
 name: Droid Review Shards
 
+# 同 head 去重（编排器注 2026-08-29）：synchronize/ready_for_review 竞态会为同一
+# head 触发多条并行 Droid Auto Review run（infra-core PR #61 实测 3 条并存，浪费
+# pve 池容量）。按 head SHA 分组 = 新 run 仅取消同 head 旧 run（内容相同，安全）；
+# 不同 head 各自独立组，互不互斥（安全方向限定）。
+# 回退链：PR 路径 caller 不传 head-sha（memory thin caller 的 inputs.head_sha 在
+# pull_request_target 下为空），被调 workflow 继承 caller 事件上下文 →
+# github.event.pull_request.head.sha；无 head 信息的 dispatch 兜底 run_id 唯一组，
+# 绝不允许空 key 把所有 run 折叠进同组互相取消。
+concurrency:
+  group: dr-${{ inputs.head_sha || github.event.pull_request.head.sha || github.run_id }}
+  cancel-in-progress: true
+
 on:
   workflow_call:
     inputs:

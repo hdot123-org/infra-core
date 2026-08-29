@@ -303,3 +303,34 @@ class TestWorkspaceGuardProbe:
         raw = WORKFLOW_PATH.read_text()
         assert raw.count("pyproject.toml") >= 2, "workspace guard 探针应为 pyproject.toml"
         assert ".github/actions/setup-venv" not in raw
+
+
+class TestConcurrencyDedup:
+    """同 head 去重契约（编排器注 2026-08-29：PR #61 实测同 head 3 条并行 run，
+    浪费 pve 池容量；synchronize/ready_for_review 竞态下 caller 级取消存在窗口）"""
+
+    def test_concurrency_group_keyed_by_head_sha(self, shards_data):
+        """group 按 head SHA 分组：同 head 同组、不同 head 异组（不互斥）。
+
+        回退链字节级锁定——
+        - inputs.head_sha：dispatch 显式传入时精确分组（本 reusable input 为
+          snake_case `head_sha`，与 workflow_call 声明一致）；
+        - github.event.pull_request.head.sha：PR 路径 caller 不传 head-sha
+          （memory thin caller 的 `inputs.head_sha` 在 pull_request_target 下为空），
+          被调 workflow 继承 caller 事件上下文，取真实 head SHA；
+        - github.run_id：无 head 信息（如未传 head_sha 的 dispatch）兜底唯一组，
+          绝不允许空 key 把所有 PR 折叠进同组互相取消。
+        """
+        concurrency = shards_data.get("concurrency", {})
+        group = concurrency.get("group", "")
+        assert group == (
+            "dr-${{ inputs.head_sha || github.event.pull_request.head.sha || github.run_id }}"
+        ), f"concurrency group 漂移：{group!r}"
+
+    def test_cancel_in_progress_safe_direction(self, shards_data):
+        """cancel-in-progress = true：仅同组（同 head）新 run 取消旧 run——
+        内容相同安全；不同 head 异组互不取消（安全方向限定）。"""
+        concurrency = shards_data.get("concurrency", {})
+        assert concurrency.get("cancel-in-progress") is True, (
+            "同 head 新 run 必须取消旧 run（不同 head 靠异组天然不互斥）"
+        )
