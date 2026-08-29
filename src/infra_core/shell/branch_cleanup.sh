@@ -123,8 +123,12 @@ else
   echo "Scheduled mode: processing all non-main branches"
 
   # Get all remote branches except main
+  # Also drop GitHub's synthetic pull-request refs (pull/N/merge): they are
+  # not real branches, and actions/checkout leaves them in cached clones on
+  # self-hosted runners (INFRA-589: one sweep wasted ~4min of gh API calls
+  # checking ~120 of them).
   # || true prevents set -e + pipefail from exiting when grep finds no matches
-  BRANCHES=$(git branch -r | grep -v 'origin/main' | grep -v 'HEAD' | sed 's|origin/||' | xargs) || true
+  BRANCHES=$(git branch -r | grep -v 'origin/main' | grep -v 'HEAD' | grep -v 'pull/' | sed 's|origin/||' | xargs) || true
 
   if [[ -z "$BRANCHES" ]]; then
     echo "No branches found (besides main). Nothing to clean."
