@@ -794,7 +794,14 @@ class TestLinearProjectSync:
         assert "LINEAR_PROJECT_ID: ${{ inputs.linear-project-id }}" in content
 
     def test_thin_caller_forwards_linear_vars(self):
-        """The thin caller workflow forwards LINEAR_PROJECT_* vars to composite action."""
+        """The thin caller workflow forwards LINEAR_PROJECT_* vars to composite action.
+
+        INFRA-606: infra-core must reference its repo-scoped
+        vars.LINEAR_PROJECT_INFRA_CORE_ID（与 memory-core 的
+        LINEAR_PROJECT_MEMORY_CORE_ID 对称）。此前弱断言（OR 形态）放行了
+        泛型 vars.LINEAR_PROJECT_ID，一旦该仓变量被删/误指其他项目，
+        tracking 的 Linear project 同步会静默失效。
+        """
         workflow_path = (
             Path(__file__).parent.parent / ".github" / "workflows" / "branch-cleanup.yml"
         )
@@ -802,9 +809,13 @@ class TestLinearProjectSync:
 
         # Check that the thin caller forwards the Linear project ID
         assert "linear-project-id:" in content
-        # Should reference vars.LINEAR_PROJECT_INFRA_CORE_ID or vars.LINEAR_PROJECT_MEMORY_CORE_ID
-        # based on repository context
-        assert "vars.LINEAR_PROJECT" in content or "inputs.linear-project-id" in content
+        # Must reference the repo-scoped var exactly; generic
+        # vars.LINEAR_PROJECT_ID is the drift this test now rejects.
+        assert "linear-project-id: ${{ vars.LINEAR_PROJECT_INFRA_CORE_ID }}" in content
+        assert "${{ vars.LINEAR_PROJECT_ID }}" not in content, (
+            "thin caller 不得引用泛型 vars.LINEAR_PROJECT_ID（应使用仓级 "
+            "LINEAR_PROJECT_INFRA_CORE_ID，防止跨仓 project 误挂或变量缺失静默跳过）"
+        )
 
     # ------------------------------------------------------------------
     # Repo-scoped issue resolution (2026-08-28, INFRA-586 live-validation finding)
