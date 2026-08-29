@@ -59,29 +59,45 @@ runs:
         BRANCH_AGE_CLOSED_HOURS: ${{ inputs.branch-age-closed-hours }}
         BRANCH_AGE_ORPHAN_HOURS: ${{ inputs.branch-age-orphan-hours }}
       run: |
+        # Per-run scratch dir (INFRA-589): RUNNER_TEMP is isolated per job by
+        # GitHub Actions. Fixed /tmp paths previously leaked state across runs
+        # AND across repositories on shared self-hosted runners: a later run
+        # with PROTECTED_COUNT=0 skipped the list rewrite (and touch does not
+        # truncate), so branch_cleanup_issue.sh read the previous run's (or
+        # another repo's) protected list and created/kept phantom trackers.
+        WORK_DIR="${RUNNER_TEMP:-/tmp}/branch-cleanup-state"
+        mkdir -p "$WORK_DIR"
+        OUTPUT_FILE="$WORK_DIR/output.txt"
+        DELETED_FILE="$WORK_DIR/deleted_branches.txt"
+        PROTECTED_FILE="$WORK_DIR/protected_branches.txt"
+        # Always truncate the list files first: an empty list is a valid
+        # result and must overwrite any stale content.
+        : > "$DELETED_FILE"
+        : > "$PROTECTED_FILE"
+
         if [ "$MODE" = "immediate" ]; then
           # PR-close trigger: immediate cleanup of the merged branch only
-          bash $GITHUB_ACTION_PATH/branch_cleanup.sh --immediate "$TRIGGER_BRANCH" | tee /tmp/branch_cleanup_output.txt
+          bash $GITHUB_ACTION_PATH/branch_cleanup.sh --immediate "$TRIGGER_BRANCH" | tee "$OUTPUT_FILE"
         else
           # Scheduled trigger: sweep all orphan branches
-          bash $GITHUB_ACTION_PATH/branch_cleanup.sh --scheduled | tee /tmp/branch_cleanup_output.txt
+          bash $GITHUB_ACTION_PATH/branch_cleanup.sh --scheduled | tee "$OUTPUT_FILE"
         fi
 
         # Parse script output and set environment variables
-        DELETED_COUNT=$(grep '^deleted_count=' /tmp/branch_cleanup_output.txt | cut -d'=' -f2)
-        PROTECTED_COUNT=$(grep '^protected_count=' /tmp/branch_cleanup_output.txt | cut -d'=' -f2)
+        DELETED_COUNT=$(grep '^deleted_count=' "$OUTPUT_FILE" | cut -d'=' -f2)
+        PROTECTED_COUNT=$(grep '^protected_count=' "$OUTPUT_FILE" | cut -d'=' -f2)
 
         echo "deleted_count=${DELETED_COUNT:-0}" >> "$GITHUB_ENV"
         echo "protected_count=${PROTECTED_COUNT:-0}" >> "$GITHUB_ENV"
 
         # Extract deleted branch names for issue notification
         if [ "${DELETED_COUNT:-0}" -gt 0 ]; then
-          awk '/^Deleted .* branch\(es\):$/,/^$/' /tmp/branch_cleanup_output.txt | grep -v '^Deleted' | grep -v '^$' > /tmp/deleted_branches.txt || true
+          awk '/^Deleted .* branch\(es\):$/,/^$/' "$OUTPUT_FILE" | grep -v '^Deleted' | grep -v '^$' > "$DELETED_FILE" || true
         fi
 
         # Extract protected branch names for issue notification
         if [ "${PROTECTED_COUNT:-0}" -gt 0 ]; then
-          awk '/^Protected .* branch\(es\) with unmerged/,/^$/' /tmp/branch_cleanup_output.txt | grep -v '^Protected' | grep -v '^$' > /tmp/protected_branches.txt || true
+          awk '/^Protected .* branch\(es\) with unmerged/,/^$/' "$OUTPUT_FILE" | grep -v '^Protected' | grep -v '^$' > "$PROTECTED_FILE" || true
         fi
 
     - name: Manage tracking issue (INFRA-385 dedup)
@@ -99,11 +115,19 @@ runs:
         RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         RUN_DATE=$(date -u '+%Y-%m-%d %H:%M UTC')
 
-        # Ensure list files exist (empty lists are valid)
-        touch /tmp/deleted_branches.txt /tmp/protected_branches.txt
+        # Per-run scratch dir (INFRA-589): same isolation as the cleanup step;
+        # the list files were created (truncated) there at the start of this job.
+        WORK_DIR="${RUNNER_TEMP:-/tmp}/branch-cleanup-state"
+        DELETED_FILE="$WORK_DIR/deleted_branches.txt"
+        PROTECTED_FILE="$WORK_DIR/protected_branches.txt"
+
+        # Ensure list files exist (empty lists are valid). The cleanup step
+        # truncated them, but `if: always()` means this step can run even when
+        # that step failed before creating them.
+        touch "$DELETED_FILE" "$PROTECTED_FILE"
 
         bash $GITHUB_ACTION_PATH/branch_cleanup_issue.sh \
-          --deleted /tmp/deleted_branches.txt \
-          --protected /tmp/protected_branches.txt \
+          --deleted "$DELETED_FILE" \
+          --protected "$PROTECTED_FILE" \
           --run-url "$RUN_URL" \
           --run-date "$RUN_DATE"
