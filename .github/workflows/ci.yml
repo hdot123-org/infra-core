@@ -387,12 +387,11 @@ jobs:
       - name: "mypy --strict scripts/"
         run: mypy --strict scripts/
 
-  # ─── Advisory (continue-on-error: surfaced but non-blocking) ───
+  # ─── Advisory scans (INFRA-595: zero-red — failures block merge) ───
 
   advisory-dependency-security-scan:
     name: "Advisory dependency security scan"
     runs-on: [self-hosted, pve-linux]
-    continue-on-error: true
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
@@ -423,7 +422,6 @@ jobs:
   advisory-deptry:
     name: "Advisory deptry"
     runs-on: [self-hosted, pve-linux]
-    continue-on-error: true
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
@@ -549,7 +547,6 @@ jobs:
   advisory-telemetry-audit:
     name: "Advisory telemetry coverage audit"
     runs-on: [self-hosted, pve-linux]
-    continue-on-error: true
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
@@ -600,8 +597,8 @@ jobs:
 
   # ─── ci-ok: aggregation gate (naming contract: DO NOT RENAME) ───
   # Zero-red enforcement: scans ALL check-runs via GitHub API and fails if any
-  # has a non-success conclusion (including advisory jobs with continue-on-error).
-  # This makes ci-ok the single source of truth for merge eligibility.
+  # has a non-success conclusion. This makes ci-ok the single source of truth
+  # for merge eligibility.
   # User mandate (2026-08-28): "写死不允许红色合并，一个都不允许"
 
   ci-ok:
@@ -622,7 +619,7 @@ jobs:
       # Domain mypy
       - mypy-src-strict
       - mypy-scripts-strict
-      # Advisory (continue-on-error above, but still listed for completeness)
+      # Advisory (INFRA-595: zero-red — no continue-on-error, failures block)
       - advisory-dependency-security-scan
       - advisory-deptry
       # Gap-filling jobs (M3 基础层补齐)
@@ -669,6 +666,11 @@ jobs:
           [[ "${{ needs.business-policy-tests.result }}" == "success" ]] || { echo "FAIL: business-policy-tests"; FAILED=1; }
 
           # Advisory jobs (zero-red enforcement: all checks must pass)
+          # INFRA-595: advisory jobs no longer set continue-on-error — that
+          # made needs.<job>.result always "success" (post-masking value) and
+          # this gate a no-op (proven in run 33129232081: advisory-deptry
+          # check-run was "failure" while .result echoed "success"). With
+          # continue-on-error removed, .result reports the real conclusion.
           echo "Checking advisory jobs (zero-red policy)..."
           [[ "${{ needs.advisory-dependency-security-scan.result }}" == "success" ]] || { echo "FAIL: advisory-dependency-security-scan"; FAILED=1; }
           [[ "${{ needs.advisory-deptry.result }}" == "success" ]] || { echo "FAIL: advisory-deptry"; FAILED=1; }
@@ -703,8 +705,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Zero-red enforcement: fetch all check-runs for this commit and fail if any
-          # has a conclusion other than success/skipped/neutral. This catches advisory
-          # jobs with continue-on-error that would otherwise pass through.
+          # has a conclusion other than success/skipped/neutral. This is the
+          # API-level backstop behind the needs.result gate above.
           # User mandate (2026-08-28): "写死不允许红色合并，一个都不允许"
 
           COMMIT_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
