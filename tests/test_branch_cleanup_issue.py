@@ -205,6 +205,10 @@ class GhMockHarness:
         env = os.environ.copy()
         env["PATH"] = f"{self.mock_bin}:{env['PATH']}"
         env["GH_REPO_KEY"] = "example-org/memory"
+        # Actions runner 默认注入 GITHUB_REPOSITORY；"env 未设置"分支的测试前提
+        # 要求子进程不含该变量（本地无此 env 故此前本地全绿、runner 必红）。
+        # 显式剥离后再应用 self.env——测试显式传入的 GITHUB_REPOSITORY 仍然生效。
+        env.pop("GITHUB_REPOSITORY", None)
         # Apply any additional env vars passed to __init__
         env.update(self.env)
 
@@ -659,7 +663,7 @@ def test_workflow_calls_tracking_issue_script():
 def test_script_has_execute_permission():
     """git ls-files --stage shows mode 100755 for the new script."""
     result = subprocess.run(
-        ["git", "ls-files", "--stage", "scripts/branch_cleanup_issue.sh"],
+        ["git", "ls-files", "--stage", "src/infra_core/shell/branch_cleanup_issue.sh"],
         cwd=Path(__file__).parent.parent,
         capture_output=True,
         text=True,
