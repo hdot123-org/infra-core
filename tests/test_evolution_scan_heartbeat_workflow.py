@@ -142,3 +142,19 @@ def test_heartbeat_reusable_label_ensure_heartbeat_label():
         'gh --repo "$GITHUB_REPOSITORY" label create "evolution-heartbeat" --color D93F0B'
         in ensure["run"]
     )
+
+
+def test_reusable_must_not_carry_concurrency():
+    """reusable 本体禁止顶层 concurrency（caller 同名组 → GitHub 自死锁秒取消）。
+
+    实测（2026-08-29，memory #1071 切换首 tick）：caller 顶层 group
+    'evolution-scan' 与 callee 内 'evolution-scan' 同名时，run 级 deadlock
+    检测直接取消、零 job（"Canceling since a deadlock was detected for
+    concurrency group ... between a top level workflow and 'scan'"）。
+    per-repo 串行化归 caller 顶层 concurrency（消费仓契约测试锁定）。
+    """
+    for path in (_SCAN, _HEARTBEAT):
+        data = _load(path)
+        assert "concurrency" not in data, (
+            f"{path.name} reusable 不得携带顶层 concurrency（自死锁陷阱）"
+        )
