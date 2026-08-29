@@ -152,6 +152,9 @@ def test_reusable_must_not_carry_concurrency():
     检测直接取消、零 job（"Canceling since a deadlock was detected for
     concurrency group ... between a top level workflow and 'scan'"）。
     per-repo 串行化归 caller 顶层 concurrency（消费仓契约测试锁定）。
+
+    注：全量 workflow_call 泛化禁令见 test_naming_contract.py
+    TestReusableNoTopLevelConcurrency（INFRA-626）。
     """
     for path in (_SCAN, _HEARTBEAT):
         data = _load(path)

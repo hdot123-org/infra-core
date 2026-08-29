@@ -25,17 +25,18 @@
 
 name: Droid Review Shards
 
-# 同 head 去重（编排器注 2026-08-29）：synchronize/ready_for_review 竞态会为同一
-# head 触发多条并行 Droid Auto Review run（infra-core PR #61 实测 3 条并存，浪费
-# pve 池容量）。按 head SHA 分组 = 新 run 仅取消同 head 旧 run（内容相同，安全）；
-# 不同 head 各自独立组，互不互斥（安全方向限定）。
-# 回退链：PR 路径 caller 不传 head-sha（memory thin caller 的 inputs.head_sha 在
-# pull_request_target 下为空），被调 workflow 继承 caller 事件上下文 →
-# github.event.pull_request.head.sha；无 head 信息的 dispatch 兜底 run_id 唯一组，
-# 绝不允许空 key 把所有 run 折叠进同组互相取消。
-concurrency:
-  group: dr-${{ inputs.head_sha || github.event.pull_request.head.sha || github.run_id }}
-  cancel-in-progress: true
+# 禁止顶层 concurrency（INFRA-626）：reusable 携带顶层 concurrency 会与 caller
+# 顶层组名组合触发 GitHub run 级自死锁检测（evolution 系 #1071 首 tick 实测，
+# caller 'evolution-scan' × callee 同名组 → 零 job 秒取消）。per-repo 串行化/
+# 去重归 caller 顶层 concurrency。通用禁令由 test_naming_contract.py
+# TestReusableNoTopLevelConcurrency 对全部 workflow_call 文件锁定。
+#
+# 历史注（编排器注 2026-08-29，随 INFRA-626 移除）：本文件曾带
+# dr-${{ inputs.head_sha || github.event.pull_request.head.sha || github.run_id }}
+# 做 caller 级同 head 去重（PR #61 实测同 head 3 条并行 run）——迁移理由：被调
+# workflow 的顶层 concurrency 在 caller 组名不同时同样生效，跨仓同名 caller
+# 组合一撞即死锁；同 head 去重若消费仓需要，应在 caller 顶层 group 中按
+# head SHA 表达（caller 侧模板测试锁定），reusable 侧一律不携带。
 
 on:
   workflow_call:
