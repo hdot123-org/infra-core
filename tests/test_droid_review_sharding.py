@@ -668,6 +668,9 @@ rm -rf "$BASE_DIR" "$HEAD_DIR"
 
         验证 run_shard.sh 中的 droid exec 调用使用了 ${GITHUB_WORKSPACE:-$PWD}/head-src
         这样的绝对路径，而不是相对路径 head-src。这是 round-2 根因确诊的缺陷 A。
+
+        2026-08-29 起路径经 DROID_CWD 变量传递（重试 + 会话恢复共用同一路径），
+        本测试同时锁住定义处（必须含 ${GITHUB_WORKSPACE:-$PWD}）与调用处（--cwd "$DROID_CWD"）。
         """
         import re
 
@@ -675,6 +678,18 @@ rm -rf "$BASE_DIR" "$HEAD_DIR"
         assert script_path.exists(), "run_shard.sh must exist"
 
         content = script_path.read_text()
+
+        # DROID_CWD 定义处必须是绝对路径（含 ${GITHUB_WORKSPACE} 或 ${PWD}）
+        def_pattern = r'DROID_CWD="([^"]+)"'
+        def_matches = re.findall(def_pattern, content)
+        assert len(def_matches) == 1, "run_shard.sh 必须唯一定义 DROID_CWD"
+        for value in def_matches:
+            assert "${GITHUB_WORKSPACE" in value or "${PWD" in value, (
+                f"DROID_CWD must use absolute path with ${{GITHUB_WORKSPACE}} or ${{PWD}}, but got: {value}"
+            )
+            assert not value.startswith("head-src"), (
+                "DROID_CWD must not use relative path 'head-src', it causes droid CLI 0.200.0 to silently crash"
+            )
 
         # 查找 droid exec 调用及其 --cwd 参数
         # 匹配模式：droid exec ... --cwd <path>
@@ -685,19 +700,21 @@ rm -rf "$BASE_DIR" "$HEAD_DIR"
 
         for match in matches:
             # 检查是否包含 --cwd 参数
-            cwd_pattern = r"--cwd\s+(\S+)"
+            cwd_pattern = r'--cwd\s+"?\$DROID_CWD"?'
             cwd_matches = re.findall(cwd_pattern, match)
 
             if cwd_matches:
-                for cwd_value in cwd_matches:
-                    # 验证 --cwd 值是绝对路径（包含 ${GITHUB_WORKSPACE} 或 ${PWD}）
-                    assert "${GITHUB_WORKSPACE" in cwd_value or "${PWD" in cwd_value, (
-                        f"--cwd must use absolute path with ${{GITHUB_WORKSPACE}} or ${{PWD}}, but got: {cwd_value}"
-                    )
-                    # 确保不是相对路径
-                    assert not cwd_value.startswith("head-src"), (
-                        "--cwd must not use relative path 'head-src', it causes droid CLI 0.200.0 to silently crash"
-                    )
+                # --cwd 引用 $DROID_CWD → 绝对路径契约由定义处断言保证
+                continue
+            # 允许直接内联绝对路径形态（等价）
+            inline_pattern = r"--cwd\s+(\S+)"
+            for cwd_value in re.findall(inline_pattern, match):
+                assert "${GITHUB_WORKSPACE" in cwd_value or "${PWD" in cwd_value, (
+                    f"--cwd must use absolute path with ${{GITHUB_WORKSPACE}} or ${{PWD}}, but got: {cwd_value}"
+                )
+                assert not cwd_value.startswith("head-src"), (
+                    "--cwd must not use relative path 'head-src', it causes droid CLI 0.200.0 to silently crash"
+                )
 
 
 # ══════════════════════════════════════════════════════════════════════
