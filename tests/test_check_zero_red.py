@@ -2,7 +2,9 @@
 
 User mandate (2026-08-28): "写死不允许红色合并，一个都不允许"
 These tests verify that the ci-ok gate correctly fails when any check-run
-(including advisory jobs with continue-on-error) has a non-success conclusion.
+(including advisory jobs) has a non-success conclusion. INFRA-595: advisory
+jobs carry no continue-on-error, so a failure is a red check-run that both
+the needs.result gate and the GitHub API scan block.
 """
 
 import subprocess
@@ -137,12 +139,15 @@ class TestCIWorkflowZeroRed:
         ci_ok_section = content[ci_ok_start:]
 
         # Verify advisory jobs are checked with FAILED=1 logic
+        # INFRA-595: advisory jobs must NOT set continue-on-error (which makes
+        # .result always "success"); with it removed, .result is the real
+        # conclusion and this gate is effective.
         assert "advisory-dependency-security-scan.result" in ci_ok_section, (
             "Should check advisory-dependency-security-scan result"
         )
         assert "advisory-deptry.result" in ci_ok_section, "Should check advisory-deptry result"
         assert "advisory-telemetry-audit.result" in ci_ok_section, (
-            "Should check advisory-telemetry-audit result result"
+            "Should check advisory-telemetry-audit result"
         )
 
         # Verify they set FAILED=1 on non-success
@@ -174,22 +179,27 @@ class TestZeroRedPolicy:
             "Should reference the user mandate or zero-red policy"
         )
 
-    def test_advisory_jobs_have_continue_on_error(self):
-        """Verify advisory jobs still have continue-on-error: true."""
+    def test_advisory_jobs_no_continue_on_error(self):
+        """INFRA-595: advisory jobs must NOT have continue-on-error (zero-red).
+
+        continue-on-error masks failures: needs.<job>.result reports the
+        post-masking value (always "success"), making the ci-ok gate a no-op
+        (proven in run 33129232081). Zero-red requires red check-runs.
+        """
         ci_yml = Path(__file__).parent.parent / ".github" / "workflows" / "ci.yml"
         content = ci_yml.read_text()
 
-        # Advisory jobs should have continue-on-error to preserve data collection
+        # Advisory jobs must exist
         assert "advisory-dependency-security-scan:" in content, (
             "Should have advisory-dependency-security-scan job"
         )
         assert "advisory-deptry:" in content, "Should have advisory-deptry job"
         assert "advisory-telemetry-audit:" in content, "Should have advisory-telemetry-audit job"
 
-        # Count continue-on-error occurrences (should be at least 3 for advisory jobs)
+        # No job-level continue-on-error anywhere: failures must stay red
         continue_on_error_count = content.count("continue-on-error: true")
-        assert continue_on_error_count >= 3, (
-            f"Expected at least 3 continue-on-error: true (one per advisory job), found {continue_on_error_count}"
+        assert continue_on_error_count == 0, (
+            f"Expected 0 continue-on-error: true (zero-red: INFRA-595), found {continue_on_error_count}"
         )
 
 
