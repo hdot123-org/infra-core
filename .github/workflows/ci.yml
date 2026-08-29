@@ -9,9 +9,14 @@
 # auto-merge.yml 则整步禁 checkout（契约测试锁定）。
 #
 # Step2 wiring: structured jobs (guards / test groups / domain mypy / advisory)
+# 2026-08-29 容量收敛（runner-capacity-one-shot）：19 job → 10 job——
+#   lint-bundle（ruff/shellcheck/actionlint/repo-consistency 四合一）、
+#   type-bundle（mypy×3）、advisory-bundle（advisory×3）、
+#   test-groups（schema/security/business_policy 三段顺序跑），
+#   pytest / integration-tests / e2e-tests / guards / health-check / ci-ok
+#   六个独立保持。branch protection required check 仅 ci-ok（聚合零红已
+#   覆盖 per-job 要求）；INFRA-595 零红铁律逐项判定保留。
 # Coverage ramp-up: 45% baseline, +5 per release, target 80%.
-# Existing 6 check names preserved (naming contract):
-#   pytest, ruff, actionlint, mypy, Block non-owner governance modifications, ci-ok
 name: CI
 
 on:
@@ -20,8 +25,15 @@ on:
   pull_request:
     branches: [main]
 
+# 2026-08-29 容量收敛：同一 ref 的 PR 连环 push 取消进行中的旧 run（省
+# pve 双机排队）；main push 永不取消（禁止裸 true——合并后 main 全绿验证
+# 不能被后续事件打断）。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  # ─── Existing jobs (naming contract: DO NOT RENAME) ───
+  # ─── Aggregation anchors (naming contract: DO NOT RENAME) ───
 
   pytest:
     name: pytest
@@ -65,8 +77,10 @@ jobs:
         # for local inspection. Remote upload (Codecov/Coveralls) deferred to
         # a later feature when a token is available.
 
-  ruff:
-    name: ruff
+  # ─── Bundles (2026-08-29 容量收敛：19 job → 10 job) ───
+
+  lint-bundle:
+    name: lint-bundle
     runs-on: [self-hosted, pve-linux]
     steps:
       - name: Workspace guard (sparse residue detox)
@@ -94,26 +108,26 @@ jobs:
           ruff check .
           ruff format --check .
 
-  actionlint:
-    name: actionlint
-    runs-on: [self-hosted, pve-linux]
-    steps:
-      - name: Workspace guard (sparse residue detox)
+      - name: Install shellcheck to RUNNER_TEMP
+        shell: bash
         run: |
-          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
-          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
-          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
-          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
-          # 工作树残缺时本地 composite action 同样无法解析。
-          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
-            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
-            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
-              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
-              rm -rf "$GITHUB_WORKSPACE/.git"
-            fi
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            wget -q https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz
+            tar -xf shellcheck-v0.10.0.linux.x86_64.tar.xz -C "${RUNNER_TEMP}"
+            export PATH="${RUNNER_TEMP}/shellcheck-v0.10.0:$PATH"
+            echo "${RUNNER_TEMP}/shellcheck-v0.10.0" >> "$GITHUB_PATH"
+            rm -f shellcheck-v0.10.0.linux.x86_64.tar.xz
           fi
+          shellcheck --version | head -2
 
-      - uses: actions/checkout@v5
+      - name: Shell lint (find *.sh -exec shellcheck -x)
+        shell: bash
+        run: |
+          find . -name '*.sh' \
+            -not -path './.venv/*' \
+            -not -path './.git/*' \
+            -not -path './node_modules/*' \
+            -print0 | xargs -0 shellcheck -x
 
       - name: Run actionlint
         run: |
@@ -142,8 +156,11 @@ jobs:
             ./actionlint -color
           fi
 
-  mypy:
-    name: mypy
+      - name: Run repo delivery consistency check
+        run: bash scripts/repo_health_check.sh --ci
+
+  type-bundle:
+    name: type-bundle
     runs-on: [self-hosted, pve-linux]
     steps:
       - name: Workspace guard (sparse residue detox)
@@ -169,7 +186,85 @@ jobs:
       - name: Run mypy
         run: mypy --strict src/infra_core
 
-  # ─── Guards (security markers + structural invariants) ───
+      - name: "Enforce mypy --strict (src/)"
+        run: mypy --strict src/infra_core
+
+      - name: "Enforce mypy --strict (scripts/)"
+        run: mypy --strict scripts/
+
+  advisory-bundle:
+    name: advisory-bundle
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run pip-audit
+        run: pip-audit --progress-spinner off
+
+      - name: Install deptry
+        run: pip install deptry
+
+      - name: Run deptry
+        run: deptry .
+
+      - name: Run telemetry coverage audit
+        run: bash scripts/audit_telemetry_coverage.sh
+
+  test-groups:
+    name: test-groups
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - name: Workspace guard (sparse residue detox)
+        run: |
+          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
+          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
+          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
+          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
+          # 工作树残缺时本地 composite action 同样无法解析。
+          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
+            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
+              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
+              rm -rf "$GITHUB_WORKSPACE/.git"
+            fi
+          fi
+
+      - uses: actions/checkout@v5
+
+      - name: Setup venv (per-run isolation)
+        uses: ./.github/actions/setup-venv
+
+      - name: "Run schema marker tests (-m schema, -n 4)"
+        run: pytest -q -m schema -n 4 --no-cov
+
+      - name: "Run security marker tests (-m security, -n 4)"
+        run: pytest -q -m security -n 4 --no-cov
+
+      - name: "Run business_policy marker tests (-m business_policy, -n 4)"
+        run: pytest -q -m business_policy -n 4 --no-cov
+
+  # ─── Independent jobs ───
 
   guards:
     name: guards
@@ -217,62 +312,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python scripts/check_pr_ref_consistency.py ${{ github.event.pull_request.number }}
-
-  # ─── Specialized test groups (pytest markers) ───
-
-  security-tests:
-    name: security-tests
-    runs-on: [self-hosted, pve-linux]
-    steps:
-      - name: Workspace guard (sparse residue detox)
-        run: |
-          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
-          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
-          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
-          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
-          # 工作树残缺时本地 composite action 同样无法解析。
-          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
-            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
-            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
-              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
-              rm -rf "$GITHUB_WORKSPACE/.git"
-            fi
-          fi
-
-      - uses: actions/checkout@v5
-
-      - name: Setup venv (per-run isolation)
-        uses: ./.github/actions/setup-venv
-
-      - name: "Run security marker tests (-m security, -n 4)"
-        run: pytest -q -m security -n 4 --no-cov
-
-  schema-tests:
-    name: schema-tests
-    runs-on: [self-hosted, pve-linux]
-    steps:
-      - name: Workspace guard (sparse residue detox)
-        run: |
-          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
-          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
-          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
-          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
-          # 工作树残缺时本地 composite action 同样无法解析。
-          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
-            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
-            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
-              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
-              rm -rf "$GITHUB_WORKSPACE/.git"
-            fi
-          fi
-
-      - uses: actions/checkout@v5
-
-      - name: Setup venv (per-run isolation)
-        uses: ./.github/actions/setup-venv
-
-      - name: "Run schema marker tests (-m schema, -n 4)"
-        run: pytest -q -m schema -n 4 --no-cov
 
   integration-tests:
     name: integration-tests
@@ -331,168 +370,6 @@ jobs:
       - name: CLI smoke test (entry points callable)
         run: bash scripts/cli_smoke_test.sh
 
-  # ─── Domain mypy (strict per domain) ───
-
-  mypy-src-strict:
-    name: "Enforce mypy --strict (src/)"
-    runs-on: [self-hosted, pve-linux]
-    steps:
-      - name: Workspace guard (sparse residue detox)
-        run: |
-          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
-          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
-          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
-          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
-          # 工作树残缺时本地 composite action 同样无法解析。
-          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
-            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
-            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
-              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
-              rm -rf "$GITHUB_WORKSPACE/.git"
-            fi
-          fi
-
-      - uses: actions/checkout@v5
-
-      - name: Setup venv (per-run isolation)
-        uses: ./.github/actions/setup-venv
-
-      - name: "mypy --strict src/infra_core"
-        run: mypy --strict src/infra_core
-
-  mypy-scripts-strict:
-    name: "Enforce mypy --strict (scripts/)"
-    runs-on: [self-hosted, pve-linux]
-    steps:
-      - name: Workspace guard (sparse residue detox)
-        run: |
-          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
-          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
-          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
-          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
-          # 工作树残缺时本地 composite action 同样无法解析。
-          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
-            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
-            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
-              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
-              rm -rf "$GITHUB_WORKSPACE/.git"
-            fi
-          fi
-
-      - uses: actions/checkout@v5
-
-      - name: Setup venv (per-run isolation)
-        uses: ./.github/actions/setup-venv
-
-      - name: "mypy --strict scripts/"
-        run: mypy --strict scripts/
-
-  # ─── Advisory scans (INFRA-595: zero-red — failures block merge) ───
-
-  advisory-dependency-security-scan:
-    name: "Advisory dependency security scan"
-    runs-on: [self-hosted, pve-linux]
-    steps:
-      - name: Workspace guard (sparse residue detox)
-        run: |
-          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
-          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
-          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
-          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
-          # 工作树残缺时本地 composite action 同样无法解析。
-          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
-            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
-            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
-              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
-              rm -rf "$GITHUB_WORKSPACE/.git"
-            fi
-          fi
-
-      - uses: actions/checkout@v5
-
-      - name: Setup venv (per-run isolation)
-        uses: ./.github/actions/setup-venv
-
-      - name: Install pip-audit
-        run: pip install pip-audit
-
-      - name: Run pip-audit
-        run: pip-audit --progress-spinner off
-
-  advisory-deptry:
-    name: "Advisory deptry"
-    runs-on: [self-hosted, pve-linux]
-    steps:
-      - name: Workspace guard (sparse residue detox)
-        run: |
-          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
-          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
-          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
-          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
-          # 工作树残缺时本地 composite action 同样无法解析。
-          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
-            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
-            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
-              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
-              rm -rf "$GITHUB_WORKSPACE/.git"
-            fi
-          fi
-
-      - uses: actions/checkout@v5
-
-      - name: Setup venv (per-run isolation)
-        uses: ./.github/actions/setup-venv
-
-      - name: Install deptry
-        run: pip install deptry
-
-      - name: Run deptry
-        run: deptry .
-
-  # ─── Gap-filling jobs (M3 基础层补齐，参照 memory-core 原版) ───
-
-  shellcheck:
-    name: shellcheck
-    runs-on: [self-hosted, pve-linux]
-    steps:
-      - name: Workspace guard (sparse residue detox)
-        run: |
-          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
-          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
-          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
-          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
-          # 工作树残缺时本地 composite action 同样无法解析。
-          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
-            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
-            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
-              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
-              rm -rf "$GITHUB_WORKSPACE/.git"
-            fi
-          fi
-
-      - uses: actions/checkout@v5
-
-      - name: Install shellcheck to RUNNER_TEMP
-        shell: bash
-        run: |
-          if ! command -v shellcheck >/dev/null 2>&1; then
-            wget -q https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz
-            tar -xf shellcheck-v0.10.0.linux.x86_64.tar.xz -C "${RUNNER_TEMP}"
-            export PATH="${RUNNER_TEMP}/shellcheck-v0.10.0:$PATH"
-            echo "${RUNNER_TEMP}/shellcheck-v0.10.0" >> "$GITHUB_PATH"
-            rm -f shellcheck-v0.10.0.linux.x86_64.tar.xz
-          fi
-          shellcheck --version | head -2
-
-      - name: Shell lint (find *.sh -exec shellcheck -x)
-        shell: bash
-        run: |
-          find . -name '*.sh' \
-            -not -path './.venv/*' \
-            -not -path './.git/*' \
-            -not -path './node_modules/*' \
-            -print0 | xargs -0 shellcheck -x
-
   health-check:
     name: health-check
     runs-on: [self-hosted, pve-linux]
@@ -520,81 +397,6 @@ jobs:
       - name: Run CI health check
         run: bash scripts/ci_health_check.sh
 
-  repo-consistency:
-    name: repo-consistency
-    runs-on: [self-hosted, pve-linux]
-    steps:
-      - name: Workspace guard (sparse residue detox)
-        run: |
-          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
-          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
-          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
-          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
-          # 工作树残缺时本地 composite action 同样无法解析。
-          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
-            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
-            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
-              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
-              rm -rf "$GITHUB_WORKSPACE/.git"
-            fi
-          fi
-
-      - uses: actions/checkout@v5
-
-      - name: Run repo delivery consistency check
-        run: bash scripts/repo_health_check.sh --ci
-
-  advisory-telemetry-audit:
-    name: "Advisory telemetry coverage audit"
-    runs-on: [self-hosted, pve-linux]
-    steps:
-      - name: Workspace guard (sparse residue detox)
-        run: |
-          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
-          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
-          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
-          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
-          # 工作树残缺时本地 composite action 同样无法解析。
-          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
-            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
-            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
-              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
-              rm -rf "$GITHUB_WORKSPACE/.git"
-            fi
-          fi
-
-      - uses: actions/checkout@v5
-
-      - name: Run telemetry coverage audit
-        run: bash scripts/audit_telemetry_coverage.sh
-
-  business-policy-tests:
-    name: business-policy-tests
-    runs-on: [self-hosted, pve-linux]
-    steps:
-      - name: Workspace guard (sparse residue detox)
-        run: |
-          # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
-          # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
-          # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
-          # checkout 前检测残留并删除 .git 强制全新克隆；必须内联 run——
-          # 工作树残缺时本地 composite action 同样无法解析。
-          if [ -e "$GITHUB_WORKSPACE/.git" ]; then
-            SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
-            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/.github/actions/setup-venv/action.yml" ]; then
-              echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
-              rm -rf "$GITHUB_WORKSPACE/.git"
-            fi
-          fi
-
-      - uses: actions/checkout@v5
-
-      - name: Setup venv (per-run isolation)
-        uses: ./.github/actions/setup-venv
-
-      - name: "Run business_policy marker tests (-m business_policy, -n 4)"
-        run: pytest -q -m business_policy -n 4 --no-cov
-
   # ─── ci-ok: aggregation gate (naming contract: DO NOT RENAME) ───
   # Zero-red enforcement: scans ALL check-runs via GitHub API and fails if any
   # has a non-success conclusion. This makes ci-ok the single source of truth
@@ -604,30 +406,18 @@ jobs:
   ci-ok:
     name: ci-ok
     needs:
-      # Existing (naming contract)
+      # Aggregation anchor
       - pytest
-      - ruff
-      - actionlint
-      - mypy
-      # Guards
+      # Bundles（2026-08-29 容量收敛）
+      - lint-bundle
+      - type-bundle
+      - advisory-bundle
+      - test-groups
+      # Independent jobs
       - guards
-      # Specialized test groups
-      - security-tests
-      - schema-tests
       - integration-tests
       - e2e-tests
-      # Domain mypy
-      - mypy-src-strict
-      - mypy-scripts-strict
-      # Advisory (INFRA-595: zero-red — no continue-on-error, failures block)
-      - advisory-dependency-security-scan
-      - advisory-deptry
-      # Gap-filling jobs (M3 基础层补齐)
-      - shellcheck
       - health-check
-      - repo-consistency
-      - advisory-telemetry-audit
-      - business-policy-tests
     runs-on: [self-hosted, pve-linux]
     if: always()
     steps:
@@ -635,46 +425,27 @@ jobs:
         run: |
           FAILED=0
 
-          # Existing jobs (naming contract)
-          echo "Checking existing jobs..."
+          echo "Checking aggregation anchor..."
           [[ "${{ needs.pytest.result }}" == "success" ]] || { echo "FAIL: pytest"; FAILED=1; }
-          [[ "${{ needs.ruff.result }}" == "success" ]] || { echo "FAIL: ruff"; FAILED=1; }
-          [[ "${{ needs.actionlint.result }}" == "success" ]] || { echo "FAIL: actionlint"; FAILED=1; }
-          [[ "${{ needs.mypy.result }}" == "success" ]] || { echo "FAIL: mypy"; FAILED=1; }
 
-          # Guards
-          echo "Checking guards..."
+          echo "Checking bundles..."
+          [[ "${{ needs.lint-bundle.result }}" == "success" ]] || { echo "FAIL: lint-bundle"; FAILED=1; }
+          [[ "${{ needs.type-bundle.result }}" == "success" ]] || { echo "FAIL: type-bundle"; FAILED=1; }
+          [[ "${{ needs.advisory-bundle.result }}" == "success" ]] || { echo "FAIL: advisory-bundle"; FAILED=1; }
+          [[ "${{ needs.test-groups.result }}" == "success" ]] || { echo "FAIL: test-groups"; FAILED=1; }
+
+          echo "Checking independent jobs..."
           [[ "${{ needs.guards.result }}" == "success" ]] || { echo "FAIL: guards"; FAILED=1; }
-
-          # Specialized test groups
-          echo "Checking specialized test groups..."
-          [[ "${{ needs.security-tests.result }}" == "success" ]] || { echo "FAIL: security-tests"; FAILED=1; }
-          [[ "${{ needs.schema-tests.result }}" == "success" ]] || { echo "FAIL: schema-tests"; FAILED=1; }
           [[ "${{ needs.integration-tests.result }}" == "success" ]] || { echo "FAIL: integration-tests"; FAILED=1; }
           [[ "${{ needs.e2e-tests.result }}" == "success" ]] || { echo "FAIL: e2e-tests"; FAILED=1; }
-
-          # Domain mypy
-          echo "Checking domain mypy..."
-          [[ "${{ needs.mypy-src-strict.result }}" == "success" ]] || { echo "FAIL: mypy-src-strict"; FAILED=1; }
-          [[ "${{ needs.mypy-scripts-strict.result }}" == "success" ]] || { echo "FAIL: mypy-scripts-strict"; FAILED=1; }
-
-          # Gap-filling jobs (M3 基础层补齐)
-          echo "Checking gap-filling jobs..."
-          [[ "${{ needs.shellcheck.result }}" == "success" ]] || { echo "FAIL: shellcheck"; FAILED=1; }
           [[ "${{ needs.health-check.result }}" == "success" ]] || { echo "FAIL: health-check"; FAILED=1; }
-          [[ "${{ needs.repo-consistency.result }}" == "success" ]] || { echo "FAIL: repo-consistency"; FAILED=1; }
-          [[ "${{ needs.business-policy-tests.result }}" == "success" ]] || { echo "FAIL: business-policy-tests"; FAILED=1; }
 
-          # Advisory jobs (zero-red enforcement: all checks must pass)
-          # INFRA-595: advisory jobs no longer set continue-on-error — that
-          # made needs.<job>.result always "success" (post-masking value) and
-          # this gate a no-op (proven in run 33129232081: advisory-deptry
-          # check-run was "failure" while .result echoed "success"). With
-          # continue-on-error removed, .result reports the real conclusion.
-          echo "Checking advisory jobs (zero-red policy)..."
-          [[ "${{ needs.advisory-dependency-security-scan.result }}" == "success" ]] || { echo "FAIL: advisory-dependency-security-scan"; FAILED=1; }
-          [[ "${{ needs.advisory-deptry.result }}" == "success" ]] || { echo "FAIL: advisory-deptry"; FAILED=1; }
-          [[ "${{ needs.advisory-telemetry-audit.result }}" == "success" ]] || { echo "FAIL: advisory-telemetry-audit"; FAILED=1; }
+          # Advisory zero-red enforcement folded into advisory-bundle above:
+          # INFRA-595 advisory jobs no longer set continue-on-error — that made
+          # needs.<job>.result always "success" (post-masking value) and this
+          # gate a no-op (proven in run 33129232081: advisory-deptry check-run
+          # was "failure" while .result echoed "success"). The bundle job has
+          # no continue-on-error either, so .result reports the real conclusion.
 
           if [[ "$FAILED" -eq 1 ]]; then
             echo "❌ One or more required jobs failed"

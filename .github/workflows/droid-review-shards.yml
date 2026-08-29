@@ -359,11 +359,35 @@ jobs:
       - name: Install Droid CLI
         run: |
           set -eu
-          # (B) Fix: Install droid CLI binary (runner doesn't have it by default).
-          # Copied from droid-action@e5ae502's install step.
-          curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://app.factory.ai/cli | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          "$HOME/.local/bin/droid" --version
+          # 宿主优先（照抄 actionlint host-first 模式，PR #53）：ce-01 五台 pve
+          # runner 已预装 /usr/local/bin/droid（Layer 1 离线化）。背景：Factory CLI
+          # 下载脚本是 node-00 出口拓扑下最后一条非镜像下载路径——PR #52
+          # review-shard 被 runner shutdown 杀死在下载中、PR #61 首轮同因红
+          # （rerun 自愈）。PATH 命中且版本 ≥0.200 直接使用，零外网下载；宿主
+          # 缺失/过旧时 fallback 原 curl 下载路径（GitHub-hosted 兼容）并打 ::warning。
+          HOST_OK=0
+          if command -v droid >/dev/null 2>&1; then
+            HOST_VERSION="$(droid --version 2>/dev/null | head -1 | grep -oE '[0-9]+(\.[0-9]+)*' | head -1)" || true
+            HOST_MAJOR="${HOST_VERSION%%.*}"
+            HOST_MINOR="${HOST_VERSION#*.}"
+            HOST_MINOR="${HOST_MINOR%%.*}"
+            if [ "${HOST_MAJOR:-0}" -gt 0 ] || { [ "${HOST_MAJOR:-0}" -eq 0 ] && [ "${HOST_MINOR:-0}" -ge 200 ]; }; then
+              echo "✓ Using host droid CLI: $(command -v droid) ($(droid --version 2>/dev/null | head -1))"
+              HOST_OK=1
+            else
+              echo "::warning::host droid ${HOST_VERSION:-unknown} < 0.200, falling back to download"
+            fi
+          else
+            echo "::warning::droid not found on host, falling back to download"
+          fi
+          if [ "$HOST_OK" -eq 1 ]; then
+            droid --version
+          else
+            curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://app.factory.ai/cli | sh
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+            # GITHUB_PATH 对本步不生效，就地自检走全路径（后续步骤已含 ~/.local/bin）
+            "$HOME/.local/bin/droid" --version
+          fi
 
       - name: Write BYOM settings file
         # LLM 链路：ts 内网直达 Kong（tailscale serve, tailnet only, LE 证书）。

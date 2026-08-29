@@ -48,24 +48,19 @@ infra-core 用自己的 governance 门禁保护自身（self-bootstrap）：
 
 ## 5. 门禁矩阵
 
-`CI` workflow 共 19 个 job：既有 4 个（命名契约）+ guards + 4 个专项测试组 + 2 个分域 mypy + 3 个 advisory + 基础层补齐 4 个 + ci-ok 聚合。结构契约由 `tests/test_ci_structure_contract.py` 锁定（job 集合快照只对齐当前 main，后续 ci.yml 变更由对应 feature 同步该测试）。
+`CI` workflow 共 10 个 job（2026-08-29 容量收敛：19 → 10 bundle 化，降低 pve 双机排队）：pytest 锚点 + lint-bundle（ruff/shellcheck/actionlint/repo-consistency 四合一）+ type-bundle（mypy×3）+ advisory-bundle（advisory×3）+ test-groups（schema/security/business_policy 三段顺序）+ guards + integration-tests + e2e-tests + health-check + ci-ok 聚合。结构契约由 `tests/test_ci_structure_contract.py` 锁定（job 集合快照只对齐当前 main，后续 ci.yml 变更由对应 feature 同步该测试）。
 
 | 门禁 | workflow | 说明 |
 |------|----------|------|
 | pytest | `CI` | 单元测试 + 覆盖率地板（`--cov-fail-under`，ramp-up 计划见 pyproject.toml） |
-| ruff | `CI` | lint + format 检查 |
-| actionlint | `CI` | workflow 语法检查 |
-| mypy | `CI` | mypy（历史 check 名保留） |
+| lint-bundle | `CI` | lint 四合一：ruff（check+format 两半）/ shellcheck / actionlint（宿主优先）/ repo 交付一致性检查（`scripts/repo_health_check.sh --ci`） |
+| type-bundle | `CI` | mypy×3：基础 src 检查 + 分域 `mypy --strict`（src/infra_core 与 scripts/） |
 | guards | `CI` | 4 个守卫脚本：边界污染 / 文档分类 / fix-has-test / PR 引用一致性（后两个 PR-only，依赖 GH_TOKEN） |
-| security-tests / schema-tests / integration-tests / e2e-tests | `CI` | 专项测试组，按 pytest marker 分组（`-m <marker> -n 4 --no-cov`）；e2e 附 CLI 冒烟 |
-| mypy-src-strict / mypy-scripts-strict | `CI` | 分域 `mypy --strict`（src/infra_core 与 scripts/） |
-| advisory-dependency-security-scan / advisory-deptry | `CI` | advisory 扫描（pip-audit / deptry），INFRA-595 零红：无 `continue-on-error`，失败即红 check-run，ci-ok 按 `.result` 阻断（曾有 `continue-on-error` 时 `.result` 恒为 success，判定空转，run 33129232081 实证） |
-| advisory-telemetry-audit | `CI` | advisory：遥测覆盖率审计（`scripts/audit_telemetry_coverage.sh`），INFRA-595 零红：无 `continue-on-error`，失败即红，ci-ok 按 `.result` 阻断（同上） |
-| shellcheck | `CI` | shell 脚本静态检查 |
+| test-groups | `CI` | 专项测试组 bundle：schema/security/business_policy 三段顺序跑（`-m <marker> -n 4 --no-cov`） |
+| advisory-bundle | `CI` | advisory 三合一（pip-audit / deptry / 遥测覆盖率审计 `scripts/audit_telemetry_coverage.sh`），INFRA-595 零红：无 `continue-on-error`，失败即红 check-run，ci-ok 按 `.result` 阻断（曾有 `continue-on-error` 时 `.result` 恒为 success，判定空转，run 33129232081 实证） |
+| integration-tests / e2e-tests | `CI` | 独立专项组（`-m <marker> -n 4 --no-cov`）；e2e 附 CLI 冒烟 |
 | health-check | `CI` | CI 健康自检（`scripts/ci_health_check.sh`） |
-| repo-consistency | `CI` | 仓库交付一致性检查（`scripts/repo_health_check.sh --ci`） |
-| business-policy-tests | `CI` | 业务策略测试组（`-m business_policy -n 4 --no-cov`） |
-| ci-ok | `CI` | 聚合（branch protection required check），逐项显式阻断全部 18 个前置 job（含 advisory，按 `.result`；INFRA-595），另有 GitHub API 全 check-runs 零红扫描双保险 |
+| ci-ok | `CI` | 聚合（branch protection required check），逐项显式阻断全部 9 个前置 job（含 advisory-bundle，按 `.result`；INFRA-595），另有 GitHub API 全 check-runs 零红扫描双保险 |
 | governance | `Evolution Governance` | 受保护路径 owner 门禁（pull_request_target，执行 shipped governance-check action） |
 | release | `Release Please` | 非门禁：发版管道（schedule/push(paths)/dispatch，DISPATCH_TOKEN，详见第 6 节） |
 

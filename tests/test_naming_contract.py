@@ -535,7 +535,7 @@ class TestAutoMergeTriggerContract:
     验证 infra-core 自仓 auto-merge.yml 恢复 memory-core 同构触发面：
     - workflow 名 "Auto Merge"（字节级）
     - 四触发器：workflow_run(CI/QA/Droid Auto Review/Evolution Governance completed)
-      + pull_request_target(opened/synchronize/reopened) + schedule */10 + workflow_dispatch
+      + pull_request_target(opened/synchronize/reopened) + schedule */30 + workflow_dispatch
     - INFRA-428 concurrency 组级排队：group=auto-merge-pipeline, cancel-in-progress=false
     - triage 脚本路径必须真实存在（M2 桩引用旧 scripts/ 路径的 exit-127 回归守卫）
     - 合并动作钉住 shared-workflows action + DISPATCH_TOKEN（GITHUB_TOKEN 递归防护铁律）
@@ -569,10 +569,11 @@ class TestAutoMergeTriggerContract:
         ), f"workflow_run names drifted: {wr['workflows']}"
         assert wr["types"] == ["completed"]
 
-    def test_auto_merge_schedule_cron_10min(self):
-        """schedule 兜底扫描节奏为 */10（全绿 PR ≤10min 收敛的契约来源）"""
+    def test_auto_merge_schedule_cron_30min(self):
+        """schedule 兜底扫描节奏为 */30（2026-08-29 容量收敛 */10→*/30：
+        降低 pve 双机 schedule 触发量；快速路径 workflow_run 不受影响）"""
         data = self._load_workflow()
-        assert data[True]["schedule"] == [{"cron": "*/10 * * * *"}]
+        assert data[True]["schedule"] == [{"cron": "*/30 * * * *"}]
 
     def test_auto_merge_pr_target_types(self):
         """pull_request_target 类型：opened/synchronize/reopened"""
