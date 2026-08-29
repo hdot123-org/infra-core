@@ -1,0 +1,127 @@
+# Droid Review Watchdog Handlers — reusable handler pipeline（M4 门禁切换，gate-watchdog-automerge）
+#
+# 被 memory-core 等 watchdog thin caller 调用，承接 self-heal-rerun / cancel-on-ci-fail
+# 两个 handler job 的执行体。
+#
+# quota-sweep 不在本文件——VAL-GATE-107 契约要求 artifact 前缀过滤
+# （startswith("droid-review-debug-")）与 run 名过滤（name == "Droid Auto Review"）
+# 保留在 caller 文件可断言，且 schedule 触发器只能由 caller 承载（workflow_call
+# 不能挂 schedule/workflow_run）。
+#
+# 事件门控由 caller 承载：caller 的 job 级 if 按 workflow_run.name 精确匹配
+# 事件源（github 事件上下文只在 caller 求值），本文件只按 inputs.mode 选择
+# 对应 handler——本文件不引用任何具体 workflow 名，避免双份守卫漂移。
+#
+# 与 memory-core 原内联实现的差异（reusable 化适配，行为等价）：
+#   - runs-on: ubuntu-latest → [self-hosted, pve-linux]（runner 铁律 2026-08-26）
+#   - vars.WATCHDOG_MAX_ATTEMPT 由 caller 以 max-attempt input 转发（vars context
+#     在 caller 文件引用，显式传递避免隐式依赖）；脚本内 -z 回退保持
+#   - 事件上下文（run id / run attempt / head sha）由 caller 以 inputs 显式转发，
+#     本文件不依赖 github.event.workflow_run 上下文流动
+#
+# 门禁语义不变（见 memory-core 原文件头注释）：
+#   - watchdog 只请求 rerun / cancel，不改变任何 check 结论；失败轮保持 failure
+#     结算（fail-closed），rerun 的那轮才是有效 review
+#   - 本文件零 checkout（self-hosted 共享持久工作区防毒铁律 2026-08-28）：
+#     两个 handler 均为纯 gh API 调用，对工作区零写入
+
+name: Droid Review Watchdog Handlers
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: 'Handler to run: self-heal-rerun | cancel-on-ci-fail'
+        required: true
+        type: string
+      run-id:
+        description: '上游 workflow_run.id'
+        required: true
+        type: number
+      run-attempt:
+        description: '上游 workflow_run.run_attempt'
+        required: true
+        type: number
+      head-sha:
+        description: '上游 workflow_run.head_sha（cancel-on-ci-fail 用）'
+        required: false
+        type: string
+        default: ''
+      max-attempt:
+        description: 'rerun 限界（caller 转发 vars.WATCHDOG_MAX_ATTEMPT；空时脚本回退 3）'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  actions: write
+
+jobs:
+  self-heal-rerun:
+    # 503 自愈 rerun（TD-503-01 v2）：仅处理 Droid Auto Review 的失败 run；
+    # run_attempt 限界防止 rerun 风暴（守卫在 caller，本 job 由 mode 门控）
+    if: inputs.mode == 'self-heal-rerun'
+    runs-on: [self-hosted, pve-linux]
+    timeout-minutes: 10
+    steps:
+      - name: Rerun droid-review on infra-transient failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ inputs.run-id }}
+          RUN_ATTEMPT: ${{ inputs.run-attempt }}
+          MAX_ATTEMPT: ${{ inputs.max-attempt }}
+        run: |
+          set -eu
+          # max-attempt fallback（变量缺失时使用默认值并打日志）
+          if [ -z "${MAX_ATTEMPT:-}" ]; then MAX_ATTEMPT=3; echo "max-attempt 未设置、使用默认值 3"; fi
+          if [ "$RUN_ATTEMPT" -ge "$MAX_ATTEMPT" ]; then
+            echo "Run $RUN_ID already at attempt $RUN_ATTEMPT (>=$MAX_ATTEMPT). Skipping; needs manual attention."
+            exit 0
+          fi
+          echo "Droid Auto Review run $RUN_ID (attempt $RUN_ATTEMPT/$MAX_ATTEMPT) failed; checking logs..."
+          # 失败特征匹配：prep 阶段的 GitHub API 503/网络瞬时错误（2026-08-17/18 实测日志）
+          PATTERNS='permission - 503|Failed to check permissions|HttpError: No server is currently available|unexpected EOF|TLS handshake timeout'
+          JOB_LOGS=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --jq '.jobs[].id' | while read -r JOB_ID; do
+            gh api "repos/$REPO/actions/jobs/$JOB_ID/logs" 2>/dev/null || true
+          done)
+          if echo "$JOB_LOGS" | grep -qE "$PATTERNS"; then
+            echo "Infra-transient failure detected. Requesting rerun of failed jobs..."
+            if gh api -X POST "repos/$REPO/actions/runs/$RUN_ID/rerun-failed-jobs"; then
+              echo "Rerun requested (upstream run is terminal; API accepts). The rerun carries the effective review."
+            else
+              echo "::warning::Rerun request failed (503 storm?). Manual rerun still possible; not bypassing gate."
+            fi
+          else
+            echo "Failure does not match infra-transient patterns — likely a real review finding or credential issue. No auto-rerun."
+          fi
+
+  cancel-on-ci-fail:
+    # CI 失败 → 取消同 head SHA 上仍在跑的 droid-review（2026-08-19 PR #810 实证）。
+    # 补状态机缺失的边：CI 红 → review 终止。合并门禁语义不变（ci-ok 仍阻止合并；
+    # 修复 push 后 droid-review 由 pull_request_target 重新触发）。
+    if: inputs.mode == 'cancel-on-ci-fail'
+    runs-on: [self-hosted, pve-linux]
+    timeout-minutes: 5
+    steps:
+      - name: Cancel in-progress droid-review on CI failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ inputs.head-sha }}
+        run: |
+          set -eu
+          echo "CI failed for $HEAD_SHA; cancelling in-progress Droid Auto Review runs..."
+          # 列出该 head SHA 上 in_progress/queued 的 Droid Auto Review run 并取消
+          RUNS=$(gh api "repos/$REPO/actions/runs?head_sha=$HEAD_SHA&status=in_progress" --paginate --jq '.workflow_runs[] | select(.name == "Droid Auto Review") | .id')
+          QUEUED=$(gh api "repos/$REPO/actions/runs?head_sha=$HEAD_SHA&status=queued" --paginate --jq '.workflow_runs[] | select(.name == "Droid Auto Review") | .id')
+          CANCELLED=0
+          for RUN_ID in $RUNS $QUEUED; do
+            if gh api -X POST "repos/$REPO/actions/runs/$RUN_ID/cancel"; then
+              echo "Cancelled Droid Auto Review run $RUN_ID"
+              CANCELLED=$((CANCELLED + 1))
+            else
+              echo "::warning::Failed to cancel run $RUN_ID (may have just finished; harmless)."
+            fi
+          done
+          echo "Done. Cancelled $CANCELLED review run(s)."
