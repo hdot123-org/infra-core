@@ -329,10 +329,15 @@ echo "::endgroup::"
 
 # ── 校验 findings schema ──
 echo "Validating findings schema..."
+# validate_findings 从脚本自身目录解析（引擎自包含）：reusable workflow
+# （droid-review-shards.yml）在消费仓任意 CWD 运行，不能假设消费仓存在
+# scripts/droid_review/ 布局（M5 后消费副本删除）。独立变量名 _ENGINE_DIR，
+# 与 PR #55 的 SCRIPT_DIR 会话恢复逻辑互不依赖、合并互不冲突。
+_ENGINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 python3 -c "
 import json, sys
-sys.path.insert(0, 'scripts')
-from droid_review.publish_findings import validate_findings
+sys.path.insert(0, '$_ENGINE_DIR')
+from publish_findings import validate_findings
 data = json.load(open('findings-shard-${SHARD_ID}.json'))
 if not validate_findings(data):
   print('::error::Invalid findings schema', file=sys.stderr)
