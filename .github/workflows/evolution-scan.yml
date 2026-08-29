@@ -65,8 +65,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
         run: |
-          gh label create "evolution-found" --color FBCA04 --description "Evolution scanner finding" --force || true
-          gh label create "evolution-isolated" --color B60205 --description "Stuck 3+ ticks" --force || true
+          # INFRA-601: 显式仓库上下文，免疫 runner insteadOf 镜像重写
+          gh --repo "$GITHUB_REPOSITORY" label create "evolution-found" --color FBCA04 --description "Evolution scanner finding" --force || true
+          gh --repo "$GITHUB_REPOSITORY" label create "evolution-isolated" --color B60205 --description "Stuck 3+ ticks" --force || true
       - name: Run evolution scanner
         run: python scripts/evolution_scanner.py
         env:
