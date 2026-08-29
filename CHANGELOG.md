@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/hdot123-org/infra-core/compare/v0.5.0...v0.5.1) (2026-08-29)
+
+
+### Bug Fixes
+
+* **engine:** __init__ 改 PEP 562 lazy export——消除与消费仓同名裸名模块的 import 碰撞 ([#70](https://github.com/hdot123-org/infra-core/issues/70)) ([becff80](https://github.com/hdot123-org/infra-core/commit/becff809d9e63d7251c6f0e918584cc99ddc36f8))
+
 ## [0.5.0](https://github.com/hdot123-org/infra-core/compare/v0.4.0...v0.5.0) (2026-08-29)
 
 
