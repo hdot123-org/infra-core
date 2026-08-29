@@ -6590,8 +6590,13 @@ def test_heartbeat_detects_stale_and_creates_alert():
         monitor_path = Path(tmpdir) / "monitor_heartbeat.json"
 
         with patch("evolution_heartbeat.subprocess.run") as mock_run:
-            # Mock: no open issues, no existing alert, then create alert
+            # INFRA-578: stale path dispatches the scanner first; here the
+            # dispatch is REJECTED (returncode=1) so the alert path executes.
             mock_run.side_effect = [
+                # INFRA-578 self-heal: gh workflow run (dispatch stale scanner) → rejected
+                subprocess.CompletedProcess(
+                    args=[], returncode=1, stdout="", stderr="gh: workflow disabled"
+                ),
                 # check_pr_coverage: list issues (none)
                 subprocess.CompletedProcess(args=[], returncode=0, stdout="[]", stderr=""),
                 # resolve_cleared_alerts → list_open_alert_issues: no open alerts
@@ -6618,12 +6623,78 @@ def test_heartbeat_detects_stale_and_creates_alert():
             ):
                 exit_code = main(history_path=history_path)
 
-            # Should exit 1 (anomaly detected)
+            # Should exit 1 (anomaly detected despite dispatch attempt)
             assert exit_code == 1, "Should exit 1 when anomaly detected"
-            # Verify alert was created (pr list + open alert list + alert dedup check + create)
-            assert mock_run.call_count == 4, (
-                "Should call gh 4 times (pr list + open alert list + alert check + create)"
+            # INFRA-578: stale path adds a self-heal workflow dispatch before the alert flow
+            # (dispatch + pr list + open alert list + alert check + create)
+            assert mock_run.call_count == 5, (
+                "Should call gh 5 times (self-heal dispatch + pr list + open alert list + alert check + create)"
             )
+
+
+def test_heartbeat_dispatch_accepted_suppresses_alert():
+    """INFRA-597: stale + ACCEPTED dispatch (non-severe) → no alert, exit 0.
+
+    Regression for the 2026-08-28 alert storm (#1059 / INFRA-597): cron
+    load-shed produced a transient 5.8h scanner gap; the heartbeat healed it
+    via workflow_dispatch and STILL raised an alert issue, which synced to
+    Linear and dispatched an agent session. With suppression, the same
+    scenario exits clean and the issue-creation tail never runs.
+    """
+    from evolution_heartbeat import main
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        history_path = Path(tmpdir) / "findings_over_time.json"
+
+        # Stale history (advisory only; liveness is the alert basis)
+        old_time = datetime.now(UTC) - timedelta(hours=3)
+        data = {
+            "snapshots": [{"timestamp": old_time.isoformat(), "tick_id": "old", "findings": []}]
+        }
+        with history_path.open("w") as f:
+            json.dump(data, f)
+
+        heartbeat_path = Path(tmpdir) / "heartbeat.json"
+        recent_time = datetime.now(UTC) - timedelta(minutes=30)
+        with heartbeat_path.open("w") as f:
+            json.dump({"timestamp": recent_time.isoformat(), "status": "ok"}, f)
+
+        monitor_path = Path(tmpdir) / "monitor_heartbeat.json"
+
+        with patch("evolution_heartbeat.subprocess.run") as mock_run:
+            # Dispatch accepted; coverage list → none; open alert list → none.
+            mock_run.side_effect = [
+                # INFRA-578 self-heal: gh workflow run (dispatch stale scanner) → accepted
+                subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+                # check_pr_coverage: list issues (none)
+                subprocess.CompletedProcess(args=[], returncode=0, stdout="[]", stderr=""),
+                # resolve_cleared_alerts → list_open_alert_issues: no open alerts
+                subprocess.CompletedProcess(args=[], returncode=0, stdout="[]", stderr=""),
+            ]
+
+            with (
+                patch("evolution_heartbeat.HEARTBEAT_MARKER_PATH", heartbeat_path),
+                patch("evolution_heartbeat.MONITOR_HEARTBEAT_PATH", monitor_path),
+                patch(
+                    "evolution_heartbeat.check_scanner_liveness",
+                    return_value={
+                        "alive": False,
+                        "hours_since_last_run": 5.8,
+                        "message": "Scanner stale: last run 5.8h ago (threshold: 2h)",
+                    },
+                ),
+            ):
+                exit_code = main(history_path=history_path)
+
+            assert exit_code == 0, "Suppressed alert must exit 0"
+            # Issue-creation tail (alert_issue_exists + create_alert_issue) never ran
+            assert mock_run.call_count == 3, (
+                "Should call gh 3 times (dispatch + pr list + open alert list); alert tail suppressed"
+            )
+            # Monitor marker still written with zero anomalies
+            data = json.loads(monitor_path.read_text())
+            assert data["status"] == "ok"
+            assert data["anomalies_detected"] == 0
 
 
 # ============================================================================
@@ -7266,11 +7337,15 @@ def test_main_dedup_skips_duplicate_alert(tmp_path):
         patch("evolution_heartbeat.create_alert_issue") as mock_create,
         patch(
             "evolution_heartbeat.check_scanner_liveness",
-            return_value={"alive": False, "message": "Scanner stale"},
+            return_value={"alive": False, "hours_since_last_run": 5.0, "message": "Scanner stale"},
         ),
     ):
         # check_pr_coverage list -> no issues; resolve_cleared_alerts → list_open_alert_issues -> no open alerts; alert_issue_exists -> one open alert
+        # INFRA-578/597: stale path first dispatches the scanner via the REAL
+        # trigger_scanner_dispatch (entry 1, rc=1 → rejected) so the alert
+        # path runs and hits the dedup branch (open alert #7 exists).
         mock_run.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="gh: refused"),
             subprocess.CompletedProcess(args=[], returncode=0, stdout="[]", stderr=""),
             subprocess.CompletedProcess(args=[], returncode=0, stdout="[]", stderr=""),
             subprocess.CompletedProcess(
@@ -10626,3 +10701,129 @@ def test_rule_packs_enabled_false_disables_pack_tool(tmp_path):
         "evolution_self_audit",
     }
     assert tool_names == expected_remaining, f"应保留 {expected_remaining}，实际含 {tool_names}"
+
+
+# ---------------------------------------------------------------------------
+# INFRA-588: heartbeat reverse-watch (scanner → heartbeat self-heal)
+# ---------------------------------------------------------------------------
+
+
+def test_infra588_watch_heartbeat_channel_alive_skips_dispatch():
+    """INFRA-588: heartbeat alive → no dispatch, no alert print."""
+    from evolution_scanner import watch_heartbeat_channel
+
+    with (
+        patch("evolution_scanner.sys.modules", evolution_scanner.sys.modules),
+        patch(
+            "evolution_heartbeat.check_heartbeat_workflow_liveness",
+            return_value={"alive": True, "message": "ok"},
+        ),
+        patch("evolution_heartbeat.trigger_heartbeat_dispatch") as mock_dispatch,
+    ):
+        watch_heartbeat_channel()
+
+    mock_dispatch.assert_not_called()
+
+
+def test_infra588_watch_heartbeat_channel_stale_dispatches():
+    """INFRA-588: heartbeat stale → scanner re-dispatches it (reverse self-heal).
+
+    2026-08-27 scenario: heartbeat cron slots load-shed for 20+ hours after
+    healing the scanner — the one-directional INFRA-578 heal left the pipeline
+    unwatched. The scanner must now pull the heartbeat back up.
+    """
+    from evolution_scanner import watch_heartbeat_channel
+
+    with (
+        patch(
+            "evolution_heartbeat.check_heartbeat_workflow_liveness",
+            return_value={"alive": False, "message": "stale"},
+        ),
+        patch("evolution_heartbeat.trigger_heartbeat_dispatch") as mock_dispatch,
+    ):
+        watch_heartbeat_channel()
+
+    mock_dispatch.assert_called_once()
+
+
+def test_infra588_watch_heartbeat_channel_probe_failure_never_crashes():
+    """INFRA-588: reverse-watch is best-effort hardening — probe crash must not kill the tick."""
+    from evolution_scanner import watch_heartbeat_channel
+
+    with (
+        patch(
+            "evolution_heartbeat.check_heartbeat_workflow_liveness",
+            side_effect=RuntimeError("gh exploded"),
+        ),
+        patch("evolution_heartbeat.trigger_heartbeat_dispatch") as mock_dispatch,
+    ):
+        # Must not raise
+        watch_heartbeat_channel()
+
+    mock_dispatch.assert_not_called()
+
+
+def test_infra588_watch_heartbeat_channel_import_failure_never_crashes(monkeypatch):
+    """INFRA-588: even an ImportError from the lazy dependency must not kill the tick."""
+    import builtins
+
+    from evolution_scanner import watch_heartbeat_channel
+
+    real_import = builtins.__import__
+
+    def _broken_import(name, *args, **kwargs):
+        if name == "evolution_heartbeat":
+            raise ImportError("module gone")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _broken_import)
+    # Must not raise despite the import failing
+    watch_heartbeat_channel()
+
+
+def test_infra588_main_calls_watch_after_write_heartbeat(capsys):
+    """INFRA-588: main() must run the reverse-watch every tick, after the heartbeat marker.
+
+    Ordering matters: write_heartbeat first (INFRA-204 marker always lands),
+    then the reverse-watch, both before P1-2/P2-A hard exits.
+    """
+    from evolution_scanner import main
+
+    config = {
+        "audit_tools": [{"name": "test_tool", "command": 'echo "[]"'}],
+        "severity_order": ["critical", "warning", "info"],
+        "dedup_label": "evolution-found",
+        "isolation_threshold": 3,
+        "failure_label": "evolution-isolated",
+        "max_issues_per_tick": 3,
+        "max_self_audit_issues_per_tick": 1,
+        "max_code_hygiene_issues_per_tick": 1,
+        "snapshot_limit": 100,
+    }
+
+    order: list[str] = []
+
+    with (
+        patch("evolution_scanner.check_kill_switch", return_value=False),
+        patch("evolution_scanner.load_config", return_value=config),
+        patch("evolution_scanner.run_audit_tool", return_value=[]),
+        patch("evolution_scanner.detect_regressions", return_value=[]),
+        patch("evolution_scanner.get_open_issues", return_value=[]),
+        patch("evolution_scanner.update_history"),
+        patch(
+            "evolution_scanner.write_heartbeat",
+            side_effect=lambda *a, **k: order.append("write_heartbeat"),
+        ),
+        patch(
+            "evolution_scanner.watch_heartbeat_channel",
+            side_effect=lambda: order.append("watch_heartbeat"),
+        ) as mock_watch,
+        patch("evolution_scanner.check_isolation"),
+        patch("evolution_scanner.auto_close_resolved"),
+    ):
+        main([])
+
+    mock_watch.assert_called_once()
+    assert order == ["write_heartbeat", "watch_heartbeat"], (
+        f"Reverse-watch must run after write_heartbeat, got: {order}"
+    )

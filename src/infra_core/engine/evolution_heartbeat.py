@@ -31,6 +31,13 @@ HEARTBEAT_MARKER_PATH = Path(".evolution/heartbeat.json")
 MONITOR_HEARTBEAT_PATH = Path(".evolution/monitor_heartbeat.json")
 SCANNER_WORKFLOW = "evolution-scan.yml"
 SCANNER_LIVENESS_THRESHOLD_HOURS = 2  # Alert if scanner hasn't run in 2 hours
+# INFRA-597: successful self-heal dispatch only suppresses the alert below this
+# outage severity. Beyond it, the stale signal is no longer "cron load-shed
+# drift" but a genuine long outage — alert even if dispatch was accepted,
+# because repeated dispatch success with no new run implies systemic failure.
+SCANNER_SEVERE_STALENESS_HOURS = 8
+HEARTBEAT_WORKFLOW = "evolution-heartbeat.yml"
+HEARTBEAT_LIVENESS_THRESHOLD_HOURS = 3  # Cron is 2h; alert if no run within 3h
 
 # --- Shared anomaly markers (producer ↔ consumer coupling) ---
 # These strings are written by create_alert_issue/_build_alert_body and parsed by
@@ -240,6 +247,31 @@ def check_scanner_liveness(
       - last_status (str): conclusion of the most recent run
       - message (str): human-readable status
     """
+    return _check_workflow_liveness(SCANNER_WORKFLOW, threshold_hours)
+
+
+def check_heartbeat_workflow_liveness(
+    threshold_hours: int = HEARTBEAT_LIVENESS_THRESHOLD_HOURS,
+) -> dict[str, Any]:
+    """INFRA-588: Check if the heartbeat workflow itself has run recently.
+
+    INFRA-578 self-heal is one-directional (heartbeat → scanner). On 2026-08-27
+    the heartbeat's own cron slots were load-shed for 20+ hours AFTER it had
+    healed the scanner, leaving the whole pipeline unwatched. The scanner now
+    reverse-watches the heartbeat (see evolution_scanner.watch_heartbeat_channel);
+    this function provides the liveness probe it queries.
+
+    Returns the same shape as check_scanner_liveness.
+    """
+    return _check_workflow_liveness(HEARTBEAT_WORKFLOW, threshold_hours)
+
+
+def _check_workflow_liveness(workflow: str, threshold_hours: int) -> dict[str, Any]:
+    """Stateless workflow liveness probe via gh run list (shared implementation).
+
+    Used by both check_scanner_liveness (scanner) and
+    check_heartbeat_workflow_liveness (heartbeat reverse-watch, INFRA-588).
+    """
     result: dict[str, Any] = {
         "alive": True,
         "hours_since_last_run": float("inf"),
@@ -254,7 +286,7 @@ def check_scanner_liveness(
                 "list",
                 *gh_repo_args(),
                 "--workflow",
-                SCANNER_WORKFLOW,
+                workflow,
                 "--limit",
                 "5",
                 "--json",
@@ -302,6 +334,65 @@ def check_scanner_liveness(
         result["alive"] = False
         result["message"] = f"Scanner liveness check failed: {exc}"
     return result
+
+
+def trigger_scanner_dispatch() -> bool:
+    """Self-heal: trigger evolution-scan via workflow_dispatch (INFRA-578).
+
+    GitHub-hosted scheduled runs are load-shed at peak minutes (cron slots on
+    :00/:30 can be dropped entirely, not queued). When the heartbeat detects a
+    stale scanner, it re-triggers the scan immediately instead of waiting for
+    the next cron slot that may be dropped again.
+
+    Returns True if the dispatch was accepted by the GitHub API.
+    """
+    try:
+        proc = subprocess.run(
+            ["gh", "workflow", "run", *gh_repo_args(), SCANNER_WORKFLOW],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"[heartbeat] Scanner dispatch failed: {exc}")
+        return False
+
+    if proc.returncode != 0:
+        print(f"[heartbeat] Scanner dispatch failed: {proc.stderr.strip()}")
+        return False
+
+    print(f"[heartbeat] Self-heal: dispatched {SCANNER_WORKFLOW} via workflow_dispatch")
+    return True
+
+
+def trigger_heartbeat_dispatch() -> bool:
+    """INFRA-588: Reverse self-heal — re-trigger evolution-heartbeat via workflow_dispatch.
+
+    Called by the scanner's watch_heartbeat_channel() when it detects the
+    heartbeat workflow's cron slots have been load-shed. Mirrors
+    trigger_scanner_dispatch (INFRA-578): dispatch failure must not crash the
+    calling tick — observability of the failure is preserved via the returned
+    flag and caller-side print.
+
+    Returns True if the dispatch was accepted by the GitHub API.
+    """
+    try:
+        proc = subprocess.run(
+            ["gh", "workflow", "run", *gh_repo_args(), HEARTBEAT_WORKFLOW],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"[scanner] Heartbeat dispatch failed: {exc}")
+        return False
+
+    if proc.returncode != 0:
+        print(f"[scanner] Heartbeat dispatch failed: {proc.stderr.strip()}")
+        return False
+
+    print(f"[scanner] Self-heal: dispatched {HEARTBEAT_WORKFLOW} via workflow_dispatch")
+    return True
 
 
 def check_heartbeat_marker(max_age_hours: int = FRESHNESS_THRESHOLD_HOURS) -> dict[str, Any]:
@@ -582,7 +673,11 @@ def resolve_cleared_alerts(
     return closed
 
 
-def _build_alert_body(scanner_stale: bool, issues_without_pr: int) -> str:
+def _build_alert_body(
+    scanner_stale: bool,
+    issues_without_pr: int,
+    scanner_stale_hours: float | None = None,
+) -> str:
     """Build alert issue body using shared constants.
 
     This function is the single source of truth for anomaly text format.
@@ -591,7 +686,13 @@ def _build_alert_body(scanner_stale: bool, issues_without_pr: int) -> str:
     """
     anomalies = []
     if scanner_stale:
-        anomalies.append(f"{_ANOMALY_SCANNER_STALE_MARKER} (scanner may have stopped)")
+        if scanner_stale_hours is not None:
+            anomalies.append(
+                f"{_ANOMALY_SCANNER_STALE_MARKER} for {scanner_stale_hours:.1f}h "
+                "(scanner may have stopped; self-heal dispatch failed or outage is severe)"
+            )
+        else:
+            anomalies.append(f"{_ANOMALY_SCANNER_STALE_MARKER} (scanner may have stopped)")
     if issues_without_pr > 0:
         anomalies.append(f"{issues_without_pr} {_ANOMALY_ISSUES_WITHOUT_PR_MARKER}")
 
@@ -613,6 +714,7 @@ def create_alert_issue(
     scanner_stale: bool,
     issues_without_pr: int,
     dedup_label: str = EVOLUTION_FOUND_LABEL,
+    scanner_stale_hours: float | None = None,
 ) -> bool:
     """Create a GitHub Issue for detected pipeline anomalies.
 
@@ -621,7 +723,9 @@ def create_alert_issue(
     if not scanner_stale and issues_without_pr == 0:
         return False
 
-    body = _build_alert_body(scanner_stale, issues_without_pr)
+    body = _build_alert_body(
+        scanner_stale, issues_without_pr, scanner_stale_hours=scanner_stale_hours
+    )
     title = "[heartbeat] Pipeline anomaly detected"
 
     create_result = subprocess.run(
@@ -654,10 +758,34 @@ def main(history_path: Path = HISTORY_PATH) -> int:
     """Run heartbeat checks and alert on anomalies. Returns process exit code."""
     # Primary: scanner liveness via GitHub Actions API (stateless, no cache dependency)
     liveness = check_scanner_liveness()
+    # INFRA-597: track whether the self-heal dispatch was accepted. A successful
+    # dispatch means a scan run was just queued (runs appear in the workflow
+    # history immediately), so the staleness signal is transient cron load-shed,
+    # not a stopped scanner. Only a failed dispatch (or a severe outage, see
+    # below) still warrants an alert issue.
+    dispatch_accepted = False
     if liveness["alive"]:
         print(f"[heartbeat] {liveness['message']}")
     else:
         print(f"[heartbeat] ALERT: {liveness['message']}")
+        # INFRA-578: self-heal first — re-trigger the scanner instead of
+        # waiting for the next cron slot (peak-minute slots get load-shed).
+        dispatch_accepted = trigger_scanner_dispatch()
+        if dispatch_accepted:
+            stale_hours = liveness.get("hours_since_last_run", float("inf"))
+            if stale_hours > SCANNER_SEVERE_STALENESS_HOURS:
+                # INFRA-597: severe outage — the dispatch alone is not credible
+                # recovery (repeated dispatch success with no new run implies
+                # systemic failure). Keep the alert for human visibility.
+                print(
+                    f"[heartbeat] Severe outage ({stale_hours:.1f}h > "
+                    f"{SCANNER_SEVERE_STALENESS_HOURS}h): alerting despite successful dispatch"
+                )
+            else:
+                print(
+                    "[heartbeat] Self-heal dispatch accepted; suppressing scanner_stale alert "
+                    "(transient cron load-shed, INFRA-597)"
+                )
 
     # Advisory: file-based checks (may show stale if cache missed — NOT an alert basis)
     heartbeat = check_heartbeat_marker()
@@ -677,8 +805,18 @@ def main(history_path: Path = HISTORY_PATH) -> int:
     else:
         print("[heartbeat] PR coverage: OK")
 
+    # INFRA-597: suppression condition — a successful self-heal dispatch on a
+    # non-severe outage downgrades the scanner_stale anomaly to "handled".
+    # compute_current_anomalies consumers (self-heal close, monitor marker) see
+    # the post-recovery state, matching what the next tick will observe.
+    severe_outage = (not liveness["alive"]) and (
+        liveness.get("hours_since_last_run", float("inf")) > SCANNER_SEVERE_STALENESS_HOURS
+    )
+    stale_alertable = not liveness["alive"] and (not dispatch_accepted or severe_outage)
+
     # P1 self-heal: close alert issues whose anomalies have cleared
-    current_anomalies = compute_current_anomalies(liveness, coverage)
+    effective_liveness = {"alive": liveness["alive"] or dispatch_accepted and not severe_outage}
+    current_anomalies = compute_current_anomalies(effective_liveness, coverage)
     closed = resolve_cleared_alerts(
         current_anomalies,
         coverage_data_ok=coverage.get("data_ok", True),
@@ -687,16 +825,21 @@ def main(history_path: Path = HISTORY_PATH) -> int:
         print(f"[heartbeat] Self-heal: closed {len(closed)} alert(s): {closed}")
 
     # INFRA-204: Write monitor heartbeat for meta-monitoring
-    anomaly_count = sum([not liveness["alive"], bool(coverage["issues_without_pr"] > 0)])
+    anomaly_count = sum([stale_alertable, bool(coverage["issues_without_pr"] > 0)])
 
-    # Create alert issue if scanner is stale or issues lack PRs
-    if not liveness["alive"] or coverage["issues_without_pr"] > 0:
+    # Create alert issue if scanner is stale and NOT suppressed, or issues lack PRs
+    if stale_alertable or coverage["issues_without_pr"] > 0:
         if alert_issue_exists():
             print("[heartbeat] Open alert issue already exists, skipping duplicate creation")
         else:
             create_alert_issue(
-                scanner_stale=not liveness["alive"],
+                scanner_stale=stale_alertable,
                 issues_without_pr=coverage["issues_without_pr"],
+                scanner_stale_hours=(
+                    liveness.get("hours_since_last_run")
+                    if stale_alertable and not liveness["alive"]
+                    else None
+                ),
             )
         write_monitor_heartbeat(anomaly_count)
         return 1  # Non-zero exit signals anomaly to CI
