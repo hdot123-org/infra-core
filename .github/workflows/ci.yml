@@ -108,10 +108,17 @@ jobs:
           ruff check .
           ruff format --check .
 
-      - name: Install shellcheck to RUNNER_TEMP
+      - name: Detect host shellcheck (Layer 1)
         shell: bash
         run: |
-          if ! command -v shellcheck >/dev/null 2>&1; then
+          # Layer 1 宿主优先（与 Run actionlint #53 模式同构，清单见 runner-tools.toml
+          # pin 0.10.0）：宿主命中直接使用，零外网下载；缺失时 fallback 下载并打
+          # ::warning。fallback 分支保留同步 export PATH，保证本步末尾的版本校验可用
+          # （GITHUB_PATH 要到下一步才生效）。
+          if command -v shellcheck >/dev/null 2>&1; then
+            echo "✓ Using host shellcheck ($(shellcheck --version | sed -n '2p'))"
+          else
+            echo "::warning::shellcheck not found on host, falling back to download"
             wget -q https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz
             tar -xf shellcheck-v0.10.0.linux.x86_64.tar.xz -C "${RUNNER_TEMP}"
             export PATH="${RUNNER_TEMP}/shellcheck-v0.10.0:$PATH"

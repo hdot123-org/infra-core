@@ -1,3 +1,22 @@
+# Layer 1+2: 宿主工具 + 缓存锁定（2026-08-28 runner-hardening，抢救性重构自 PR #37）
+#
+# 动机（2026-08-27 裁定 Pin & Freeze）：
+# 1. Layer 1: 三台 pve runner（memory-runnerz 共享组）全局路径锁定固定版本工具二进制
+#    （uv/ruff/mypy/actionlint/shellcheck/jq），CI 按 PATH 优先原则调用宿主预装二进制，
+#    版本清单见仓库根 runner-tools.toml（单一事实源）
+# 2. Layer 2: UV_CACHE_DIR=/var/cache/uv、PIP_CACHE_DIR=/var/cache/pip（runner 服务用户属主），
+#    per-run venv 的依赖安装从共享缓存取包，秒级建仓
+# 3. 护栏铁律：只锁工具二进制，被测包的 per-run venv 独立安装不动（2026-08-25 环境遮蔽教训）
+# 4. 「Install dependencies」步骤（pip install -e ".[dev]"）不可缺失——被取代的 PR #37
+#    首版重构时误删此步骤导致 CI 全红（INFRA-590），本文件以契约测试钉住其存在
+#
+# 本 action 在 $RUNNER_TEMP 下按 run_id + run_attempt 创建一次性 venv 并前置到 PATH
+# （含 VIRTUAL_ENV/VENV_PATH），job 结束由 runner 自动清理——每次运行从零解析依赖，
+# rerun 不共享旧状态。工具二进制走 PATH 优先级：宿主预装 > RUNNER_TEMP fallback 下载。
+#
+# 前置要求：调用 job 已 checkout（fast-fail 步骤读取仓库关键文件验证完整性）；
+# 系统 python3 为 3.12（pyproject requires-python ==3.12.*，pve runner 预装）。
+# 回退分支：镜像缺 python3-venv（ensurepip）时 --without-pip + get-pip 引导。
 name: "Setup venv"
 description: "Create and activate a Python virtual environment for CI jobs"
 
@@ -22,29 +41,61 @@ runs:
         fi
         echo "✓ checkout 完整性检查通过（.git / pyproject.toml / setup-venv action.yml）"
 
-    - name: Create venv
+    - name: Create per-run venv (host tools priority + shared cache)
       shell: bash
+      env:
+        RUN_ID: ${{ github.run_id }}
+        RUN_ATTEMPT: ${{ github.run_attempt }}
       run: |
-        set -e
+        set -eu
 
-        # Create venv directory
-        VENV_DIR="${RUNNER_TEMP:-/tmp}/ci-venv"
-        echo "Creating virtual environment at $VENV_DIR"
-        python3 -m venv "$VENV_DIR"
+        # Layer 2: 共享缓存目录（runner 全局 /var/cache/{pip,uv}，已预热，runner:runner 755）
+        export UV_CACHE_DIR="/var/cache/uv"
+        export PIP_CACHE_DIR="/var/cache/pip"
 
-        # Activate and verify
-        source "$VENV_DIR/bin/activate"
-        echo "✓ venv created and activated"
-        python --version
-        which python
+        # Layer 1: 宿主工具二进制探测（PATH 优先原则，版本清单见 runner-tools.toml）
+        echo "::group::Host toolchain detection"
+        for tool in uv ruff mypy actionlint shellcheck jq; do
+          if command -v "$tool" >/dev/null; then
+            ver="$($tool --version 2>/dev/null | head -1 || echo 'unknown')"
+            echo "  $tool: $(which $tool) ($ver)"
+          else
+            echo "::warning::$tool not found on host PATH (will fallback if needed)"
+          fi
+        done
+        echo "::endgroup::"
 
-        # Upgrade pip
-        echo "Upgrading pip..."
-        python -m pip install --upgrade pip --quiet
+        # Per-run venv 隔离（被测包依赖，不锁宿主工具）
+        VENV="$RUNNER_TEMP/venv-${RUN_ID}-${RUN_ATTEMPT}"
+        rm -rf "$VENV"
+        if ! python3 -m venv "$VENV" 2>"$RUNNER_TEMP/venv-err.log"; then
+          echo "::warning::python3 -m venv failed (ensurepip missing?), falling back to --without-pip + get-pip"
+          cat "$RUNNER_TEMP/venv-err.log" || true
+          rm -rf "$VENV"
+          python3 -m venv --without-pip "$VENV"
+          if command -v curl >/dev/null; then
+            curl --retry 3 --retry-delay 5 --retry-all-errors -fsSL \
+              -o "$RUNNER_TEMP/get-pip.py" https://bootstrap.pypa.io/get-pip.py
+          else
+            wget -q -O "$RUNNER_TEMP/get-pip.py" https://bootstrap.pypa.io/get-pip.py
+          fi
+          "$VENV/bin/python" "$RUNNER_TEMP/get-pip.py" --disable-pip-version-check
+        fi
 
-        # Export venv path for subsequent steps
-        echo "VENV_PATH=$VENV_DIR" >> $GITHUB_ENV
-        echo "$VENV_DIR/bin" >> $GITHUB_PATH
+        # venv 前置到 PATH（宿主工具仍可经绝对路径调用）；VENV_PATH 供下游步骤激活
+        echo "$VENV/bin" >> "$GITHUB_PATH"
+        echo "VIRTUAL_ENV=$VENV" >> "$GITHUB_ENV"
+        echo "VENV_PATH=$VENV" >> "$GITHUB_ENV"
+        echo "UV_CACHE_DIR=$UV_CACHE_DIR" >> "$GITHUB_ENV"
+        echo "PIP_CACHE_DIR=$PIP_CACHE_DIR" >> "$GITHUB_ENV"
+
+        # venv pip 升级（main 原有语义，本 PR 重构时曾遗漏致 rebase 后 advisory 红）：
+        # ensurepip 自带 pip 24.0 已积累 7 条 PYSEC 公告（pip-audit 扫描 venv 自身，
+        # 2026-08-29 run 33263696898 实证），不升级则 advisory-bundle 必红、零红合并不可达
+        "$VENV/bin/python" -m pip install --upgrade pip --quiet
+
+        "$VENV/bin/python" --version
+        "$VENV/bin/python" -m pip --version
 
     - name: Install dependencies
       shell: bash
@@ -55,6 +106,8 @@ runs:
         source "${{ env.VENV_PATH }}/bin/activate"
 
         # Install package with dev dependencies
+        # 铁律（INFRA-590）：本步骤不可移除——pip install -e ".[dev]" 是全部下游
+        # job（pytest/ruff/mypy/guards）的依赖来源
         echo "Installing infra-core with dev dependencies..."
         pip install -e ".[dev]" --quiet
 
