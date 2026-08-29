@@ -116,8 +116,16 @@ echo "deleted_count=$DELETED_COUNT protected_count=$PROTECTED_COUNT"
 TRACKER_URL=""
 LABELED=""
 
+# 仓库上下文守卫（INFRA-601）：自建 runner insteadOf 镜像重写使 gh 无法从
+# workspace remote 解析 host。GITHUB_REPOSITORY（Actions 默认注入）→ 所有
+# 依赖仓库解析的 gh 调用追加显式 --repo；未设置（本地调试）→ 原命令形态。
+GH_REPO_ARGS=()
+if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+  GH_REPO_ARGS=(--repo "${GITHUB_REPOSITORY}")
+fi
+
 # shellcheck disable=SC2016  # marker must reach gh search verbatim
-SEARCH_RESULT=$(gh search issues '"branch-cleanup-tracker"' --state open --json repository,url --limit 100 2>/dev/null || true)
+SEARCH_RESULT=$(gh search issues ${GH_REPO_ARGS[@]+"${GH_REPO_ARGS[@]}"} '"branch-cleanup-tracker"' --state open --json repository,url --limit 100 2>/dev/null || true)
 
 if [[ -n "$SEARCH_RESULT" && "$SEARCH_RESULT" != "[]" ]]; then
   OURS=$(echo "$SEARCH_RESULT" | jq -r --arg repo "$GH_REPO_KEY" '[.[] | select(.repository == $repo)] | .[0].url // ""')
@@ -129,17 +137,17 @@ fi
 # Always resolve this repository's labeled open issues (fallback tracker
 # resolution AND duplicate detection share the result).
 # shellcheck disable=SC2016
-LABELED=$(gh search issues --repo "$GH_REPO_KEY" 'label:branch-cleanup' --state open --json url --limit 100 2>/dev/null || true)
+LABELED=$(gh search issues --repo "$GH_REPO_KEY" ${GH_REPO_ARGS[@]+"${GH_REPO_ARGS[@]}"} 'label:branch-cleanup' --state open --json url --limit 100 2>/dev/null || true)
 if [[ -z "$TRACKER_URL" && -n "$LABELED" && "$LABELED" != "[]" ]]; then
   TRACKER_URL=$(echo "$LABELED" | jq -r '.[0].url // ""')
 fi
 
 gh_view_field() {
-  gh issue view "$1" --json body --jq "$2" 2>/dev/null || echo ""
+  gh issue view "$1" ${GH_REPO_ARGS[@]+"${GH_REPO_ARGS[@]}"} --json body --jq "$2" 2>/dev/null || echo ""
 }
 
 gh_close_with_comment() {
-  gh issue close "$1" --comment "$2" 2>/dev/null || true
+  gh issue close "$1" ${GH_REPO_ARGS[@]+"${GH_REPO_ARGS[@]}"} --comment "$2" 2>/dev/null || true
 }
 
 # Strip the markdown bullet/backticks from a tracked entry line, producing
@@ -312,17 +320,14 @@ if [[ -z "$TRACKER_URL" ]]; then
 $REPORT
 ---
 *This tracking issue is managed by the [Branch Cleanup]($RUN_URL) workflow; it is updated in place instead of one issue per run ($MARKER).*"
-  gh label create automation --force >/dev/null 2>&1 || true
-  gh label create branch-cleanup --force >/dev/null 2>&1 || true
-  # 仓库上下文双重防线（2026-08-28）：自建 runner insteadOf 镜像重写使 gh 无法
-  # 从 remote 解析 host。GITHUB_REPOSITORY env（Actions 默认注入）→ 追加 --repo。
+  gh label create automation ${GH_REPO_ARGS[@]+"${GH_REPO_ARGS[@]}"} --force >/dev/null 2>&1 || true
+  gh label create branch-cleanup ${GH_REPO_ARGS[@]+"${GH_REPO_ARGS[@]}"} --force >/dev/null 2>&1 || true
+  # 仓库上下文守卫沿用上方 GH_REPO_ARGS（INFRA-601 统一化）
   GH_ISSUE_CREATE_CMD=(gh issue create
     --title "Branch cleanup tracking"
     --body "$BODY"
-    --label "$LABELS")
-  if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
-    GH_ISSUE_CREATE_CMD+=(--repo "${GITHUB_REPOSITORY}")
-  fi
+    --label "$LABELS"
+    ${GH_REPO_ARGS[@]+"${GH_REPO_ARGS[@]}"})
   "${GH_ISSUE_CREATE_CMD[@]}" >/dev/null
   echo "issue_action=created"
   # Sync to Linear project (VAL-GATE-118)
@@ -385,9 +390,9 @@ if [[ -n "$REMOVED_PROTECTED" ]]; then
 fi
 
 # Update body in place
-gh issue edit "$TRACKER_NUMBER" --body "$NEW_BODY" >/dev/null 2>&1 || true
+gh issue edit "$TRACKER_NUMBER" ${GH_REPO_ARGS[@]+"${GH_REPO_ARGS[@]}"} --body "$NEW_BODY" >/dev/null 2>&1 || true
 # Deletions are also reportable state changes; comment whenever we got here.
-if gh issue comment "$TRACKER_NUMBER" --body "$COMMENT_BODY" >/dev/null 2>&1; then
+if gh issue comment "$TRACKER_NUMBER" ${GH_REPO_ARGS[@]+"${GH_REPO_ARGS[@]}"} --body "$COMMENT_BODY" >/dev/null 2>&1; then
   echo "issue_action=updated"
   # Sync to Linear project (VAL-GATE-118)
   sync_linear_project
