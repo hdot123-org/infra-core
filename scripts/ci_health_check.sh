@@ -95,7 +95,8 @@ fi
 
 # 2c. Verify core required jobs exist
 if [[ "$ERRORS" -eq 0 ]]; then
-    REQUIRED_JOBS=("pytest" "ruff" "actionlint" "mypy" "ci-ok")
+    # 2026-08-29 容量收敛：19 job → 10 job（bundle 化），清单随 ci.yml 同步
+    REQUIRED_JOBS=("pytest" "lint-bundle" "type-bundle" "advisory-bundle" "test-groups" "guards" "integration-tests" "e2e-tests" "health-check" "ci-ok")
     MISSING_JOBS=""
     for job in "${REQUIRED_JOBS[@]}"; do
         if ! python3 -c "
@@ -118,7 +119,7 @@ sys.exit(0 if '$job' in jobs else 1)
         echo "✗ Missing required jobs: $MISSING_JOBS"
         ERRORS=$((ERRORS + 1))
     else
-        echo "✓ Required jobs (pytest, ruff, actionlint, mypy, ci-ok) present"
+        echo "✓ Required jobs (10-job bundle set: pytest/lint-bundle/type-bundle/advisory-bundle/test-groups/guards/integration-tests/e2e-tests/health-check/ci-ok) present"
     fi
 fi
 
