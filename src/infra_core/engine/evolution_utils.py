@@ -24,6 +24,22 @@ TICK_DURATION_BUDGET = 120  # seconds
 API_CALL_BUDGET = 100  # max API calls per tick
 
 
+def gh_repo_args() -> list[str]:
+    """Explicit gh repo-context args (INFRA-601): ``["--repo", OWNER/REPO]``
+    when ``GITHUB_REPOSITORY`` is set (Actions 注入), else ``[]``.
+
+    自建 runner 全局 .gitconfig 的 ``url.<镜像>.insteadOf`` 重写 github.com 后，
+    gh 基于 workspace remote 的仓库推断误判 "no known GitHub host"（PR #1060 /
+    INFRA-597 双 runner 实证）。所有依赖仓库解析的 gh 子命令（issue/pr/label/
+    run …）在 env 注入时必须追加显式 ``--repo``，使仓库解析完全不依赖 remote；
+    未设置（本地调试）时返回空列表，保持原命令形态。
+    """
+    repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if repo:
+        return ["--repo", repo]
+    return []
+
+
 class TickBudgetTracker:
     """Track tick budget usage (duration and API calls)."""
 
@@ -561,10 +577,14 @@ def _check_merged_pr(github_prs: list[dict[str, Any]], linear_id: str) -> bool |
         # correct repository. Without --repo, gh pr view only checks the
         # current repo context and silently fails (fail-open) for PRs in
         # other repos — the merge state is never actually confirmed.
+        # INFRA-601: URL 提取的 owner/repo 优先（跨仓验证语义），无 URL 仓库
+        # 信息时回落到 GITHUB_REPOSITORY env 守卫（本仓场景，免疫 insteadOf）。
         repo_match = re.search(r"github\.com/([^/]+/[^/]+)/pull/", pr_url)
         gh_cmd = ["gh", "pr", "view", pr_number, "--json", "mergedAt"]
         if repo_match:
             gh_cmd.extend(["--repo", repo_match.group(1)])
+        else:
+            gh_cmd[1:1] = gh_repo_args()
 
         try:
             result = subprocess.run(gh_cmd, capture_output=True, text=True, timeout=10)
@@ -608,6 +628,7 @@ def _fetch_issue_comments(issue_number: int) -> str | None:
                 "issue",
                 "view",
                 str(issue_number),
+                *gh_repo_args(),
                 "--json",
                 "comments",
                 "--jq",
@@ -936,7 +957,7 @@ def _close_issue(issue_number: int, rule_id: str, location: str) -> bool:
     close_msg = f"该 finding 在最近一次扫描中已不再出现，自动关闭此 Issue。（Rule: {rule_id}, Location: {location}）"
     try:
         close_result = subprocess.run(
-            ["gh", "issue", "close", str(issue_number), "--comment", close_msg],
+            ["gh", "issue", "close", str(issue_number), *gh_repo_args(), "--comment", close_msg],
             capture_output=True,
             text=True,
             timeout=30,
@@ -961,6 +982,7 @@ def _fetch_open_issues(dedup_label: str) -> list[dict[str, Any]] | None:
                 "gh",
                 "issue",
                 "list",
+                *gh_repo_args(),
                 "--search",
                 f"label:{dedup_label}",
                 "--state",
@@ -1195,6 +1217,7 @@ def reconcile_in_progress(dedup_label: str) -> int:
                 "gh",
                 "issue",
                 "list",
+                *gh_repo_args(),
                 "--search",
                 f"label:{dedup_label}",
                 "--state",
@@ -1245,6 +1268,7 @@ def reconcile_in_progress(dedup_label: str) -> int:
                     "gh",
                     "pr",
                     "list",
+                    *gh_repo_args(),
                     "--search",
                     f"Fixes #{issue_number}",
                     "--state",
@@ -1284,6 +1308,7 @@ def reconcile_in_progress(dedup_label: str) -> int:
                     "issue",
                     "view",
                     str(issue_number),
+                    *gh_repo_args(),
                     "--json",
                     "comments",
                     "--jq",
@@ -1315,7 +1340,15 @@ def reconcile_in_progress(dedup_label: str) -> int:
 
         try:
             comment_result = subprocess.run(
-                ["gh", "issue", "comment", str(issue_number), "--body", comment_msg],
+                [
+                    "gh",
+                    "issue",
+                    "comment",
+                    str(issue_number),
+                    *gh_repo_args(),
+                    "--body",
+                    comment_msg,
+                ],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -1565,7 +1598,7 @@ def _issue_still_open(issue_number: int) -> bool | None:
     """
     try:
         result = subprocess.run(
-            ["gh", "issue", "view", str(issue_number), "--json", "state"],
+            ["gh", "issue", "view", str(issue_number), *gh_repo_args(), "--json", "state"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -1640,7 +1673,15 @@ def execute_orphan_classifications(
 
             try:
                 close_result = subprocess.run(
-                    ["gh", "issue", "close", str(issue_number), "--comment", close_msg],
+                    [
+                        "gh",
+                        "issue",
+                        "close",
+                        str(issue_number),
+                        *gh_repo_args(),
+                        "--comment",
+                        close_msg,
+                    ],
                     capture_output=True,
                     text=True,
                     timeout=30,
@@ -1664,6 +1705,7 @@ def execute_orphan_classifications(
                         "issue",
                         "view",
                         str(issue_number),
+                        *gh_repo_args(),
                         "--json",
                         "comments",
                         "--jq",
@@ -1692,7 +1734,15 @@ def execute_orphan_classifications(
 
             try:
                 comment_result = subprocess.run(
-                    ["gh", "issue", "comment", str(issue_number), "--body", comment_msg],
+                    [
+                        "gh",
+                        "issue",
+                        "comment",
+                        str(issue_number),
+                        *gh_repo_args(),
+                        "--body",
+                        comment_msg,
+                    ],
                     capture_output=True,
                     text=True,
                     timeout=30,
@@ -1927,6 +1977,7 @@ def close_expired_notifications() -> int:
             "gh",
             "issue",
             "list",
+            *gh_repo_args(),
             "--state",
             "open",
             "--label",
@@ -1977,14 +2028,16 @@ def close_expired_notifications() -> int:
 
             # Comment first, then close
             comment_result = subprocess.run(
-                ["gh", "issue", "comment", str(number), "--body", comment_msg],
+                ["gh", "issue", "comment", str(number), *gh_repo_args(), "--body", comment_msg],
                 capture_output=True,
                 text=True,
             )
 
             if comment_result.returncode == 0:
                 close_result = subprocess.run(
-                    ["gh", "issue", "close", str(number)], capture_output=True, text=True
+                    ["gh", "issue", "close", str(number), *gh_repo_args()],
+                    capture_output=True,
+                    text=True,
                 )
 
                 if close_result.returncode == 0:
