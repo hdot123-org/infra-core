@@ -117,8 +117,30 @@ jobs:
 
       - name: Run actionlint
         run: |
-          bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash)
-          ./actionlint -color
+          # Layer 1 宿主优先（2026-08-29 node-00 出口对 raw.githubusercontent.com 间歇黑洞，
+          # run 33225582434/33231155505 实证 134s timeout 致 main CI 连续三轮红——这是
+          # 最后一条每 run 无条件非 git 直连下载路径）。ce-01 runner 已预装
+          # /usr/local/bin/actionlint 1.7.11：PATH 命中且版本 ≥1.7 直接使用，零外网下载；
+          # 宿主缺失/过旧时 fallback 原 curl 下载路径（保持 GitHub-hosted 兼容）并打
+          # ::warning。完整 Layer 1+2 治理见 PR #37，本步为单点最小落地。
+          if command -v actionlint >/dev/null 2>&1; then
+            HOST_VERSION="$(actionlint --version 2>/dev/null | head -1 | grep -oE '[0-9]+(\.[0-9]+)*' | head -1)" || true
+            HOST_MAJOR="${HOST_VERSION%%.*}"
+            HOST_MINOR="${HOST_VERSION#*.}"
+            HOST_MINOR="${HOST_MINOR%%.*}"
+            if [ "${HOST_MAJOR:-0}" -gt 1 ] || { [ "${HOST_MAJOR:-0}" -eq 1 ] && [ "${HOST_MINOR:-0}" -ge 7 ]; }; then
+              echo "✓ Using host actionlint: $(actionlint --version | head -1)"
+              actionlint -color
+            else
+              echo "::warning::host actionlint ${HOST_VERSION:-unknown} < 1.7, falling back to download"
+              bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash)
+              ./actionlint -color
+            fi
+          else
+            echo "::warning::actionlint not found on host, falling back to download"
+            bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash)
+            ./actionlint -color
+          fi
 
   mypy:
     name: mypy
@@ -692,3 +714,17 @@ jobs:
 
           # Use the standalone zero-red check script
           bash scripts/check_zero_red.sh "${{ github.repository }}" "$COMMIT_SHA"
+
+      - name: Check droid-review status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Poll for droid-review check run (separate workflow, not a ci.yml job).
+          # droid-review runs as a parallel workflow (Droid Auto Review) and produces
+          # its own check run. ci-ok must wait for it to complete before declaring
+          # the full CI suite green.
+          bash scripts/check_droid_review.sh \
+            "${{ github.event_name }}" \
+            "${{ github.repository }}" \
+            "${{ github.event.pull_request.head.sha || github.sha }}" \
+            "$GH_TOKEN"

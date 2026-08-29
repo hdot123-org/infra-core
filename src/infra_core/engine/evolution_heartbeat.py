@@ -17,6 +17,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+# INFRA-601: gh 调用显式仓库上下文守卫（同目录 bare import，与其它引擎模块同机制）
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from evolution_utils import gh_repo_args  # noqa: E402
+
 # Heartbeat configuration
 HISTORY_PATH = Path(".evolution/findings_over_time.json")
 FRESHNESS_THRESHOLD_HOURS = 2  # Alert if no snapshot within 2 hours
@@ -126,6 +130,7 @@ def check_pr_coverage(label: str = EVOLUTION_FOUND_LABEL) -> dict[str, Any]:
             "gh",
             "issue",
             "list",
+            *gh_repo_args(),
             "--label",
             label,
             "--state",
@@ -162,6 +167,7 @@ def check_pr_coverage(label: str = EVOLUTION_FOUND_LABEL) -> dict[str, Any]:
                 "gh",
                 "pr",
                 "list",
+                *gh_repo_args(),
                 "--search",
                 f'"{number}"',
                 "--state",
@@ -196,6 +202,7 @@ def alert_issue_exists(label: str = ALERT_LABEL) -> bool:
                 "gh",
                 "issue",
                 "list",
+                *gh_repo_args(),
                 "--label",
                 label,
                 "--state",
@@ -245,6 +252,7 @@ def check_scanner_liveness(
                 "gh",
                 "run",
                 "list",
+                *gh_repo_args(),
                 "--workflow",
                 SCANNER_WORKFLOW,
                 "--limit",
@@ -392,6 +400,7 @@ def list_open_alert_issues() -> list[dict[str, Any]]:
             "gh",
             "issue",
             "list",
+            *gh_repo_args(),
             "--label",
             ALERT_LABEL,
             "--state",
@@ -429,6 +438,7 @@ def _issue_has_self_heal_comment(issue_num: int) -> bool:
                 "issue",
                 "view",
                 str(issue_num),
+                *gh_repo_args(),
                 "--json",
                 "comments",
             ],
@@ -514,7 +524,7 @@ def resolve_cleared_alerts(
                 )
                 # Still try to close in case previous close failed
                 close_result = subprocess.run(
-                    ["gh", "issue", "close", str(issue_num)],
+                    ["gh", "issue", "close", str(issue_num), *gh_repo_args()],
                     capture_output=True,
                     text=True,
                     timeout=30,
@@ -537,6 +547,7 @@ def resolve_cleared_alerts(
                     "issue",
                     "comment",
                     str(issue_num),
+                    *gh_repo_args(),
                     "--body",
                     comment,
                 ],
@@ -554,7 +565,7 @@ def resolve_cleared_alerts(
 
             # Close the issue and check return code
             close_result = subprocess.run(
-                ["gh", "issue", "close", str(issue_num)],
+                ["gh", "issue", "close", str(issue_num), *gh_repo_args()],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -618,6 +629,7 @@ def create_alert_issue(
             "gh",
             "issue",
             "create",
+            *gh_repo_args(),
             "--title",
             title,
             "--body",

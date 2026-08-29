@@ -750,6 +750,10 @@ def check_reverse_closure() -> list[dict[str, Any]]:
                 "gh",
                 "issue",
                 "list",
+                # INFRA-601: 审计目标仓库显式化（与 Check 6 的 --repo REPO_NAME 语义
+                # 一致），不用 GITHUB_REPOSITORY（self-audit 可能跨仓运行）
+                "--repo",
+                REPO_NAME,
                 "--label",
                 "evolution-found",
                 "--state",
