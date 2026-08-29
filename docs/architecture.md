@@ -48,13 +48,13 @@ infra-core 用自己的 governance 门禁保护自身（self-bootstrap）：
 
 ## 5. 门禁矩阵
 
-`CI` workflow 共 10 个 job（2026-08-29 容量收敛：19 → 10 bundle 化，降低 pve 双机排队）：pytest 锚点 + lint-bundle（ruff/shellcheck/actionlint/repo-consistency 四合一）+ type-bundle（mypy×3）+ advisory-bundle（advisory×3）+ test-groups（schema/security/business_policy 三段顺序）+ guards + integration-tests + e2e-tests + health-check + ci-ok 聚合。结构契约由 `tests/test_ci_structure_contract.py` 锁定（job 集合快照只对齐当前 main，后续 ci.yml 变更由对应 feature 同步该测试）。
+`CI` workflow 共 10 个 job（2026-08-29 容量收敛：19 → 10 bundle 化，降低 pve 双机排队）：pytest 锚点 + lint-bundle（ruff/shellcheck/actionlint/repo-consistency 四合一）+ type-bundle（mypy×2）+ advisory-bundle（advisory×3）+ test-groups（schema/security/business_policy 三段顺序）+ guards + integration-tests + e2e-tests + health-check + ci-ok 聚合。结构契约由 `tests/test_ci_structure_contract.py` 锁定（job 集合快照只对齐当前 main，后续 ci.yml 变更由对应 feature 同步该测试）。
 
 | 门禁 | workflow | 说明 |
 |------|----------|------|
 | pytest | `CI` | 单元测试 + 覆盖率地板（`--cov-fail-under`，ramp-up 计划见 pyproject.toml） |
 | lint-bundle | `CI` | lint 四合一：ruff（check+format 两半）/ shellcheck / actionlint（宿主优先）/ repo 交付一致性检查（`scripts/repo_health_check.sh --ci`） |
-| type-bundle | `CI` | mypy×3：基础 src 检查 + 分域 `mypy --strict`（src/infra_core 与 scripts/） |
+| type-bundle | `CI` | mypy×2：分域 `mypy --strict` 各跑一次（src/infra_core 与 scripts/，Run mypy 重复步骤已去重） |
 | guards | `CI` | 4 个守卫脚本：边界污染 / 文档分类 / fix-has-test / PR 引用一致性（后两个 PR-only，依赖 GH_TOKEN） |
 | test-groups | `CI` | 专项测试组 bundle：schema/security/business_policy 三段顺序跑（`-m <marker> -n 4 --no-cov`） |
 | advisory-bundle | `CI` | advisory 三合一（pip-audit / deptry / 遥测覆盖率审计 `scripts/audit_telemetry_coverage.sh`），INFRA-595 零红：无 `continue-on-error`，失败即红 check-run，ci-ok 按 `.result` 阻断（曾有 `continue-on-error` 时 `.result` 恒为 success，判定空转，run 33129232081 实证） |
