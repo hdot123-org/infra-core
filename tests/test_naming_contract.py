@@ -683,3 +683,77 @@ class TestAutoMergeTriggerContract:
             assert "self-hosted" in runs_on and "pve-linux" in runs_on, (
                 f"job {job_name} must run on [self-hosted, pve-linux], got {runs_on}"
             )
+
+
+class TestMemoryCoreCallerParityContract:
+    """VAL-GATE-111/CROSS-011（gate-contract-tests）：shipped 模板 ⇄ memory-core
+    thin caller 命名契约三方对等。
+
+    memory-core 侧 TestM4NamingContractNet 锁定消费仓 live caller 的 name ⇄ path
+    全表；本类把同一契约网收敛到引擎仓 shipped 资产面：
+
+    - **自仓镜像 workflow**（与消费仓 caller 同名注册）的 name ⇄ path 全表——
+      其中 setup-labels / branch-cleanup / watchdog 等此前散落或未锁定；
+    - **reusable 体的内部名**（Evolution Scan Reusable 等）——不得抢占 caller
+      公开名（'Evolution Scan' / 'Evolution Heartbeat' 归消费仓 thin caller
+      文件；同仓同名双注册会让 workflow_run 名单与 workflow 面板歧义）；
+    - **分片模板 → caller 本地聚合契约链**：聚合 job key `droid-review` 绝不进
+      reusable（check 名嵌套陷阱）+ artifact 前缀 `droid-review-debug-` +
+      承载聚合的 composite action 随引擎仓发布且元数据记载该契约。
+
+    任何一处漂移 = memory-core live callers ↔ shipped 模板 ↔ architecture §3
+    三方对等破裂（VAL-CROSS-011）。
+    """
+
+    # 自仓镜像 workflow（与消费仓 caller 同名注册）
+    MIRROR_WORKFLOW_NAMES = {
+        "ci.yml": "CI",
+        "qa.yml": "QA",
+        "droid-review.yml": "Droid Auto Review",
+        "evolution-governance.yml": "Evolution Governance",
+        "auto-merge.yml": "Auto Merge",
+        "branch-cleanup.yml": "Branch Cleanup",
+        "droid-review-watchdog.yml": "Droid Review Watchdog",
+        "setup-labels.yml": "Setup Labels",
+        "release-please.yml": "Release Please",
+    }
+
+    # reusable 体内部名（文件被消费仓 gh run list --workflow 按文件名解析，
+    # 公开名归 caller；内部名一旦漂移同样破坏本表三方对等）
+    REUSABLE_BODY_NAMES = {
+        "evolution-scan.yml": "Evolution Scan Reusable",
+        "evolution-heartbeat.yml": "Evolution Heartbeat Reusable",
+        "droid-review-shards.yml": "Droid Review Shards",
+        "droid-review-watchdog-handlers.yml": "Droid Review Watchdog Handlers",
+        "auto-merge-pipeline.yml": "Auto Merge Pipeline",
+    }
+
+    @pytest.mark.parametrize(
+        ("filename", "expected_name"),
+        sorted({**MIRROR_WORKFLOW_NAMES, **REUSABLE_BODY_NAMES}.items()),
+    )
+    def test_workflow_name_byte_exact(self, filename: str, expected_name: str):
+        assert re.search(
+            rf"^name:\s*{re.escape(expected_name)}\s*$",
+            _read(f".github/workflows/{filename}"),
+            re.MULTILINE,
+        ), f"{filename} workflow 名漂移（三方对等契约网单点改名）: 期望 {expected_name!r}"
+
+    def test_aggregate_composite_action_carries_local_job_key_contract(self):
+        """VAL-GATE-103/111 模板侧：聚合 check 名 `droid-review` 的承载件
+        （composite action）必须随引擎仓发布，且元数据记载 caller 本地 job
+        契约——消费仓误把它改成 reusable workflow 调用会嵌套 check 名。"""
+        action_path = REPO_ROOT / "actions/droid-review-aggregate/action.yml"
+        assert action_path.exists(), (
+            "droid-review-aggregate composite 必须随引擎仓发布（caller 本地聚合承载件）"
+        )
+        text = action_path.read_text(encoding="utf-8")
+        # composite action 的 name 元数据（VAL-GATE-111: composite action name: metadata）
+        assert re.search(r"^name:\s*'Droid Review Aggregate'\s*$", text, re.MULTILINE), (
+            "composite action name 元数据漂移"
+        )
+        # 元数据必须记载 caller 本地 job key 契约与嵌套陷阱（防误改 reusable 调用的文档面）
+        assert "`droid-review`" in text, (
+            "composite 元数据必须记载 caller 本地 job key `droid-review` 契约"
+        )
+        assert "嵌套" in text, "composite 元数据必须记载 reusable 调用导致 check 名嵌套的陷阱"
