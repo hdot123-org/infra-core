@@ -5,7 +5,9 @@
 # 2. 校验文件存在性（head-src 或 BASE 任一侧存在即可——修已删除文件永久红）
 # 3. 在 head-src 单 clone 内生成分片 diff（merge-base 已在 workflow 预计算）
 # 4. 调用 droid exec，捕获 stdout（-o json），解析 findings
-# 5. 校验 findings JSON schema（fail-closed）
+#    4a. exit 137（SIGKILL）且 stdout 空 → 同参数单次重试（2026-08-29 竞态加固）
+#    4b. stdout 不可用 → 从本 run session jsonl 恢复 findings（recover_shard_findings.sh）
+# 5. 校验 findings JSON schema（fail-closed；stdout 与会话两路皆空才红）
 # 6. 输出 findings + diff artifact
 set -euo pipefail
 
@@ -43,7 +45,12 @@ if ! echo "$SHARD_FILES" | jq empty 2>/dev/null; then
   exit 1
 fi
 
-readarray -t FILES < <(echo "$SHARD_FILES" | jq -r '.[]')
+# bash 3.2 兼容（readarray/mapfile 是 bash 4+，macOS 自带 bash 无法本地测试）；
+# 行为与 `readarray -t FILES < <(jq -r '.[]')` 等价：按行切分，无尾随空元素
+FILES=()
+while IFS= read -r f; do
+  FILES+=("$f")
+done < <(echo "$SHARD_FILES" | jq -r '.[]')
 
 if [ ${#FILES[@]} -eq 0 ]; then
   echo "::error::SHARD_FILES parsed to empty file list — fail-closed"
@@ -132,6 +139,8 @@ PROMPT_TEMPLATE="$(cat .github/review/shard-review-prompt.md)"
 cat > prompt.md << PROMPT_EOF
 $PROMPT_TEMPLATE
 
+<!-- droid-review-shard-marker:${RUN_ID:-unknown}-${SHARD_ID} -->
+
 ## Shard $SHARD_ID Diff
 
 \`\`\`diff
@@ -149,7 +158,17 @@ Limit your output to the top 20 findings maximum. Return only valid JSON.
 PROMPT_EOF
 
 # ── Fix #4: 调用 droid exec，捕获 stdout (-o json)，解析 findings ──
+# 2026-08-29 exit 137 完成期竞态加固（#40/#45/#47 多次实证，run 33226955612
+# debug artifact：session jsonl 最后一行已是完整 findings JSON 但 stdout 0 字节）：
+#   (1) exit 137 且 stdout 空 → 同参数单次重试
+#   (2) stdout 不可用 → 会话 jsonl 兜底恢复（::warning 标注来源）
+#   (3) fail-closed 语义保留：stdout 与会话两路皆空才红
 echo "::group::Running droid exec for shard $SHARD_ID"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RECOVER_HELPER="$SCRIPT_DIR/recover_shard_findings.sh"
+DROID_CWD="${GITHUB_WORKSPACE:-$PWD}/head-src"
+DROID_EXEC_START=$(date +%s)
 
 # Capture stdout for JSON findings output
 DROID_OUTPUT_FILE="droid-exec-stdout.json"
@@ -157,7 +176,7 @@ set +e
 droid exec \
   --auto low \
   -m qwen3.7-plus \
-  --cwd "${GITHUB_WORKSPACE:-$PWD}/head-src" \
+  --cwd "$DROID_CWD" \
   --tag "shard-${SHARD_ID}" \
   -f prompt.md \
   -o json 2>shard-exec-error.log | tee "$DROID_OUTPUT_FILE"
@@ -166,19 +185,60 @@ set -e
 
 echo "droid exec exit code: $DROID_EXIT"
 
+# (1) exit 137 = SIGKILL，完成期竞态特征：session 完整但 stdout 0 字节。
+# 重试约 50% 恢复；仍败则走 (2) 会话兜底。
+if [ "$DROID_EXIT" -eq 137 ] && [ ! -s "$DROID_OUTPUT_FILE" ]; then
+  echo "::warning::droid exec exit 137 (SIGKILL) with empty stdout — retrying once (same args)"
+  : > "$DROID_OUTPUT_FILE"
+  set +e
+  droid exec \
+    --auto low \
+    -m qwen3.7-plus \
+    --cwd "$DROID_CWD" \
+    --tag "shard-${SHARD_ID}" \
+    -f prompt.md \
+    -o json 2>>shard-exec-error.log | tee "$DROID_OUTPUT_FILE"
+  DROID_EXIT=$?
+  set -e
+  echo "droid exec retry exit code: $DROID_EXIT"
+fi
+
+STDOUT_USABLE="false"
+if [ -s "$DROID_OUTPUT_FILE" ] && jq empty "$DROID_OUTPUT_FILE" 2>/dev/null; then
+  STDOUT_USABLE="true"
+fi
+
+# (2) stdout 不可用（空或非 JSON）且执行失败/无输出 → 会话兜底，再 fail-closed
+RECOVERED_SOURCE=""
+if [ "$STDOUT_USABLE" = "false" ] && { [ "$DROID_EXIT" -ne 0 ] || [ ! -s "$DROID_OUTPUT_FILE" ]; }; then
+  echo "::warning::droid exec stdout unusable (exit $DROID_EXIT) — trying session jsonl recovery before fail-closed"
+  if bash "$RECOVER_HELPER" "$DROID_CWD" "$DROID_EXEC_START" "$SHARD_ID" "findings-shard-${SHARD_ID}.json"; then
+    RECOVERED_SOURCE="session"
+  else
+    echo "::error::Session jsonl recovery produced no findings — fail-closed（两路皆空）"
+    echo "::error::stderr log:"
+    cat shard-exec-error.log 2>/dev/null || true
+    cd "$GITHUB_WORKSPACE"
+    exit 1
+  fi
+fi
+
 # If droid exec failed AND we have no valid output, fail-closed
-if [ $DROID_EXIT -ne 0 ]; then
+if [ "$DROID_EXIT" -ne 0 ]; then
   echo "::error::droid exec failed for shard $SHARD_ID (exit $DROID_EXIT)"
-  # Check if there's still valid output despite non-zero exit
-  if [ ! -s "$DROID_OUTPUT_FILE" ] || ! jq empty "$DROID_OUTPUT_FILE" 2>/dev/null; then
+  if [ "$STDOUT_USABLE" != "true" ] && [ "$RECOVERED_SOURCE" = "" ]; then
     echo "::error::No valid JSON output from droid exec — fail-closed"
     cd "$GITHUB_WORKSPACE"
     exit 1
   fi
-  echo "::warning::droid exec returned non-zero but produced valid JSON output, continuing"
+  if [ "$STDOUT_USABLE" = "true" ]; then
+    echo "::warning::droid exec returned non-zero but produced valid JSON output, continuing"
+  else
+    echo "::warning::droid exec returned non-zero but findings recovered from session jsonl, continuing"
+  fi
 fi
 
-if [ ! -s "$DROID_OUTPUT_FILE" ]; then
+if [ "$RECOVERED_SOURCE" = "" ] && [ ! -s "$DROID_OUTPUT_FILE" ]; then
   echo "::error::droid exec produced no stdout output — fail-closed"
   echo "::error::stderr log:"
   cat shard-exec-error.log 2>/dev/null || true
@@ -195,6 +255,12 @@ echo "::group::Parsing findings from droid exec output"
 # droid exec -o json may wrap the model output in its own JSON envelope
 # Try direct parse first, then look for nested result/content fields
 FINDINGS_PARSED="false"
+
+# 会话兜底已产出 findings 文件时跳过 stdout 解析
+if [ "$RECOVERED_SOURCE" != "" ]; then
+  FINDINGS_PARSED="true"
+  echo "Findings recovered from session jsonl — skipping stdout parse"
+fi
 
 # Attempt 1: Direct JSON parse (stdout IS the findings)
 if jq -e '.shard_id != null and .findings != null' "$DROID_OUTPUT_FILE" >/dev/null 2>&1; then
