@@ -4,6 +4,7 @@ INFRA-213: Tests the scanner liveness check (gh run list) and main() orchestrati
 """
 
 import json
+import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -146,7 +147,13 @@ def test_main_all_ok_returns_0():
 
 
 def test_main_scanner_stale_returns_1():
-    """Scanner stale → exit 1, alert created."""
+    """Scanner stale + dispatch REJECTED → exit 1, alert created.
+
+    INFRA-597 contract change (ported from memory-core hotfix): a *successful*
+    dispatch now suppresses the scanner_stale alert (see test_infra597_* below).
+    The alert path is only entered when self-heal itself fails (or the outage
+    is severe).
+    """
     runs = [_recent_run(5.0, "success")]
     with (
         patch("evolution_heartbeat.subprocess.run") as mock_run,
@@ -156,6 +163,7 @@ def test_main_scanner_stale_returns_1():
         patch("evolution_heartbeat.alert_issue_exists", return_value=False),
         patch("evolution_heartbeat.create_alert_issue") as mock_create,
         patch("evolution_heartbeat.write_monitor_heartbeat"),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=False),
     ):
         mock_run.return_value = _gh_result(json.dumps(runs))
         mock_hb.return_value = {"stale": True, "message": "advisory"}
@@ -168,7 +176,10 @@ def test_main_scanner_stale_returns_1():
         rc = evolution_heartbeat.main()
 
     assert rc == 1
-    mock_create.assert_called_once_with(scanner_stale=True, issues_without_pr=0)
+    mock_create.assert_called_once()
+    kwargs = mock_create.call_args.kwargs
+    assert kwargs["scanner_stale"] is True
+    assert kwargs["issues_without_pr"] == 0
 
 
 def test_main_advisory_checks_do_not_trigger_alert():
@@ -685,3 +696,466 @@ def test_resolve_cleared_alerts_skips_duplicate_comment_close_fails():
     # Verify no duplicate comment was posted
     comment_calls = [c for c in mock_run.call_args_list if "comment" in c.args[0]]
     assert len(comment_calls) == 0, "Should not post duplicate self-heal comment"
+
+
+# ---------------------------------------------------------------------------
+# INFRA-578: scanner self-heal dispatch (ported from memory-core hotfix)
+# ---------------------------------------------------------------------------
+
+
+def test_infra578_trigger_scanner_dispatch_success():
+    """INFRA-578: dispatch succeeds → True, correct gh workflow run command."""
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result(returncode=0)
+        result = evolution_heartbeat.trigger_scanner_dispatch()
+
+    assert result is True
+    mock_run.assert_called_once()
+    args = mock_run.call_args[0][0]
+    expected = [
+        "gh",
+        "workflow",
+        "run",
+        *evolution_heartbeat.gh_repo_args(),
+        evolution_heartbeat.SCANNER_WORKFLOW,
+    ]
+    assert args == expected
+
+
+def test_infra578_trigger_scanner_dispatch_failure():
+    """INFRA-578: gh workflow run fails → False (alert still raised by main)."""
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result(returncode=1, stderr="workflow not found")
+        result = evolution_heartbeat.trigger_scanner_dispatch()
+
+    assert result is False
+
+
+def test_infra578_trigger_scanner_dispatch_timeout():
+    """INFRA-578: subprocess timeout → False, no exception escapes."""
+    with patch(
+        "evolution_heartbeat.subprocess.run", side_effect=subprocess.TimeoutExpired("gh", 30)
+    ):
+        result = evolution_heartbeat.trigger_scanner_dispatch()
+
+    assert result is False
+
+
+def test_infra578_main_stale_scanner_triggers_dispatch():
+    """INFRA-578: main() with stale scanner must attempt self-heal dispatch before alerting.
+
+    INFRA-597: with the dispatch mocked to FAIL here, the alert must still be
+    created (observability preserved when self-heal is broken).
+    """
+    runs = [_recent_run(5.0, "success")]  # stale
+    with (
+        patch("evolution_heartbeat.subprocess.run") as mock_run,
+        patch("evolution_heartbeat.check_heartbeat_marker") as mock_hb,
+        patch("evolution_heartbeat.check_history_freshness") as mock_hist,
+        patch("evolution_heartbeat.check_pr_coverage") as mock_cov,
+        patch("evolution_heartbeat.alert_issue_exists", return_value=False),
+        patch("evolution_heartbeat.create_alert_issue") as mock_create,
+        patch("evolution_heartbeat.write_monitor_heartbeat"),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=False) as mock_dispatch,
+    ):
+        mock_run.return_value = _gh_result(json.dumps(runs))
+        mock_hb.return_value = {"stale": True, "message": "advisory"}
+        mock_hist.return_value = {"stale": True, "message": "advisory"}
+        mock_cov.return_value = {
+            "issues_without_pr": 0,
+            "total_issues": 0,
+            "missing": [],
+        }
+        rc = evolution_heartbeat.main()
+
+    assert rc == 1
+    mock_dispatch.assert_called_once()
+    # Alert must still be created because dispatch was rejected
+    mock_create.assert_called_once()
+    kwargs = mock_create.call_args.kwargs
+    assert kwargs["scanner_stale"] is True
+    assert kwargs["issues_without_pr"] == 0
+
+
+def test_infra578_main_alive_scanner_skips_dispatch():
+    """INFRA-578: main() with alive scanner must NOT dispatch (no spurious triggers)."""
+    runs = [_recent_run(0.5, "success")]  # alive
+    with (
+        patch("evolution_heartbeat.subprocess.run") as mock_run,
+        patch("evolution_heartbeat.check_heartbeat_marker") as mock_hb,
+        patch("evolution_heartbeat.check_history_freshness") as mock_hist,
+        patch("evolution_heartbeat.check_pr_coverage") as mock_cov,
+        patch("evolution_heartbeat.write_monitor_heartbeat"),
+        patch("evolution_heartbeat.trigger_scanner_dispatch") as mock_dispatch,
+    ):
+        mock_run.return_value = _gh_result(json.dumps(runs))
+        mock_hb.return_value = {"stale": True, "message": "advisory"}
+        mock_hist.return_value = {"stale": True, "message": "advisory"}
+        mock_cov.return_value = {
+            "issues_without_pr": 0,
+            "total_issues": 0,
+            "missing": [],
+        }
+        rc = evolution_heartbeat.main()
+
+    assert rc == 0
+    mock_dispatch.assert_not_called()
+
+
+def test_infra578_main_dispatch_failure_still_alerts():
+    """INFRA-578: dispatch fails → alert still created, exit 1 (observability preserved)."""
+    runs = [_recent_run(5.0, "success")]  # stale
+    with (
+        patch("evolution_heartbeat.subprocess.run") as mock_run,
+        patch("evolution_heartbeat.check_heartbeat_marker") as mock_hb,
+        patch("evolution_heartbeat.check_history_freshness") as mock_hist,
+        patch("evolution_heartbeat.check_pr_coverage") as mock_cov,
+        patch("evolution_heartbeat.alert_issue_exists", return_value=False),
+        patch("evolution_heartbeat.create_alert_issue") as mock_create,
+        patch("evolution_heartbeat.write_monitor_heartbeat"),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=False),
+    ):
+        mock_run.return_value = _gh_result(json.dumps(runs))
+        mock_hb.return_value = {"stale": True, "message": "advisory"}
+        mock_hist.return_value = {"stale": True, "message": "advisory"}
+        mock_cov.return_value = {
+            "issues_without_pr": 0,
+            "total_issues": 0,
+            "missing": [],
+        }
+        rc = evolution_heartbeat.main()
+
+    assert rc == 1
+    kwargs = mock_create.call_args.kwargs
+    assert kwargs["scanner_stale"] is True
+    assert kwargs["issues_without_pr"] == 0
+
+
+# ---------------------------------------------------------------------------
+# INFRA-597: alert suppression on successful self-heal dispatch
+# ---------------------------------------------------------------------------
+
+
+def test_infra597_successful_dispatch_suppresses_alert():
+    """INFRA-597: stale scanner + dispatch ACCEPTED (non-severe) → no alert issue, exit 0.
+
+    Root cause of the 4-day alert storm (#1046/#1051/#1055/#1059): GitHub
+    load-shed dropped cron slots for both workflows; the heartbeat detected a
+    transient 5.8h gap, healed it via workflow_dispatch (run completed), and
+    STILL created an alert issue that synced to Linear and dispatched an
+    agent session. Alert semantics must be "self-heal failed", not "staleness
+    occurred".
+    """
+    runs = [_recent_run(5.0, "success")]  # stale but non-severe (< 8h)
+    with (
+        patch("evolution_heartbeat.subprocess.run") as mock_run,
+        patch("evolution_heartbeat.check_heartbeat_marker") as mock_hb,
+        patch("evolution_heartbeat.check_history_freshness") as mock_hist,
+        patch("evolution_heartbeat.check_pr_coverage") as mock_cov,
+        patch("evolution_heartbeat.alert_issue_exists") as mock_exists,
+        patch("evolution_heartbeat.create_alert_issue") as mock_create,
+        patch("evolution_heartbeat.write_monitor_heartbeat"),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=True),
+    ):
+        mock_run.return_value = _gh_result(json.dumps(runs))
+        mock_hb.return_value = {"stale": True, "message": "advisory"}
+        mock_hist.return_value = {"stale": True, "message": "advisory"}
+        mock_cov.return_value = {
+            "issues_without_pr": 0,
+            "total_issues": 0,
+            "missing": [],
+        }
+        rc = evolution_heartbeat.main()
+
+    assert rc == 0
+    mock_create.assert_not_called()
+    mock_exists.assert_not_called()
+
+
+def test_infra597_suppression_heals_prior_alert():
+    """INFRA-597: dispatch accepted → prior open scanner_stale alert gets self-heal closed.
+
+    This is the #1059 scenario: by the time this fix lands, the transient
+    alert may still be open. With suppression active, the current anomaly set
+    treats the scanner as recovered, so resolve_cleared_alerts closes it with
+    the standard self-heal comment instead of waiting for the next scan run.
+    """
+    # stale but non-severe (5.0h < 8h)：liveness 数据经 mock 的 check_scanner_liveness
+    # 注入（hours_since_last_run=5.0），无需 gh run list 桩数据
+    open_alerts = [{"number": 1059, "body": _ALERT_BODY_SCANNER_STALE}]
+
+    with (
+        patch("evolution_heartbeat.subprocess.run") as mock_run,
+        patch("evolution_heartbeat.check_scanner_liveness") as mock_liveness,
+        patch("evolution_heartbeat.check_heartbeat_marker") as mock_hb,
+        patch("evolution_heartbeat.check_history_freshness") as mock_hist,
+        patch("evolution_heartbeat.check_pr_coverage") as mock_cov,
+        patch("evolution_heartbeat.list_open_alert_issues", return_value=open_alerts),
+        patch("evolution_heartbeat.alert_issue_exists", return_value=False),
+        patch("evolution_heartbeat.create_alert_issue"),
+        patch("evolution_heartbeat.write_monitor_heartbeat"),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=True),
+    ):
+        mock_liveness.return_value = {
+            "alive": False,
+            "hours_since_last_run": 5.0,
+            "last_status": "success",
+            "message": "Scanner stale: last run 5.0h ago",
+        }
+
+        # _issue_has_self_heal_comment (gh issue view) → no prior comment;
+        # self-heal comment + close succeed
+        def side_effect(args, **kwargs):
+            if "view" in args:
+                return _gh_result(stdout=json.dumps({"comments": []}))
+            return _gh_result(stdout="[]", returncode=0)
+
+        mock_run.side_effect = side_effect
+        mock_hb.return_value = {"stale": True, "message": "advisory"}
+        mock_hist.return_value = {"stale": True, "message": "advisory"}
+        mock_cov.return_value = {
+            "issues_without_pr": 0,
+            "total_issues": 0,
+            "missing": [],
+        }
+        rc = evolution_heartbeat.main()
+
+    assert rc == 0
+    close_calls = [c.args[0] for c in mock_run.call_args_list if "close" in c.args[0]]
+    assert len(close_calls) == 1, "Prior alert #1059 must be self-heal closed"
+
+
+def test_infra597_severe_outage_alerts_despite_dispatch():
+    """INFRA-597: outage > SCANNER_SEVERE_STALENESS_HOURS → alert even if dispatch accepted.
+
+    Repeated dispatch success with no new run appearing implies systemic
+    failure (broken workflow, disabled runner, auth issue). The suppression
+    must not silence a genuinely long outage.
+    """
+    runs = [_recent_run(12.0, "success")]  # severe (> 8h)
+    with (
+        patch("evolution_heartbeat.subprocess.run") as mock_run,
+        patch("evolution_heartbeat.check_heartbeat_marker") as mock_hb,
+        patch("evolution_heartbeat.check_history_freshness") as mock_hist,
+        patch("evolution_heartbeat.check_pr_coverage") as mock_cov,
+        patch("evolution_heartbeat.alert_issue_exists", return_value=False),
+        patch("evolution_heartbeat.create_alert_issue") as mock_create,
+        patch("evolution_heartbeat.write_monitor_heartbeat"),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=True),
+    ):
+        mock_run.return_value = _gh_result(json.dumps(runs))
+        mock_hb.return_value = {"stale": True, "message": "advisory"}
+        mock_hist.return_value = {"stale": True, "message": "advisory"}
+        mock_cov.return_value = {
+            "issues_without_pr": 0,
+            "total_issues": 0,
+            "missing": [],
+        }
+        rc = evolution_heartbeat.main()
+
+    assert rc == 1
+    mock_create.assert_called_once()
+    kwargs = mock_create.call_args.kwargs
+    assert kwargs["scanner_stale"] is True
+    assert kwargs["scanner_stale_hours"] is not None
+    assert kwargs["scanner_stale_hours"] > 12.0 - 1.0  # ~12h, not 5h
+
+
+def test_infra597_suppression_does_not_affect_coverage_anomaly():
+    """INFRA-597: suppression only covers scanner_stale; issues_without_pr still alerts."""
+    runs = [_recent_run(5.0, "success")]  # stale but non-severe
+    with (
+        patch("evolution_heartbeat.subprocess.run") as mock_run,
+        patch("evolution_heartbeat.check_heartbeat_marker") as mock_hb,
+        patch("evolution_heartbeat.check_history_freshness") as mock_hist,
+        patch("evolution_heartbeat.check_pr_coverage") as mock_cov,
+        patch("evolution_heartbeat.alert_issue_exists", return_value=False),
+        patch("evolution_heartbeat.create_alert_issue") as mock_create,
+        patch("evolution_heartbeat.write_monitor_heartbeat"),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=True),
+    ):
+        mock_run.return_value = _gh_result(json.dumps(runs))
+        mock_hb.return_value = {"stale": True, "message": "advisory"}
+        mock_hist.return_value = {"stale": True, "message": "advisory"}
+        mock_cov.return_value = {
+            "issues_without_pr": 2,
+            "total_issues": 5,
+            "missing": [11, 12],
+        }
+        rc = evolution_heartbeat.main()
+
+    assert rc == 1
+    kwargs = mock_create.call_args.kwargs
+    assert kwargs["scanner_stale"] is False
+    assert kwargs["issues_without_pr"] == 2  # still alerting
+
+
+def test_infra597_suppression_boundary_exact_severe_threshold():
+    """INFRA-597: just BELOW the severe threshold (8h) is NOT severe — suppress.
+
+    Uses 7.9h instead of exactly 8.0h to avoid a time-of-test race: the age is
+    recomputed from `runs` timestamps, and a few ms of drift would push a
+    nominally-exact 8.0h over the strict `>` boundary and flip the outcome.
+    """
+    runs = [_recent_run(7.9, "success")]  # below 8h → non-severe
+    with (
+        patch("evolution_heartbeat.subprocess.run") as mock_run,
+        patch("evolution_heartbeat.check_heartbeat_marker") as mock_hb,
+        patch("evolution_heartbeat.check_history_freshness") as mock_hist,
+        patch("evolution_heartbeat.check_pr_coverage") as mock_cov,
+        patch("evolution_heartbeat.alert_issue_exists") as mock_exists,
+        patch("evolution_heartbeat.create_alert_issue") as mock_create,
+        patch("evolution_heartbeat.write_monitor_heartbeat"),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=True),
+    ):
+        mock_run.return_value = _gh_result(json.dumps(runs))
+        mock_hb.return_value = {"stale": True, "message": "advisory"}
+        mock_hist.return_value = {"stale": True, "message": "advisory"}
+        mock_cov.return_value = {
+            "issues_without_pr": 0,
+            "total_issues": 0,
+            "missing": [],
+        }
+        rc = evolution_heartbeat.main()
+
+    assert rc == 0
+    mock_create.assert_not_called()
+    mock_exists.assert_not_called()
+
+
+def test_infra597_alert_body_includes_stale_hours():
+    """INFRA-597: alert body for a dispatch-failed stale carries the outage duration.
+
+    The duration makes the new alert semantics ('self-heal failed or severe')
+    visible in the Linear/GitHub mirror without opening the run log.
+    """
+    body = evolution_heartbeat._build_alert_body(
+        scanner_stale=True, issues_without_pr=0, scanner_stale_hours=5.8
+    )
+    parsed = evolution_heartbeat.extract_recorded_anomalies(body)
+    assert parsed == {"scanner_stale"}, "Roundtrip must survive the new suffix"
+    assert "5.8h" in body
+
+
+def test_infra597_severity_threshold_locked():
+    """INFRA-597: SCANNER_SEVERE_STALENESS_HOURS must stay well above observed
+    transient load-shed gaps (5.8h on 2026-08-28) and below a genuinely dead
+    pipeline. Locks the value to force a review if either reality shifts.
+    """
+    threshold = evolution_heartbeat.SCANNER_SEVERE_STALENESS_HOURS
+    assert threshold >= 6, "Must exceed the largest observed transient gap (5.8h)"
+    assert threshold <= 24, "A dead pipeline must alert within a day"
+
+
+# ---------------------------------------------------------------------------
+# INFRA-588: heartbeat reverse-watch (scanner → heartbeat self-heal)
+# ---------------------------------------------------------------------------
+
+
+def test_infra588_check_heartbeat_workflow_liveness_alive():
+    """INFRA-588: heartbeat ran 1h ago (cron is 2h, threshold 3h) → alive."""
+    runs = [_recent_run(1.0, "success")]
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result(json.dumps(runs))
+        result = evolution_heartbeat.check_heartbeat_workflow_liveness()
+
+    assert result["alive"] is True
+
+
+def test_infra588_check_heartbeat_workflow_liveness_stale():
+    """INFRA-588: heartbeat last ran 5h ago (> 3h threshold) → stale.
+
+    This is the 2026-08-27 scenario: heartbeat cron slots load-shed for 20+ h
+    after healing the scanner, leaving the pipeline unwatched.
+    """
+    runs = [_recent_run(5.0, "success")]
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result(json.dumps(runs))
+        result = evolution_heartbeat.check_heartbeat_workflow_liveness()
+
+    assert result["alive"] is False
+    assert "stale" in result["message"].lower()
+
+
+def test_infra588_check_heartbeat_workflow_liveness_gh_failure():
+    """INFRA-588: gh query fails → not alive (fail-safe, no exception)."""
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result(returncode=1, stderr="auth error")
+        result = evolution_heartbeat.check_heartbeat_workflow_liveness()
+
+    assert result["alive"] is False
+    assert "Cannot query" in result["message"]
+
+
+def test_infra588_liveness_probe_queries_heartbeat_workflow():
+    """INFRA-588: the heartbeat probe must query evolution-heartbeat.yml, not the scan workflow."""
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result(json.dumps([_recent_run(0.5, "success")]))
+        evolution_heartbeat.check_heartbeat_workflow_liveness()
+
+    cmd = mock_run.call_args[0][0]
+    assert "evolution-heartbeat.yml" in cmd, f"Probe must target heartbeat workflow, got: {cmd}"
+    assert "evolution-scan.yml" not in cmd
+
+
+def test_infra588_scanner_liveness_queries_scan_workflow():
+    """INFRA-588 regression: shared _check_workflow_liveness must not break scanner probe target."""
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result(json.dumps([_recent_run(0.5, "success")]))
+        evolution_heartbeat.check_scanner_liveness()
+
+    cmd = mock_run.call_args[0][0]
+    assert "evolution-scan.yml" in cmd, f"Scanner probe must target scan workflow, got: {cmd}"
+    assert "evolution-heartbeat.yml" not in cmd
+
+
+def test_infra588_trigger_heartbeat_dispatch_success():
+    """INFRA-588: dispatch succeeds → True, correct gh workflow run command."""
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result(stdout="", returncode=0)
+        ok = evolution_heartbeat.trigger_heartbeat_dispatch()
+
+    assert ok is True
+    cmd = mock_run.call_args[0][0]
+    assert cmd == [
+        "gh",
+        "workflow",
+        "run",
+        *evolution_heartbeat.gh_repo_args(),
+        evolution_heartbeat.HEARTBEAT_WORKFLOW,
+    ]
+
+
+def test_infra588_trigger_heartbeat_dispatch_failure():
+    """INFRA-588: gh workflow run fails → False, no exception escapes."""
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result(returncode=1, stderr="workflow disabled")
+        ok = evolution_heartbeat.trigger_heartbeat_dispatch()
+
+    assert ok is False
+
+
+def test_infra588_trigger_heartbeat_dispatch_timeout():
+    """INFRA-588: subprocess timeout → False, no exception escapes."""
+    with patch(
+        "evolution_heartbeat.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd="gh", timeout=30),
+    ):
+        ok = evolution_heartbeat.trigger_heartbeat_dispatch()
+
+    assert ok is False
+
+
+def test_infra588_threshold_covers_cron_drift():
+    """INFRA-588: 2h cron + 1h slack threshold (3h) tolerates the observed 2h18m+ drift.
+
+    Locks HEARTBEAT_LIVENESS_THRESHOLD_HOURS so a future edit cannot silently
+    shrink it below the cron interval (which would cause perpetual re-dispatch
+    loops) or inflate it so far that a dead heartbeat goes unnoticed.
+    """
+    cron_hours = 2  # evolution-heartbeat.yml: cron '47 */2 * * *'
+    threshold = evolution_heartbeat.HEARTBEAT_LIVENESS_THRESHOLD_HOURS
+    assert threshold >= cron_hours + 1, (
+        f"Threshold must cover cron + 1h drift slack, got {threshold}h"
+    )
+    assert threshold <= cron_hours * 3, f"Threshold too loose for a 2h cron, got {threshold}h"
