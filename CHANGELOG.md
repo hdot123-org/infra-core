@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.4.0](https://github.com/hdot123-org/infra-core/compare/v0.3.0...v0.4.0) (2026-08-29)
+
+
+### Features
+
+* ci-ok 轮询等待 droid-review 完成后再放行（INFRA-598） ([#44](https://github.com/hdot123-org/infra-core/issues/44)) ([3e04580](https://github.com/hdot123-org/infra-core/commit/3e04580bb7096d98487e301b2c2c851b0c635444))
+* **droid-review:** Factory CLI 安装宿主优先化——PATH 探测 + 版本下限 gate，缺失才 fallback 下载 ([#62](https://github.com/hdot123-org/infra-core/issues/62)) ([d9489f4](https://github.com/hdot123-org/infra-core/commit/d9489f4c8b4dedd75778bc877e16ee1b658e067b))
+* **droid-review:** 抽离 droid-review-shards reusable workflow + aggregate composite（M4 门禁切换基建） ([#59](https://github.com/hdot123-org/infra-core/issues/59)) ([6dfb73a](https://github.com/hdot123-org/infra-core/commit/6dfb73aa998182a4a05b3b244407f0178c1a0c1a))
+* enforce zero-red merge policy (ci-ok blocks any red check) ([#38](https://github.com/hdot123-org/infra-core/issues/38)) ([708b995](https://github.com/hdot123-org/infra-core/commit/708b9954e848a8731fcefc6c12d72051ef87f125))
+* **gate:** 新增 QA workflow 家族 (gate-infra-qa-workflow) ([#39](https://github.com/hdot123-org/infra-core/issues/39)) ([1e6ae15](https://github.com/hdot123-org/infra-core/commit/1e6ae15058a8ccf36a4d2d3dce9af850866dbf07))
+* **runner:** setup-venv fast-fail 加固 + infra-cli venv create 便利入口 ([#45](https://github.com/hdot123-org/infra-core/issues/45)) ([8396748](https://github.com/hdot123-org/infra-core/commit/83967484adfa5535b80fd466f3d5bee102c73287))
+* 启用 droid-review 门禁（PR-A：workflow 启用） ([#43](https://github.com/hdot123-org/infra-core/issues/43)) ([0702c9e](https://github.com/hdot123-org/infra-core/commit/0702c9ed981234837e8b58dcfb383a14aff64a13))
+* 恢复自仓 auto-merge 触发器（memory-core 同构 + triage 路径修复） ([#48](https://github.com/hdot123-org/infra-core/issues/48)) ([da4ff28](https://github.com/hdot123-org/infra-core/commit/da4ff28970750ccb3bc4ad69cd8f1076f6db2441))
+
+
+### Bug Fixes
+
+* branch-cleanup 状态隔离重做，基于新 main 重构 PR [#35](https://github.com/hdot123-org/infra-core/issues/35)（INFRA-589） ([#57](https://github.com/hdot123-org/infra-core/issues/57)) ([6cedfe7](https://github.com/hdot123-org/infra-core/commit/6cedfe736d9d7745a21a64d07c3b5f8b7bf5f9a4))
+* **ci:** actionlint 步骤宿主优先，免疫 node-00 raw 直连黑洞 ([#53](https://github.com/hdot123-org/infra-core/issues/53)) ([aac6a5a](https://github.com/hdot123-org/infra-core/commit/aac6a5ae8b305ba920cba21bf7586f3cc993882d))
+* **ci:** auto-merge 去 checkout 内联 triage 至 RUNNER_TEMP，根除共享工作区 sparse-checkout 污染 ([#50](https://github.com/hdot123-org/infra-core/issues/50)) ([6f615fa](https://github.com/hdot123-org/infra-core/commit/6f615faa7db75a76eeb08447610c49233f760720))
+* **ci:** branch-cleanup thin caller 转发仓级 LINEAR_PROJECT_INFRA_CORE_ID（INFRA-606） ([#54](https://github.com/hdot123-org/infra-core/issues/54)) ([f65270b](https://github.com/hdot123-org/infra-core/commit/f65270bab2bc4b122a35dc020deae486f1506e78))
+* **ci:** check_droid_review.sh 双副本网络韧性加固 + 副本字节一致防护 ([#58](https://github.com/hdot123-org/infra-core/issues/58)) ([60a3acc](https://github.com/hdot123-org/infra-core/commit/60a3acc97facda17db5107b1363f3995d57be8c8))
+* **ci:** gh 调用仓库上下文守卫全量覆盖 engine 与工作流（INFRA-601） ([#51](https://github.com/hdot123-org/infra-core/issues/51)) ([2742171](https://github.com/hdot123-org/infra-core/commit/2742171ba807557a63cacad207786a506b54fc73))
+* **ci:** 守卫与 shell 脚本 gh 调用显式仓库上下文，免疫 runner insteadOf 镜像重写 ([#49](https://github.com/hdot123-org/infra-core/issues/49)) ([4ef996a](https://github.com/hdot123-org/infra-core/commit/4ef996a106374e245dd173c819b3578c9651d6de))
+* **droid-review:** exit 137 完成期竞态韧性——单次重试 + session jsonl 兜底恢复 ([#55](https://github.com/hdot123-org/infra-core/issues/55)) ([135a1b5](https://github.com/hdot123-org/infra-core/commit/135a1b57d34448743c88cc33e59da55e62b2cb14))
+* Linear project 同步按仓库归约 tracking issue（INFRA-586） ([#36](https://github.com/hdot123-org/infra-core/issues/36)) ([ffcc1b1](https://github.com/hdot123-org/infra-core/commit/ffcc1b16b1978839704972fc1c89f9c1e17c4712))
+* 零红铁律落地——移除 advisory job 的 continue-on-error（INFRA-595） ([#40](https://github.com/hdot123-org/infra-core/issues/40)) ([833e6b8](https://github.com/hdot123-org/infra-core/commit/833e6b84d5dd579040ead0af3900f672e1bdc615))
+
+
+### Performance Improvements
+
+* **droid-review:** BYOM 改走 ts 内网直达 Kong，解开公网绕行 ([#47](https://github.com/hdot123-org/infra-core/issues/47)) ([89ef28a](https://github.com/hdot123-org/infra-core/commit/89ef28a85db5a96290a600d680d815701d06bc48))
+
 ## [0.3.0](https://github.com/hdot123-org/infra-core/compare/v0.2.0...v0.3.0) (2026-08-27)
 
 
