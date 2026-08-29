@@ -1,13 +1,20 @@
 """CI 结构契约测试（INFRA-580）
 
-锁定 19-job 结构化 CI 的拓扑不变量，防止 guards / 专项测试组 / 分域 mypy /
-advisory job / 基础层补齐 job 被静默删除或降级（ci-ok needs 漏配、advisory
-被恢复 continue-on-error 掩蔽失败、marker 参数漂移、runner 标签漂移）。
+锁定 10-job 结构化 CI 的拓扑不变量，防止 bundle 化后的结构回退（lint/type/
+advisory/test-groups 四个 bundle job 与六个独立 job 的集合完整性）、ci-ok
+needs 漏配、advisory 被恢复 continue-on-error 掩蔽失败、marker 参数漂移、
+runner 标签漂移、concurrency 语义漂移。
 
 与 tests/test_naming_contract.py 的分工：naming_contract 锁既有 check 名的
 字节级契约（architecture.md §2）；本文件锁结构层——job 集合完整性、ci-ok
 依赖收口与逐项阻断、advisory 零红语义（INFRA-595：无 continue-on-error，
-失败即红）、关键命令参数。
+失败即红）、关键命令参数、PR 限定 cancel-in-progress。
+
+2026-08-29 容量收敛（runner-capacity-one-shot）：19 job → 10 job——
+lint-bundle（ruff/shellcheck/actionlint/repo-consistency）、type-bundle
+（mypy×3）、advisory-bundle（advisory×3）、test-groups（schema/security/
+business_policy 三段顺序）；pytest / integration-tests / e2e-tests /
+guards / health-check / ci-ok 六个独立保持。
 """
 
 from pathlib import Path
@@ -21,50 +28,38 @@ pytestmark = pytest.mark.schema
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CI_YML = REPO_ROOT / ".github/workflows/ci.yml"
 
-# 19 个 job 的完整集合（6 → 14 扩展，INFRA-580；14 → 19 基础层补齐，
-# 随 #25 合入 main。快照只对齐当前 main：后续 ci.yml 变更由各自 feature 同步本表）
+# 10 个 job 的完整集合（19 → 10 容量收敛，2026-08-29；快照只对齐当前 main：
+# 后续 ci.yml 变更由各自 feature 同步本表）
 EXPECTED_JOBS = frozenset(
     {
-        # 既有 job（命名契约：不可重命名，见 architecture.md §2）
+        # 聚合锚点（命名契约：不可重命名，见 architecture.md §2）
         "pytest",
-        "ruff",
-        "actionlint",
-        "mypy",
-        # guards（4 个守卫脚本统一执行）
+        # bundle（容量收敛四合一）
+        "lint-bundle",
+        "type-bundle",
+        "advisory-bundle",
+        "test-groups",
+        # 独立 job
         "guards",
-        # 专项测试组（pytest markers 分组）
-        "security-tests",
-        "schema-tests",
         "integration-tests",
         "e2e-tests",
-        # 分域 mypy（--strict）
-        "mypy-src-strict",
-        "mypy-scripts-strict",
-        # advisory（非阻塞，continue-on-error）
-        "advisory-dependency-security-scan",
-        "advisory-deptry",
-        "advisory-telemetry-audit",
-        # 基础层补齐（M3，随 #25 合入）
-        "shellcheck",
         "health-check",
-        "repo-consistency",
-        "business-policy-tests",
         # 聚合门禁（branch protection required check）
         "ci-ok",
     }
 )
 
-ADVISORY_JOBS = frozenset(
-    {"advisory-dependency-security-scan", "advisory-deptry", "advisory-telemetry-audit"}
-)
+ADVISORY_JOBS = frozenset({"advisory-bundle"})
 BLOCKING_JOBS = EXPECTED_JOBS - ADVISORY_JOBS - {"ci-ok"}
 
+# 独立专项测试组 → marker
 TEST_GROUP_MARKERS = {
-    "security-tests": "security",
-    "schema-tests": "schema",
     "integration-tests": "integration",
     "e2e-tests": "e2e",
 }
+
+# test-groups bundle 的三段 marker（顺序：schema → security → business_policy）
+TEST_GROUPS_BUNDLE_MARKERS = ("schema", "security", "business_policy")
 
 GUARD_SCRIPTS = (
     "scripts/check_boundary.py",
@@ -101,7 +96,7 @@ class TestJobTopology:
         assert frozenset(ci_jobs) == EXPECTED_JOBS
 
     def test_ci_ok_needs_all_blocking_jobs(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
-        """ci-ok 的 needs 必须收口全部 12 个前置 job（含 advisory，供结果透出）。"""
+        """ci-ok 的 needs 必须收口全部 9 个前置 job（含 advisory-bundle，供结果透出）。"""
         needs = set(ci_jobs["ci-ok"].get("needs") or [])
         missing = (BLOCKING_JOBS | ADVISORY_JOBS) - needs
         assert not missing, f"ci-ok needs 缺失: {sorted(missing)}"
@@ -109,6 +104,28 @@ class TestJobTopology:
     def test_ci_ok_always_runs(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
         """聚合门禁必须 always() 运行：前置失败时 ci-ok 也要给出明确红叉。"""
         assert ci_jobs["ci-ok"].get("if") == "always()"
+
+
+class TestConcurrencyContract:
+    """2026-08-29 容量收敛的 concurrency 语义。
+
+    PR 连环 push 取消同 ref 的进行中旧 run（省 pve 双机排队）；main push
+    永不取消——合并后 main 全绿验证不能被后续事件打断（禁止裸 true）。
+    """
+
+    def test_concurrency_group_expression(self) -> None:
+        doc = yaml.safe_load(CI_YML.read_text(encoding="utf-8"))
+        concurrency = doc.get("concurrency")
+        assert isinstance(concurrency, dict), "ci.yml 必须声明顶层 concurrency"
+        assert concurrency["group"] == "ci-${{ github.workflow }}-${{ github.ref }}"
+
+    def test_cancel_in_progress_pr_only(self) -> None:
+        """cancel-in-progress 必须是 PR 限定表达式，禁止裸 true。"""
+        doc = yaml.safe_load(CI_YML.read_text(encoding="utf-8"))
+        concurrency = doc["concurrency"]
+        assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}", (
+            "cancel-in-progress 必须 PR 限定（裸 true 会打断合并后 main 全绿验证）"
+        )
 
 
 class TestCiOkEnforcement:
@@ -126,6 +143,7 @@ class TestCiOkEnforcement:
         """用户铁律（2026-08-28）：写死不允许红色合并，一个都不允许。
 
         advisory jobs 必须被接入 ci-ok 阻断判定，任一红则不可合并。
+        bundle 化后由 advisory-bundle 承接三个 advisory 的零红语义。
 
         INFRA-595：job 级 continue-on-error 会让 needs.<job>.result 恒为
         success（continue-on-error 之后的值），ci-ok 的 .result 判定沦为空转
@@ -169,6 +187,43 @@ class TestRunnerLabels:
         assert "self-hosted" in runs_on and "pve-linux" in runs_on, f"{job} runner 标签漂移"
 
 
+class TestBundles:
+    """bundle 化步骤语义保持（2026-08-29 容量收敛）。"""
+
+    def test_lint_bundle_four_in_one(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """lint-bundle 必须四合一：ruff（check+format 两半）/ shellcheck /
+        actionlint / repo-consistency，缺一即门禁降级。"""
+        script = _job_run_script(ci_jobs, "lint-bundle")
+        assert "ruff check ." in script
+        assert "ruff format --check ." in script
+        assert "shellcheck -x" in script
+        assert "repo_health_check.sh --ci" in script
+
+    def test_type_bundle_mypy_x3(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """type-bundle 必须 mypy×3：基础 src 两份语义 + scripts 分域。"""
+        script = _job_run_script(ci_jobs, "type-bundle")
+        assert script.count("mypy --strict src/infra_core") == 2
+        assert "mypy --strict scripts/" in script
+
+    def test_advisory_bundle_three_in_one(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """advisory-bundle 必须三合一：pip-audit / deptry / 遥测覆盖率审计。"""
+        script = _job_run_script(ci_jobs, "advisory-bundle")
+        assert "pip-audit --progress-spinner off" in script
+        assert "deptry ." in script
+        assert "audit_telemetry_coverage.sh" in script
+
+    def test_test_groups_three_segments_ordered(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """test-groups 三段 marker 顺序跑：schema → security → business_policy。"""
+        script = _job_run_script(ci_jobs, "test-groups")
+        positions = []
+        for marker in TEST_GROUPS_BUNDLE_MARKERS:
+            assert f"-m {marker}" in script, f"test-groups 缺失 -m {marker}"
+            positions.append(script.index(f"-m {marker}"))
+        assert positions == sorted(positions), (
+            f"test-groups 三段顺序漂移：应为 {TEST_GROUPS_BUNDLE_MARKERS}"
+        )
+
+
 class TestTestGroups:
     @pytest.mark.parametrize("job,marker", sorted(TEST_GROUP_MARKERS.items()))
     def test_group_runs_marker_with_parallelism(
@@ -179,13 +234,21 @@ class TestTestGroups:
         assert "-n 4" in script, f"{job} 必须保持 4 worker 并行"
         assert "--no-cov" in script, f"{job} 专项组不重复计覆盖率（主 pytest job 已覆盖）"
 
+    def test_bundle_segments_keep_parallelism_contract(
+        self, ci_jobs: dict[str, dict[str, Any]]
+    ) -> None:
+        """test-groups 三段逐段保持 -n 4 + --no-cov 契约。"""
+        script = _job_run_script(ci_jobs, "test-groups")
+        assert script.count("-n 4") >= len(TEST_GROUPS_BUNDLE_MARKERS)
+        assert script.count("--no-cov") >= len(TEST_GROUPS_BUNDLE_MARKERS)
+
 
 class TestDomainMypy:
     def test_src_strict(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
-        assert "mypy --strict src/infra_core" in _job_run_script(ci_jobs, "mypy-src-strict")
+        assert "mypy --strict src/infra_core" in _job_run_script(ci_jobs, "type-bundle")
 
     def test_scripts_strict(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
-        assert "mypy --strict scripts/" in _job_run_script(ci_jobs, "mypy-scripts-strict")
+        assert "mypy --strict scripts/" in _job_run_script(ci_jobs, "type-bundle")
 
 
 class TestExistingJobInvariants:
@@ -205,7 +268,7 @@ class TestExistingJobInvariants:
 
 
 class TestActionlintHostFirst:
-    """actionlint job 宿主优先契约（2026-08-29 node-00 raw 直连黑洞修复）。
+    """actionlint 步骤宿主优先契约（2026-08-29 node-00 raw 直连黑洞修复）。
 
     旧实现每 run 无条件 ``bash <(curl raw.githubusercontent.com/.../download-actionlint.bash)``
     ——curl 是非 git 直连，不走 runner insteadOf 镜像，node-00 出口对该域间歇黑洞
@@ -213,26 +276,28 @@ class TestActionlintHostFirst:
     连续三轮红，仅剩此一条非镜像路径）。ce-01 runner 已预装
     /usr/local/bin/actionlint 1.7.11（Layer 1 就绪），契约：版本 ≥1.7 的宿主
     二进制直接使用，仅缺失/过旧时才允许 fallback 下载（GitHub-hosted 兼容）。
+
+    2026-08-29 bundle 化后 actionlint 步骤位于 lint-bundle 内，契约不变。
     """
 
     def test_host_binary_probe_present(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
-        """actionlint job 必须先探测宿主二进制（PATH 优先）。"""
-        script = _job_run_script(ci_jobs, "actionlint")
+        """actionlint 步骤必须先探测宿主二进制（PATH 优先）。"""
+        script = _job_run_script(ci_jobs, "lint-bundle")
         assert "command -v actionlint" in script, "缺少宿主二进制探测（PATH 优先分支）"
 
     def test_host_version_gate(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
         """宿主版本必须 ≥1.7 才直接使用（防过旧宿主二进制误用）。"""
-        script = _job_run_script(ci_jobs, "actionlint")
+        script = _job_run_script(ci_jobs, "lint-bundle")
         assert "-ge 7" in script, "缺少宿主版本 ≥1.7 门限判断"
 
     def test_fallback_download_warns(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
         """宿主缺失时 fallback 下载必须打 ::warning（异常态要显式暴露）。"""
-        script = _job_run_script(ci_jobs, "actionlint")
+        script = _job_run_script(ci_jobs, "lint-bundle")
         assert "::warning::actionlint not found on host" in script, "fallback 分支缺少 ::warning"
 
     def test_download_only_after_host_probe(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
         """curl 下载只允许存在于宿主探测之后（禁止恢复每 run 无条件首下载）。"""
-        script = _job_run_script(ci_jobs, "actionlint")
+        script = _job_run_script(ci_jobs, "lint-bundle")
         assert "download-actionlint.bash" in script, (
             "fallback 下载路径必须保留（GitHub-hosted 兼容）"
         )
@@ -242,5 +307,5 @@ class TestActionlintHostFirst:
 
     def test_invocation_keeps_color_flag(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
         """lint 调用保持 actionlint -color（宿主与 fallback 两条路径一致）。"""
-        script = _job_run_script(ci_jobs, "actionlint")
+        script = _job_run_script(ci_jobs, "lint-bundle")
         assert "actionlint -color" in script
