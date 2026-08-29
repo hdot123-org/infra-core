@@ -655,6 +655,15 @@ def test_workflow_calls_tracking_issue_script():
     for arg in ("--deleted", "--protected", "--run-url", "--run-date"):
         assert arg in content, f"Action must pass {arg}"
     assert "GH_REPO_KEY" in content, "Action must pass the repository key for gh search"
+    # INFRA-589: the tracking-issue step must consume the per-run list files
+    # (RUNNER_TEMP-derived), never fixed /tmp paths that leak state across
+    # runs/repos on shared self-hosted runners.
+    assert "${RUNNER_TEMP:-/tmp}/branch-cleanup-state" in content, (
+        "tracking-issue step must read lists from the per-run RUNNER_TEMP state dir"
+    )
+    assert (
+        "/tmp/deleted_branches.txt" not in content and "/tmp/protected_branches.txt" not in content
+    ), "tracking-issue step must not reference fixed /tmp list files"
 
 
 # ============================================================================
