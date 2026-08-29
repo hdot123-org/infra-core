@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.0](https://github.com/hdot123-org/infra-core/compare/v0.4.0...v0.5.0) (2026-08-29)
+
+
+### Features
+
+* **auto-merge:** 抽离 auto-merge-pipeline reusable workflow——resolve+triage+merge 执行体（M4 门禁切换基建） ([#65](https://github.com/hdot123-org/infra-core/issues/65)) ([05ca61c](https://github.com/hdot123-org/infra-core/commit/05ca61c6dd13724fada13214efd91379279c17b6))
+* **engine:** 移植 INFRA-578/588/597 自愈套件到 evolution 引擎——双向 workflow_dispatch 拉起 + 告警抑制 ([#67](https://github.com/hdot123-org/infra-core/issues/67)) ([2872f94](https://github.com/hdot123-org/infra-core/commit/2872f940ccd20f8690cee25e81d4cc37cf2d63a9))
+* **runner:** 重构 Layer 1+2 宿主工具链锁定与共享缓存（取代 PR [#37](https://github.com/hdot123-org/infra-core/issues/37)，INFRA-590） ([#56](https://github.com/hdot123-org/infra-core/issues/56)) ([b146a58](https://github.com/hdot123-org/infra-core/commit/b146a5850aefe80da02f8e762ad180addf4116b7))
+* **watchdog:** 抽离 droid-review-watchdog-handlers reusable workflow（M4 门禁切换基建） ([#64](https://github.com/hdot123-org/infra-core/issues/64)) ([0270da1](https://github.com/hdot123-org/infra-core/commit/0270da1434b3307582545798f2b6de204e43e4f0))
+
+
+### Bug Fixes
+
+* **ci:** droid CLI fallback 下载加 --max-time 300 兜底（Fixes INFRA-613） ([#63](https://github.com/hdot123-org/infra-core/issues/63)) ([80a4461](https://github.com/hdot123-org/infra-core/commit/80a44610a97f8ae97c22093ab718c1838af5057b))
+
 ## [0.4.0](https://github.com/hdot123-org/infra-core/compare/v0.3.0...v0.4.0) (2026-08-29)
 
 
