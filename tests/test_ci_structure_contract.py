@@ -2,11 +2,12 @@
 
 锁定 19-job 结构化 CI 的拓扑不变量，防止 guards / 专项测试组 / 分域 mypy /
 advisory job / 基础层补齐 job 被静默删除或降级（ci-ok needs 漏配、advisory
-变阻塞、marker 参数漂移、runner 标签漂移）。
+被恢复 continue-on-error 掩蔽失败、marker 参数漂移、runner 标签漂移）。
 
 与 tests/test_naming_contract.py 的分工：naming_contract 锁既有 check 名的
 字节级契约（architecture.md §2）；本文件锁结构层——job 集合完整性、ci-ok
-依赖收口与逐项阻断、advisory 非阻塞语义、关键命令参数。
+依赖收口与逐项阻断、advisory 零红语义（INFRA-595：无 continue-on-error，
+失败即红）、关键命令参数。
 """
 
 from pathlib import Path
@@ -125,8 +126,13 @@ class TestCiOkEnforcement:
         """用户铁律（2026-08-28）：写死不允许红色合并，一个都不允许。
 
         advisory jobs 必须被接入 ci-ok 阻断判定，任一红则不可合并。
-        这是零红机制的核心：advisory 虽有 continue-on-error（数据产出优先），
-        但 ci-ok 的零红聚合（含 GitHub API 全 check-runs 扫描）会阻断合并。
+
+        INFRA-595：job 级 continue-on-error 会让 needs.<job>.result 恒为
+        success（continue-on-error 之后的值），ci-ok 的 .result 判定沦为空转
+        ——run 33129232081 实证：advisory-deptry check-run 为 failure 而
+        .result 报 success。修复：移除 advisory 的 continue-on-error，
+        使失败成为红 check-run，.result 判定与 GitHub API 全 check-runs
+        扫描双保险均真实生效。
         """
         script = _job_run_script(ci_jobs, "ci-ok")
         for job in ADVISORY_JOBS:
@@ -139,8 +145,18 @@ class TestCiOkEnforcement:
 
 class TestAdvisorySemantics:
     @pytest.mark.parametrize("job", sorted(ADVISORY_JOBS))
-    def test_advisory_continue_on_error(self, ci_jobs: dict[str, dict[str, Any]], job: str) -> None:
-        assert ci_jobs[job].get("continue-on-error") is True, f"{job} 必须保持非阻塞"
+    def test_advisory_no_continue_on_error(
+        self, ci_jobs: dict[str, dict[str, Any]], job: str
+    ) -> None:
+        """INFRA-595 零红铁律：advisory 不得设置 job 级 continue-on-error。
+
+        continue-on-error 会（a）让 needs.<job>.result 恒为 success，ci-ok
+        判定空转；（b）PR checks 面板显示为橙而非红。零红政策下 advisory
+        失败必须直接阻断合并。
+        """
+        assert ci_jobs[job].get("continue-on-error") is None, (
+            f"{job} 不得设置 continue-on-error（零红铁律：advisory 失败必须红）"
+        )
 
 
 class TestRunnerLabels:
