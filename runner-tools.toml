@@ -1,0 +1,40 @@
+# runner-tools.toml — 宿主机工具二进制版本单一事实源（Single Source of Truth）
+#
+# 三台 pve runner（memory-runnerz 共享组：ce-01 上 actions-runner + pve-runner-02/03）
+# 全局路径预装以下固定版本工具，CI 按 PATH 优先原则直接调用宿主二进制，零外网下载。
+# 被测包的 per-run venv 独立安装不受影响（2026-08-25 环境遮蔽教训）。
+#
+# 版本实测来源：2026-08-29 memory-core CI run 33237980373 的 setup-venv
+# "Host toolchain detection" 输出（共享 runner 池，双仓同源）。
+# 首版（被本 PR 取代的 #37）曾 pin uv=0.4.29/ruff=0.16.1/mypy=2.3.0/actionlint=1.7.12，
+# 与宿主实况不符——本清单以实测为准，后续宿主升级时同步更新。
+#
+# 消费方（契约测试 tests/test_runner_toolchain_contract.py 钉住一致性）：
+#   - .github/actions/setup-venv：[tools] 六工具探测循环 + [cache] 缓存目录导出
+#   - .github/workflows/ci.yml：lint-bundle 内 actionlint/shellcheck 步骤宿主优先
+#     + [ci_fallback] 回退版本（#61 容量收敛 bundle 化后两者为 lint-bundle 步骤）
+#
+# 维护约定：runner 宿主升级工具版本时同步更新 [tools]；改 ci.yml 回退下载 URL 时
+# 同步更新 [ci_fallback]。
+
+[tools]
+uv = "0.12.7"
+ruff = "0.16.3"
+mypy = "2.3.1"
+actionlint = "1.7.11"
+shellcheck = "0.10.0"
+jq = "1.7"
+
+# CI fallback：宿主缺失/过旧时 ci.yml 的下载回退版本（与 ci.yml 内 URL 钉住一致）
+[ci_fallback]
+actionlint = "1.7.12"
+shellcheck = "0.10.0"
+
+# Layer 2 共享缓存目录（runner 服务用户属主 runner:runner 755，首次预热后常驻 NVMe）
+[cache]
+uv_cache_dir = "/var/cache/uv"
+pip_cache_dir = "/var/cache/pip"
+
+# runner 标签（runs-on 选择器）
+[runner]
+labels = ["self-hosted", "pve-linux"]
