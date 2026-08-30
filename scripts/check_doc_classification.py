@@ -31,6 +31,7 @@ DOC_CATEGORIES = {
     "specs": "docs/specs/",
     "infrastructure": "docs/infrastructure/",
     "onboarding": "docs/onboarding/",
+    "roadmap": "docs/roadmap/",
 }
 
 # 例外目录（允许存在但不属于上述分类）
