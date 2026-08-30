@@ -65,7 +65,9 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-          MAX_ATTEMPT: ${{ vars.WATCHDOG_MAX_ATTEMPT }}
+          # 显式 `||` 兜底（M5 R1(2)）：无兜底引用按契约须真实存在；
+          # 脚本内 -z 回退保留为双保险（R1(2) 存在性校验只拦无兜底引用）
+          MAX_ATTEMPT: ${{ vars.WATCHDOG_MAX_ATTEMPT || '3' }}
         run: |
           set -eu
           # repo variable fallback（变量缺失时使用默认值并打日志）
@@ -137,9 +139,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          QUOTA_SCAN_WINDOW_HOURS: ${{ vars.QUOTA_SCAN_WINDOW_HOURS }}
-          QUOTA_RECOVERY_WINDOW_SECONDS: ${{ vars.QUOTA_RECOVERY_WINDOW_SECONDS }}
-          WATCHDOG_MAX_ATTEMPT: ${{ vars.WATCHDOG_MAX_ATTEMPT }}
+          QUOTA_SCAN_WINDOW_HOURS: ${{ vars.QUOTA_SCAN_WINDOW_HOURS || '6' }}
+          QUOTA_RECOVERY_WINDOW_SECONDS: ${{ vars.QUOTA_RECOVERY_WINDOW_SECONDS || '1800' }}
+          WATCHDOG_MAX_ATTEMPT: ${{ vars.WATCHDOG_MAX_ATTEMPT || '3' }}
         run: |
           set -eu
           # repo variable fallback（变量缺失时使用默认值并打日志）
