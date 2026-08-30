@@ -606,14 +606,60 @@ def test_adapt_error_patterns():
 
 
 def test_config_has_json_flags():
-    """VAL-FIX-ADAPT-004: Config commands include --json flags."""
+    """Config 的 inline 工具命令包含 --json 标志（VAL-FIX-ADAPT-004，INFRA-659 更新）。
+
+    引擎仓自扫配置以 rule_packs 展开 infra-* 工具（pack 模板自带 --json），
+    inline 条目仅保留禁用态的 memory-* 协议栈工具作契约占位。
+    """
     config_path = Path(__file__).parent.parent / ".evolution" / "config.yml"
     with config_path.open() as f:
         config_content = f.read()
 
-    # Check that --json flags are present
-    assert "memory-audit-daily --json" in config_content
+    # Inline（非 pack 展开）工具命令仍必须带 --json
     assert "memory-consistency-check --json" in config_content
+    assert "memory-validate --target . --json" in config_content
+    # Pack 形态：引擎仓自扫走 infra-* 入口（pack 模板，INFRA-659）
+    assert "rule_packs:" in config_content
+    assert "pack: memory" in config_content
+
+
+def test_config_self_scan_tools_resolve():
+    """INFRA-659: 引擎仓自扫配置经 resolve_rule_packs 展开后只剩 2 个生效工具。
+
+    防回归：inline enabled:false 必须真正禁用 memory-* 占位条目，且展开结果
+    的命令必须是 infra-* 入口（引擎仓 venv 无 memory-* console scripts）。
+    """
+    import yaml
+
+    repo_root = Path(__file__).parent.parent
+    config = yaml.safe_load((repo_root / ".evolution" / "config.yml").read_text())
+    evolution_scanner.resolve_rule_packs(config)
+
+    enabled_names = [t["name"] for t in config["audit_tools"]]
+    assert enabled_names == ["audit_layout", "code_hygiene_audit"]
+
+    for tool in config["audit_tools"]:
+        assert tool["command"].startswith("infra-"), (
+            f"引擎仓自扫工具 {tool['name']} 必须使用 infra-* 入口: {tool['command']}"
+        )
+
+
+def test_suppress_json_covers_inherent_layout_findings():
+    """INFRA-659: suppress.json 精确抑制引擎仓固有布局 finding（干净 checkout 实测集）。
+
+    引擎仓 docs/ 为设计文档目录、memory/ 整树 gitignored（.gitignore），
+    二者在 CI 干净 checkout 下恒定触发 audit_layout 误报。抑制条目必须精确匹配
+    (rule_id, location)，禁用通配——真实违规仍会浮出。
+    """
+    repo_root = Path(__file__).parent.parent
+    suppressions = evolution_scanner.load_suppressions(repo_root)
+    suppressed_keys = {(s.get("rule_id"), s.get("location")) for s in suppressions}
+
+    expected = {
+        ("ROOT_DOCS_DIR", "docs"),
+        ("OWNERSHIP_MISSING", "memory/system/ownership.toml"),
+    }
+    assert expected == suppressed_keys
 
 
 # ============================================================================
@@ -2303,7 +2349,12 @@ def test_workflow_generates_error_patterns():
 
 
 def test_config_error_patterns_no_dead_command():
-    """INFRA-81: error_patterns entry has no misleading dead command field."""
+    """error_patterns 条目无误导性死命令字段（INFRA-81；INFRA-659 改为禁用态）。
+
+    引擎仓自扫禁用 error_patterns（CI 无宿主 ~/.memory-core 输入源，且 pack
+    模板会在仓库根创建 gitignored 的 memory/kb/patterns/，凭空制造
+    CURRENT_MEMORY 误报）。禁用条目仍不得携带 command: 字段。
+    """
     config_path = Path(__file__).parent.parent / ".evolution" / "config.yml"
     with config_path.open() as f:
         lines = f.read().splitlines()
@@ -2322,8 +2373,9 @@ def test_config_error_patterns_no_dead_command():
             block_lines.append(line)
     block_text = "\n".join(block_lines)
     assert "name: error_patterns" in block_text
-    assert "output_format: registry_jsonl" in block_text
-    assert "source_file:" in block_text
+    # INFRA-659: 引擎仓自扫禁用该工具（pack_tool 引用 + enabled: false）
+    assert "enabled: false" in block_text
+    assert "pack_tool: error_patterns" in block_text
     # No active command key (only a comment referencing the CI step)
     assert "command:" not in block_text
 

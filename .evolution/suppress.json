@@ -1,0 +1,14 @@
+{
+  "suppressed": [
+    {
+      "rule_id": "ROOT_DOCS_DIR",
+      "location": "docs",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "OWNERSHIP_MISSING",
+      "location": "memory/system/ownership.toml",
+      "expires": "2099-12-31"
+    }
+  ]
+}
