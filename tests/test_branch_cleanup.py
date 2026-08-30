@@ -2340,3 +2340,36 @@ def test_sweep_filter_in_source_matches_synthetic_refs() -> None:
     assert "grep -v 'pull/'" in content, (
         "scheduled sweep must filter pull/ synthetic refs out of git branch -r output"
     )
+
+
+# ============================================================================
+# VAL-BRANCH-037 (INFRA-632): retirement list ships with infra-632 entry
+# ============================================================================
+def test_retirement_list_tracks_infra_632() -> None:
+    """The checked-in retirement list also lists the superseded
+    factory/infra-589-tmp-state-pollution branch so tracking issue INFRA-632
+    (mirror #77) can drain once the scheduled cleanup deletes the branch.
+
+    Evidence chain:
+    - PR #35 (infra-core) closed unmerged at 2026-08-29T07:34Z after
+      auto-merge reported CONFLICTING against main.
+    - The INFRA-589 fix was redone on new main by PR #57 (6cedfe7, merged
+      2026-08-29T08:08Z): RUNNER_TEMP per-run state isolation lives in
+      actions/branch-cleanup/action.yml, and the pull/N/merge refs filter
+      plus VAL-BRANCH-034/035/036 contract tests all ship on main.
+    - The branch tip predates and lacks PR #49/#51's gh --repo context
+      guard, so it is strictly older than main's implementation; the
+      INFRA-383 merge-tree containment check cannot see
+      cross-implementation equivalence, so the branch would be protected
+      forever and the INFRA-632 tracking issue would never drain.
+
+    Mirrors VAL-BRANCH-029/031/032/033: the list is the audit artifact,
+    and adding or removing entries requires PR review.
+    """
+    retired = repo_root() / "src" / "infra_core" / "shell" / "branch_cleanup_retired.txt"
+    assert retired.is_file(), "scripts/branch_cleanup_retired.txt must exist"
+    content = retired.read_text()
+    assert "factory/infra-589-tmp-state-pollution" in content, (
+        "infra-632 superseded branch must be listed for retirement"
+    )
+    assert "INFRA-632" in content, "the infra-632 entry must carry its INFRA reference"
