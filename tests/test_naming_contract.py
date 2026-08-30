@@ -192,8 +192,8 @@ class TestSetupLabelsReusableWorkflow:
 
     验证 infra-core 提供的 setup-labels reusable workflow 满足契约：
     - workflow_call 触发器
-    - labels-json input
-    - created-count/skipped-count outputs
+    - labels_json input
+    - created_count/skipped_count outputs
     """
 
     def test_setup_labels_workflow_exists(self):
@@ -211,7 +211,7 @@ class TestSetupLabelsReusableWorkflow:
         assert "workflow_call" in triggers, "setup-labels must declare workflow_call trigger"
 
     def test_setup_labels_has_labels_json_input(self):
-        """setup-labels.yml 必须声明 labels-json input"""
+        """setup-labels.yml 必须声明 labels_json input"""
         import yaml
 
         workflow_path = REPO_ROOT / ".github/workflows/setup-labels.yml"
@@ -219,11 +219,11 @@ class TestSetupLabelsReusableWorkflow:
         triggers = data.get(True, {})
         workflow_call = triggers.get("workflow_call", {})
         inputs = workflow_call.get("inputs", {})
-        assert "labels-json" in inputs, "setup-labels must declare labels-json input"
-        assert inputs["labels-json"].get("type") == "string"
+        assert "labels_json" in inputs, "setup-labels must declare labels_json input"
+        assert inputs["labels_json"].get("type") == "string"
 
     def test_setup_labels_has_outputs(self):
-        """setup-labels.yml 必须声明 created-count/skipped-count outputs"""
+        """setup-labels.yml 必须声明 created_count/skipped_count outputs"""
         import yaml
 
         workflow_path = REPO_ROOT / ".github/workflows/setup-labels.yml"
@@ -231,8 +231,8 @@ class TestSetupLabelsReusableWorkflow:
         triggers = data.get(True, {})
         workflow_call = triggers.get("workflow_call", {})
         outputs = workflow_call.get("outputs", {})
-        assert "created-count" in outputs, "setup-labels must declare created-count output"
-        assert "skipped-count" in outputs, "setup-labels must declare skipped-count output"
+        assert "created_count" in outputs, "setup-labels must declare created_count output"
+        assert "skipped_count" in outputs, "setup-labels must declare skipped_count output"
 
 
 class TestGovernanceCompositeActionMemoryCore:

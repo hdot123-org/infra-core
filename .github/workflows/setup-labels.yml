@@ -10,18 +10,18 @@ name: Setup Labels
 on:
   workflow_call:
     inputs:
-      labels-json:
+      labels_json:
         description: 'JSON array of labels to create (each: {name, color, description})'
         required: false
         type: string
         default: ''
     outputs:
-      created-count:
+      created_count:
         description: 'Number of labels created'
-        value: ${{ jobs.create-labels.outputs.created-count }}
-      skipped-count:
+        value: ${{ jobs.create-labels.outputs.created_count }}
+      skipped_count:
         description: 'Number of labels skipped (already exist)'
-        value: ${{ jobs.create-labels.outputs.skipped-count }}
+        value: ${{ jobs.create-labels.outputs.skipped_count }}
 
 permissions:
   issues: write
@@ -30,8 +30,8 @@ jobs:
   create-labels:
     runs-on: [self-hosted, pve-linux]
     outputs:
-      created-count: ${{ steps.create.outputs.created-count }}
-      skipped-count: ${{ steps.create.outputs.skipped-count }}
+      created_count: ${{ steps.create.outputs.created_count }}
+      skipped_count: ${{ steps.create.outputs.skipped_count }}
     steps:
       - name: Create labels
         id: create
@@ -55,12 +55,12 @@ jobs:
 
             // Parse input labels or use defaults
             let labels;
-            const inputJson = `${{ inputs.labels-json }}`;
+            const inputJson = `${{ inputs.labels_json }}`;
             if (inputJson && inputJson.trim()) {
               try {
                 labels = JSON.parse(inputJson);
               } catch (e) {
-                core.setFailed(`Invalid labels-json input: ${e.message}`);
+                core.setFailed(`Invalid labels_json input: ${e.message}`);
                 return;
               }
             } else {
@@ -89,6 +89,6 @@ jobs:
               }
             }
 
-            core.setOutput('created-count', created);
-            core.setOutput('skipped-count', skipped);
+            core.setOutput('created_count', created);
+            core.setOutput('skipped_count', skipped);
             console.log(`Summary: ${created} created, ${skipped} skipped`);

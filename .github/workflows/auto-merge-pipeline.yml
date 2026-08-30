@@ -43,7 +43,7 @@ name: Auto Merge Pipeline
 on:
   workflow_call:
     secrets:
-      dispatch-token:
+      dispatch_token:
         description: '合并/更新分支/评论凭证（caller 侧 DISPATCH_TOKEN PAT，不受 GITHUB_TOKEN 递归抑制）'
         required: true
 
@@ -394,7 +394,7 @@ jobs:
       - name: Handle BEHIND PR (update-branch self-heal)
         if: steps.triage.outputs.action == 'update-branch'
         env:
-          GH_TOKEN: ${{ secrets.dispatch-token }}
+          GH_TOKEN: ${{ secrets.dispatch_token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ matrix.pr_number }}
         run: |
@@ -414,7 +414,7 @@ jobs:
       - name: Handle CONFLICTING PR (notify)
         if: steps.triage.outputs.action == 'notify'
         env:
-          GH_TOKEN: ${{ secrets.dispatch-token }}
+          GH_TOKEN: ${{ secrets.dispatch_token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ matrix.pr_number }}
         run: |
@@ -453,7 +453,7 @@ jobs:
       - name: Handle stalled PR (checks reported non-success)
         if: steps.triage.outputs.action == 'wait' && steps.triage.outputs.stalled == 'true'
         env:
-          GH_TOKEN: ${{ secrets.dispatch-token }}
+          GH_TOKEN: ${{ secrets.dispatch_token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ matrix.pr_number }}
         run: |
@@ -495,4 +495,4 @@ jobs:
           # push(paths: .release-please-manifest.json) 触发器失效 → release PR
           # 合并后 tag/Release 不创建、Release Pipeline 断链。
           # 2026-08-15 两次事故（v0.29.0 / v0.30.0 均靠手动 dispatch 补救）。
-          GITHUB_TOKEN: ${{ secrets.dispatch-token }}
+          GITHUB_TOKEN: ${{ secrets.dispatch_token }}
