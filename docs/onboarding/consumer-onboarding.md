@@ -52,6 +52,8 @@ for f in *.thin-caller.yml; do mv "$f" "${f%.thin-caller.yml}.yml"; done
 ```yaml
 # Human-maintained governance config. Scanner reads only, never writes.
 max_issues_per_tick: 1
+max_self_audit_issues_per_tick: 1
+max_code_hygiene_issues_per_tick: 1
 severity_order: [critical, warning, info]
 dedup_label: evolution-found
 isolation_threshold: 3
