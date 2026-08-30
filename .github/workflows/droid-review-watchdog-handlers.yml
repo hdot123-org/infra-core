@@ -29,6 +29,13 @@ name: Droid Review Watchdog Handlers
 
 on:
   workflow_call:
+    # 双形态键声明（CONSUMER-GATE-DEADLOCK 修复 2026-08-30）：GitHub 对 caller
+    # with: 传键做声明面严格校验——caller 传了未声明键 → run 级 startup_failure
+    # （零 job）。memory #1075 双写 caller × 本文件单侧 snake-only 声明即
+    # 04:00Z watchdog 断链根因。每个 snake 键带一个 hyphen 变体（required:
+    # false），取值处统一熔合 `inputs.x_snake || inputs['x-hyphen']`（bracket
+    # 语法——hyphen 键不允许点号取值）。mode 无变体（caller 单形态传键）。
+    # 两步终态：memory 统一 snake-only 后本仓删全部 hyphen 变体。
     inputs:
       mode:
         description: 'Handler to run: self-heal-rerun | cancel-on-ci-fail'
@@ -38,17 +45,37 @@ on:
         description: '上游 workflow_run.id'
         required: true
         type: number
+      run-id:
+        description: 'hyphen 过渡变体（与 run_id 等价）'
+        required: false
+        type: number
+        default: 0
       run_attempt:
         description: '上游 workflow_run.run_attempt'
         required: true
         type: number
+      run-attempt:
+        description: 'hyphen 过渡变体（与 run_attempt 等价）'
+        required: false
+        type: number
+        default: 0
       head_sha:
         description: '上游 workflow_run.head_sha（cancel-on-ci-fail 用）'
         required: false
         type: string
         default: ''
+      head-sha:
+        description: 'hyphen 过渡变体（与 head_sha 等价）'
+        required: false
+        type: string
+        default: ''
       max_attempt:
         description: 'rerun 限界（caller 转发 vars.WATCHDOG_MAX_ATTEMPT；空时脚本回退 3）'
+        required: false
+        type: string
+        default: ''
+      max-attempt:
+        description: 'hyphen 过渡变体（与 max_attempt 等价）'
         required: false
         type: string
         default: ''
@@ -68,9 +95,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          RUN_ID: ${{ inputs.run_id }}
-          RUN_ATTEMPT: ${{ inputs.run_attempt }}
-          MAX_ATTEMPT: ${{ inputs.max_attempt }}
+          RUN_ID: ${{ inputs.run_id || inputs['run-id'] }}
+          RUN_ATTEMPT: ${{ inputs.run_attempt || inputs['run-attempt'] }}
+          MAX_ATTEMPT: ${{ inputs.max_attempt || inputs['max-attempt'] }}
         run: |
           set -eu
           # max-attempt fallback（变量缺失时使用默认值并打日志）
@@ -108,7 +135,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ inputs.head_sha }}
+          HEAD_SHA: ${{ inputs.head_sha || inputs['head-sha'] }}
         run: |
           set -eu
           echo "CI failed for $HEAD_SHA; cancelling in-progress Droid Auto Review runs..."

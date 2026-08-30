@@ -2373,3 +2373,51 @@ def test_retirement_list_tracks_infra_632() -> None:
         "infra-632 superseded branch must be listed for retirement"
     )
     assert "INFRA-632" in content, "the infra-632 entry must carry its INFRA reference"
+
+
+# ============================================================================
+# VAL-BRANCH-038 (INFRA-640): retirement list ships with infra-640 entries
+# ============================================================================
+def test_retirement_list_tracks_infra_640() -> None:
+    """The checked-in retirement list also lists the three superseded
+    branches flagged by tracking issue INFRA-640 (mirror #88) so the
+    tracker can drain once the scheduled cleanup deletes them.
+
+    Evidence chain (one entry per protected branch):
+    - factory/infra-585-fix-vars-forwarding: PR #28 (infra-core) closed
+      unmerged at 2026-08-27T12:55Z; per the owner's close comment the
+      vars.BRANCH_AGE_* forwarding fix already landed on main via PR #27
+      (e500f37), which switched branch-cleanup to the thin-caller
+      architecture (M4, INFRA-583) — the branch's single unique commit
+      is the older standalone composite-action env fix.
+    - mission-ic-gate-infra-droid-review-enable: PR #42 closed unmerged
+      at 2026-08-28T11:39Z; superseded by the split plan PR-A #43
+      (droid-review workflow enablement) + PR-B #44 (ci-ok polls
+      droid-review), both merged — the single unique commit is the
+      pre-split monolithic gate enablement.
+    - mission-ic-runner-host-toolchain-pin-cache: PR #37 closed unmerged
+      at 2026-08-29T07:12Z after baseline drift (auto-merge CONFLICTING);
+      superseded by PR #56 which salvaged-redid Layer 1+2 host toolchain
+      pinning & shared cache on new main, fixing the dropped
+      "Install dependencies" step (INFRA-590) — the 4 unique commits
+      (1 feat + 3 stale main merges) are the abandoned first attempt.
+    - In all three cases the INFRA-383 merge-tree containment check
+      cannot see cross-implementation equivalence, so the branches would
+      be protected forever and the INFRA-640 tracking issue would never
+      drain.
+
+    Mirrors VAL-BRANCH-029/031/032/033/037: the list is the audit
+    artifact, and adding or removing entries requires PR review.
+    """
+    retired = repo_root() / "src" / "infra_core" / "shell" / "branch_cleanup_retired.txt"
+    assert retired.is_file(), "scripts/branch_cleanup_retired.txt must exist"
+    content = retired.read_text()
+    for branch in (
+        "factory/infra-585-fix-vars-forwarding",
+        "mission-ic-gate-infra-droid-review-enable",
+        "mission-ic-runner-host-toolchain-pin-cache",
+    ):
+        assert branch in content, (
+            f"infra-640 superseded branch {branch} must be listed for retirement"
+        )
+    assert "INFRA-640" in content, "the infra-640 entries must carry their INFRA reference"

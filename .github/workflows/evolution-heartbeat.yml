@@ -11,10 +11,18 @@ name: Evolution Heartbeat Reusable
 
 on:
   workflow_call:
+    # 双形态键声明（CONSUMER-GATE-DEADLOCK 修复 2026-08-30）：GitHub 对 caller
+    # secrets: 传键做声明面严格校验——caller 传了未声明键 → run 级
+    # startup_failure（零 job）。hyphen 变体 required: false，env 层熔合
+    # `secrets.x_snake || secrets['x-hyphen']`。两步终态：memory 统一
+    # snake-only 后本仓删全部 hyphen 变体。
     secrets:
       dispatch_token:
         required: true
         description: PAT (hdot123) for issue/label writes and self-heal dispatch
+      dispatch-token:
+        required: false
+        description: 'hyphen 过渡变体（与 dispatch_token 等价；env 层熔合 snake || hyphen）'
   workflow_dispatch: {}
 
 
@@ -34,14 +42,14 @@ jobs:
         run: pip install -e .
       - name: Ensure labels exist
         env:
-          GH_TOKEN: ${{ secrets.dispatch_token }}
+          GH_TOKEN: ${{ secrets.dispatch_token || secrets['dispatch-token'] }}
         run: |
           # INFRA-601: 显式仓库上下文，免疫 runner insteadOf 镜像重写
           gh --repo "$GITHUB_REPOSITORY" label create "evolution-heartbeat" --color D93F0B --description "Evolution heartbeat alert" --force || true
       - name: Run heartbeat check
         run: python -m infra_core.engine.evolution_heartbeat
         env:
-          GH_TOKEN: ${{ secrets.dispatch_token }}
+          GH_TOKEN: ${{ secrets.dispatch_token || secrets['dispatch-token'] }}
           # P1-A: Prevent module poisoning — blocks automatic insertion of scripts/ into sys.path.
           PYTHONSAFEPATH: '1'
 # 并发治理归属 caller：reusable 本体禁止携带 concurrency（同组名自死锁陷阱，
