@@ -18,13 +18,25 @@ name: Evolution Scan Reusable
 
 on:
   workflow_call:
+    # 双形态键声明（CONSUMER-GATE-DEADLOCK 修复 2026-08-30）：GitHub 对 caller
+    # secrets: 传键做声明面严格校验——caller 传了未声明键 → run 级
+    # startup_failure（零 job）。memory #1075 双写 caller（snake + hyphen 并传）
+    # × 本文件单侧 snake-only 声明即 evolution 系断链根因。hyphen 变体
+    # required: false，env 层熔合 `secrets.x_snake || secrets['x-hyphen']`。
+    # 两步终态：memory 统一 snake-only 后本仓删全部 hyphen 变体。
     secrets:
       dispatch_token:
         required: true
         description: PAT (hdot123) for issue/label writes and self-heal dispatch
+      dispatch-token:
+        required: false
+        description: 'hyphen 过渡变体（与 dispatch_token 等价；env 层熔合 snake || hyphen）'
       linear_api_key:
         required: false
         description: LINEAR_API_KEY for auto_close_resolved Linear state verification
+      linear-api-key:
+        required: false
+        description: 'hyphen 过渡变体（与 linear_api_key 等价；env 层熔合 snake || hyphen）'
   workflow_dispatch: {}
 
 
@@ -61,7 +73,7 @@ jobs:
           restore-keys: evolution-history-
       - name: Ensure labels exist
         env:
-          GH_TOKEN: ${{ secrets.dispatch_token }}
+          GH_TOKEN: ${{ secrets.dispatch_token || secrets['dispatch-token'] }}
         run: |
           # INFRA-601: 显式仓库上下文，免疫 runner insteadOf 镜像重写
           gh --repo "$GITHUB_REPOSITORY" label create "evolution-found" --color FBCA04 --description "Evolution scanner finding" --force || true
@@ -69,11 +81,11 @@ jobs:
       - name: Run evolution scanner
         run: python -m infra_core.engine.evolution_scanner
         env:
-          GH_TOKEN: ${{ secrets.dispatch_token }}
+          GH_TOKEN: ${{ secrets.dispatch_token || secrets['dispatch-token'] }}
           # LINEAR_API_KEY enables Linear issue state verification in auto_close_resolved.
           # Without it, the scanner cannot verify Linear terminal state and will
           # fail-closed (block close) for Linear-linked issues to prevent churn.
-          LINEAR_API_KEY: ${{ secrets.linear_api_key }}
+          LINEAR_API_KEY: ${{ secrets.linear_api_key || secrets['linear-api-key'] }}
           # P1-A: Prevent module poisoning — blocks automatic insertion of scripts/ into sys.path.
           # The scanner explicitly re-adds its own directory via sys.path.insert.
           PYTHONSAFEPATH: '1'
