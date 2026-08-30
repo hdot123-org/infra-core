@@ -132,8 +132,13 @@ def run_audit_tool(
     """Run an audit tool and return findings, or None on failure.
 
     Returns None on failure (exception, missing source file, empty stdout, JSON
-    decode error). Returns [] on success with no findings. Non-zero exit codes
-    with valid JSON stdout are still parsed (audit tools exit non-zero on findings).
+    decode error, all-JSONL-lines-malformed). Returns [] on success with no
+    findings. Non-zero exit codes with valid JSON stdout are still parsed
+    (audit tools exit non-zero on findings).
+
+    output_format="jsonl" tools (e.g. error_patterns --json) emit one JSON
+    object per line; a single json.loads would crash on 2+ entries ("Extra
+    data"), so each line is parsed with the same tolerance as registry_jsonl.
     """
     from evolution_adapters import ADAPTER_MAP
 
@@ -197,6 +202,30 @@ def run_audit_tool(
         # If no stdout at all, tool genuinely failed (not just "found problems")
         if not result.stdout.strip():
             return None
+        # JSONL stdout: one JSON object per line (pack error_patterns --json).
+        # Malformed lines are skipped with a warning; all-malformed output is a
+        # tool failure (None), not [] — same contract as registry_jsonl above.
+        if tool.get("output_format") == "jsonl":
+            jsonl_lines: list[dict[str, Any]] = []
+            for lineno, line in enumerate(result.stdout.splitlines(), 1):
+                if not line.strip():
+                    continue
+                try:
+                    jsonl_lines.append(json.loads(line))
+                except json.JSONDecodeError as e:
+                    print(
+                        f"[evolution] Warning: {tool['name']} JSONL line {lineno} malformed, skipped: {e}"
+                    )
+            if not jsonl_lines:
+                print(
+                    f"[evolution] Warning: {tool['name']} all JSONL lines malformed, treating as tool failure"
+                )
+                return None
+            jsonl_adapter: Any = ADAPTER_MAP.get(tool["name"])
+            if jsonl_adapter:
+                jsonl_findings: list[dict[str, Any]] = jsonl_adapter(jsonl_lines)
+                return jsonl_findings
+            return jsonl_lines
         try:
             raw = json.loads(result.stdout)
         except json.JSONDecodeError as e:

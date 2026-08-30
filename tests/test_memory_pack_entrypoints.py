@@ -159,7 +159,9 @@ class TestPackEntryPointDiscovery:
         for entry in specs:
             assert entry["name"], "条目缺少 name"
             assert entry["command"], f"{entry['name']} 缺少 command"
-            assert entry["output_format"] == "json"
+            # json = 单 JSON 对象；jsonl = 每行一个 JSON 对象（error_patterns）。
+            # 每工具的精确声明由 tests/test_pack_seam_contracts.py 锁定。
+            assert entry["output_format"] in {"json", "jsonl"}
             assert isinstance(entry["timeout"], int) and entry["timeout"] > 0
 
     def test_tool_names_match_specs(self):
