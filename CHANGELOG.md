@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.1](https://github.com/hdot123-org/infra-core/compare/v0.7.0...v0.7.1) (2026-08-30)
+
+
+### Bug Fixes
+
+* **evolution:** check_config_yml 计入 rule_packs 展开生效工具数 ([#104](https://github.com/hdot123-org/infra-core/issues/104)) ([64a4b55](https://github.com/hdot123-org/infra-core/commit/64a4b55369d0f9776b175973cfb0249a08980c25))
+* **evolution:** 修复引擎仓自扫配置并抑制固有布局误报 (INFRA-659) ([#102](https://github.com/hdot123-org/infra-core/issues/102)) ([87b43b2](https://github.com/hdot123-org/infra-core/commit/87b43b242dc13b0a2541550856718a6789be2bca))
+
 ## [0.7.0](https://github.com/hdot123-org/infra-core/compare/v0.6.1...v0.7.0) (2026-08-30)
 
 
