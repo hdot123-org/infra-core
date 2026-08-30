@@ -4462,6 +4462,50 @@ def test_adapt_audit_layout():
     assert result[1]["location"] == "relative/path.md"
 
 
+def test_adapt_audit_layout_findings_schema():
+    """adapt_audit_layout 消费 infra-layout-audit 的真实输出 schema（AuditResult.to_dict）。
+
+    schema 漂移回归锁（engine-jsonl-and-pack-adapters）：layout_audit 实际产出
+    {findings: [{severity: P0|P1|P2, kind, path, message, suggested_bucket}]}，
+    旧 adapter 只认 {violations: [...]}——真实输出走 violations 分支静默返回 []。
+    """
+    raw = {
+        "target": "/tmp/proj",
+        "findings": [
+            {
+                "severity": "P1",
+                "kind": "ownership_missing",
+                "path": "memory/system/ownership.toml",
+                "message": "ownership.toml not found - ownership declaration missing",
+                "suggested_bucket": "needs_human_decision",
+            },
+            {
+                "severity": "P0",
+                "kind": "domain_missing",
+                "path": "memory/system/ownership.toml",
+                "message": "Ownership domain/resource deleted: kb",
+                "suggested_bucket": "needs_human_decision",
+            },
+        ],
+        "summary": {"total": 2, "p0": 1, "p1": 1, "p2": 0, "scanned_dirs": 3, "scanned_files": 5},
+    }
+    result = adapt_audit_layout(raw)
+    assert len(result) == 2
+    assert result[0]["rule_id"] == "OWNERSHIP_MISSING"
+    assert result[0]["severity"] == "warning"  # P1 → warning
+    assert result[1]["rule_id"] == "DOMAIN_MISSING"
+    assert result[1]["severity"] == "critical"  # P0 → critical
+    assert all(f["category"] == "audit_layout" for f in result)
+    assert result[0]["location"] == "memory/system/ownership.toml"
+    assert "needs_human_decision" in result[0]["evidence"]
+
+
+def test_adapt_audit_layout_findings_schema_empty_is_success():
+    """健康项目（findings: []）→ 空列表（成功零 findings），不是 tool failure。"""
+    result = adapt_audit_layout({"target": "/tmp/proj", "findings": [], "summary": {"total": 0}})
+    assert result == []
+
+
 def test_adapt_validate_project():
     """adapt_validate_project transforms validate_project output correctly."""
     # Scanner calls json.loads() before passing to adapter, so raw is already parsed
