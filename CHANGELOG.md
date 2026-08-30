@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.0](https://github.com/hdot123-org/infra-core/compare/v0.5.1...v0.6.0) (2026-08-30)
+
+
+### Features
+
+* **M5:** webhook-scripts 生产同步真源迁入本仓 + 消费仓接入指南 ([#81](https://github.com/hdot123-org/infra-core/issues/81)) ([e067af5](https://github.com/hdot123-org/infra-core/commit/e067af54038d1840ea56a7b20b431cdce1b94271))
+
+
+### Bug Fixes
+
+* **ci:** type-bundle 去重 mypy src 域——删除 Run mypy 重复步骤 ([#75](https://github.com/hdot123-org/infra-core/issues/75)) ([b0cdbc2](https://github.com/hdot123-org/infra-core/commit/b0cdbc211a2f1886851d422e870f1b3327122d98))
+* **linear:** create path 回填新建 tracker URL——同步不再恒走 no-tracker skip ([#79](https://github.com/hdot123-org/infra-core/issues/79)) ([480fee5](https://github.com/hdot123-org/infra-core/commit/480fee534209384a07a07a19a2f338faaef8dea8))
+* **linear:** 项目同步改用现行 issueUpdate mutation——VAL-GATE-118 真红根因修复 ([#76](https://github.com/hdot123-org/infra-core/issues/76)) ([5485b40](https://github.com/hdot123-org/infra-core/commit/5485b40af51dc8e3c9d2c09c07d72fa54641aa38))
+* **M5:** reusable workflow_call 双形态键声明恢复——解锁消费仓门禁死锁 ([#86](https://github.com/hdot123-org/infra-core/issues/86)) ([4f22a15](https://github.com/hdot123-org/infra-core/commit/4f22a15bea759f5659352951f462dfdb5f410591))
+* **pack:** 修复 pack↔engine 接缝三缺陷——error_patterns jsonl 声明/工具名统一 engine 键/daily audit 零宿主写 ([#80](https://github.com/hdot123-org/infra-core/issues/80)) ([3efcc82](https://github.com/hdot123-org/infra-core/commit/3efcc82765723df5351c5c0a396362474442b505))
+* **workflows:** droid-review-shards reusable 移除顶层 concurrency——INFRA-626 系统性收尾 ([#73](https://github.com/hdot123-org/infra-core/issues/73)) ([7f02477](https://github.com/hdot123-org/infra-core/commit/7f024771b3d478302b4127814fd6622ed91bdff7))
+* **workflows:** reusable 移除顶层 concurrency——caller 同名组自死锁 ([#72](https://github.com/hdot123-org/infra-core/issues/72)) ([4592006](https://github.com/hdot123-org/infra-core/commit/4592006198e8c6bc5737c7c6ea2002867c6de445))
+
 ## [0.5.1](https://github.com/hdot123-org/infra-core/compare/v0.5.0...v0.5.1) (2026-08-29)
 
 
