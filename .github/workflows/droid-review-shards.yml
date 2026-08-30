@@ -56,22 +56,22 @@ on:
         required: false
         type: string
         default: ''
-      shard-max-files:
+      shard_max_files:
         description: 'Layer 3: shard size cap in files (caller 转发 vars.SHARD_MAX_FILES)'
         required: false
         type: string
         default: '25'
-      shard-max-count:
+      shard_max_count:
         description: 'Layer 3: shard count cap (caller 转发 vars.SHARD_MAX_COUNT)'
         required: false
         type: string
         default: '6'
-      shard-timeout-minutes:
+      shard_timeout_minutes:
         description: 'Layer 1: shard job timeout in minutes (caller 转发 vars.SHARD_TIMEOUT_MINUTES)'
         required: false
         type: string
         default: '45'
-      shard-max-parallel:
+      shard_max_parallel:
         description: 'Layer 4: matrix concurrency cap (caller 转发 vars.SHARD_MAX_PARALLEL)'
         required: false
         type: string
@@ -222,8 +222,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ needs.setup.outputs.pr_number }}
-          MAX_FILES: ${{ inputs.shard-max-files }}
-          MAX_COUNT: ${{ inputs.shard-max-count }}
+          MAX_FILES: ${{ inputs.shard_max_files }}
+          MAX_COUNT: ${{ inputs.shard_max_count }}
         run: |
           set -eu
           # Get changed files from PR (with status for deleted-file handling)
@@ -266,10 +266,10 @@ jobs:
       needs.plan-shards.outputs.shards != '[]' &&
       needs.plan-shards.outputs.shards != ''
     runs-on: [self-hosted, pve-linux]
-    timeout-minutes: ${{ fromJSON(inputs.shard-timeout-minutes) }}
+    timeout-minutes: ${{ fromJSON(inputs.shard_timeout_minutes) }}
     strategy:
       fail-fast: false
-      max-parallel: ${{ fromJSON(inputs.shard-max-parallel) }}
+      max-parallel: ${{ fromJSON(inputs.shard_max_parallel) }}
       matrix:
         shard: ${{ fromJSON(needs.plan-shards.outputs.shards) }}
     env:

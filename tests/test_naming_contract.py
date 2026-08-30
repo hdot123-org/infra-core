@@ -5,6 +5,8 @@ infra-core 侧对 shipped workflow 模板断言字节级一致。
 """
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -148,10 +150,9 @@ class TestGovernanceActionScriptPath:
         run_match = re.search(r"run:\s*\|(.+?)(?=\n\w|\Z)", content, re.DOTALL)
         assert run_match, "action.yml 必须包含 run 块"
         run_block = run_match.group(1)
-        # 不得包含路径穿越
-        assert ".." not in run_block or "../" not in run_block, (
-            f"action.yml run 块包含路径穿越（..）：{run_block}"
-        )
+        # 不得包含路径穿越（M1 scrutiny R2：原 `A or B` 断言为恒真同义反复——
+        # ".." 不在蕴含 "../" 不在；收敛为真实的穿越契约 "../"）
+        assert "../" not in run_block, f"action.yml run 块包含路径穿越（../）：{run_block}"
 
     def test_action_yml_script_path_resolves_to_existing_file(self):
         """action.yml 引用的脚本路径必须在 repo 树中真实存在"""
@@ -192,8 +193,8 @@ class TestSetupLabelsReusableWorkflow:
 
     验证 infra-core 提供的 setup-labels reusable workflow 满足契约：
     - workflow_call 触发器
-    - labels-json input
-    - created-count/skipped-count outputs
+    - labels_json input
+    - created_count/skipped_count outputs
     """
 
     def test_setup_labels_workflow_exists(self):
@@ -211,7 +212,7 @@ class TestSetupLabelsReusableWorkflow:
         assert "workflow_call" in triggers, "setup-labels must declare workflow_call trigger"
 
     def test_setup_labels_has_labels_json_input(self):
-        """setup-labels.yml 必须声明 labels-json input"""
+        """setup-labels.yml 必须声明 labels_json input"""
         import yaml
 
         workflow_path = REPO_ROOT / ".github/workflows/setup-labels.yml"
@@ -219,11 +220,11 @@ class TestSetupLabelsReusableWorkflow:
         triggers = data.get(True, {})
         workflow_call = triggers.get("workflow_call", {})
         inputs = workflow_call.get("inputs", {})
-        assert "labels-json" in inputs, "setup-labels must declare labels-json input"
-        assert inputs["labels-json"].get("type") == "string"
+        assert "labels_json" in inputs, "setup-labels must declare labels_json input"
+        assert inputs["labels_json"].get("type") == "string"
 
     def test_setup_labels_has_outputs(self):
-        """setup-labels.yml 必须声明 created-count/skipped-count outputs"""
+        """setup-labels.yml 必须声明 created_count/skipped_count outputs"""
         import yaml
 
         workflow_path = REPO_ROOT / ".github/workflows/setup-labels.yml"
@@ -231,8 +232,8 @@ class TestSetupLabelsReusableWorkflow:
         triggers = data.get(True, {})
         workflow_call = triggers.get("workflow_call", {})
         outputs = workflow_call.get("outputs", {})
-        assert "created-count" in outputs, "setup-labels must declare created-count output"
-        assert "skipped-count" in outputs, "setup-labels must declare skipped-count output"
+        assert "created_count" in outputs, "setup-labels must declare created_count output"
+        assert "skipped_count" in outputs, "setup-labels must declare skipped_count output"
 
 
 class TestGovernanceCompositeActionMemoryCore:
@@ -757,3 +758,84 @@ class TestMemoryCoreCallerParityContract:
             "composite 元数据必须记载 caller 本地 job key `droid-review` 契约"
         )
         assert "嵌套" in text, "composite 元数据必须记载 reusable 调用导致 check 名嵌套的陷阱"
+
+
+class TestDroidReviewTriggerContract:
+    """R1(1) 契约补钉：droid-review 恢复/切换后的 trigger 面（具体 types）。
+
+    m4 scrutiny R1 发现：自仓 droid-review.yml 的 pull_request_target 四类
+    types 与 workflow_dispatch 输入面此前无任何测试钉住（memory 侧 thin
+    caller 已有 VAL-GATE-113 断言，本仓自仓文件缺失）。
+    """
+
+    def _load(self):
+        return yaml.safe_load(
+            (REPO_ROOT / ".github/workflows/droid-review.yml").read_text(encoding="utf-8")
+        )
+
+    def test_workflow_name_byte_exact(self):
+        assert self._load()["name"] == "Droid Auto Review"
+
+    def test_pull_request_target_types_exact(self):
+        """四类事件 types 字节级（open PR 即 review 的入口面）。"""
+        triggers = self._load().get("on") or self._load().get(True) or {}
+        prt = triggers["pull_request_target"]
+        assert prt["types"] == ["opened", "ready_for_review", "reopened", "synchronize"]
+        assert "branches" not in prt and "branches-ignore" not in prt
+
+    def test_workflow_dispatch_inputs(self):
+        """dispatch 面字节级钉住（自仓形态：两输入皆可选 string——手动补跑
+        入口；memory 侧 thin caller 的必填 number 形态由其自身测试钉住）。"""
+        triggers = self._load().get("on") or self._load().get(True) or {}
+        inputs = triggers["workflow_dispatch"]["inputs"]
+        assert inputs["pr_number"]["required"] is False
+        assert inputs["pr_number"]["type"] == "string"
+        assert inputs["head_sha"]["required"] is False
+        assert inputs["head_sha"]["type"] == "string"
+
+
+class TestRepoVariablesExistence:
+    """R1(2) 契约补钉：workflow 引用的 vars.X 必须在 GitHub 仓 variables 真实存在。
+
+    此前契约测试只 pin 文件内文本引用，变量缺失（如 INFRA-606 改名后未建）
+    会穿过全部契约测试。本测试优雅降级：gh 不可用 / API 不可达（CI 无凭证、
+    离线）时 skip，不误报。只校验**无 `||` 兜底**的引用——带兜底的引用按
+    设计允许变量缺席（脚本内回退默认值）。
+    """
+
+    REPO = "hdot123-org/infra-core"
+
+    @classmethod
+    def _required_vars(cls) -> set[str]:
+        pattern = re.compile(r"vars\.([A-Z0-9_]+)(\s*\|\|)?")
+        required: set[str] = set()
+        for wf in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+            lines = [
+                ln
+                for ln in wf.read_text(encoding="utf-8").splitlines()
+                if not ln.lstrip().startswith("#") and not ln.lstrip().startswith("description:")
+            ]
+            for m in pattern.finditer("\n".join(lines)):
+                if not m.group(2):
+                    required.add(m.group(1))
+        return required
+
+    def test_required_vars_exist_on_github(self):
+        required = self._required_vars()
+        assert required, "工作流应至少引用一个无兜底 vars.*"
+        if shutil.which("gh") is None:
+            pytest.skip("gh CLI 不可用（优雅降级）")
+        probe = subprocess.run(
+            ["gh", "api", f"repos/{self.REPO}/actions/variables", "--jq", ".variables[].name"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if probe.returncode != 0:
+            pytest.skip(f"gh API 不可达（无凭证/离线）: {probe.stderr.strip()[:80]}")
+        existing = {ln.strip() for ln in probe.stdout.splitlines() if ln.strip()}
+        missing = required - existing
+        assert not missing, (
+            f"workflow 引用的无兜底 vars 在 GitHub 仓缺失: {sorted(missing)}"
+            f"（已有: {sorted(existing)}）"
+        )
