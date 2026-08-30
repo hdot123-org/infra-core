@@ -333,9 +333,19 @@ $REPORT
     --body "$BODY"
     --label "$LABELS"
     ${GH_REPO_ARGS[@]+"${GH_REPO_ARGS[@]}"})
-  "${GH_ISSUE_CREATE_CMD[@]}" >/dev/null
+  # create-path gap 修复（live 发现 run 33285476683 / INFRA-632）：回填新建
+  # tracker 的 URL/编号，sync_linear_project 才能在创建当轮发起 Linear 同步。
+  # 此前 TRACKER_URL 仍为空，同步恒走 skipped (no tracker issue)，新建
+  # tracker 的 Linear mirror 永远挂不上 project（后续 run reused-silent 不补）。
+  CREATED_URL=$("${GH_ISSUE_CREATE_CMD[@]}" 2>/dev/null | tail -n 1) || CREATED_URL=""
+  if [[ -n "$CREATED_URL" ]]; then
+    TRACKER_URL="$CREATED_URL"
+    TRACKER_NUMBER=$(issue_number_of "$TRACKER_URL")
+  fi
   echo "issue_action=created"
-  # Sync to Linear project (VAL-GATE-118)
+  # Sync to Linear project (VAL-GATE-118)。Linear GitHub integration 的 mirror
+  # 可能尚未建好——此时按三态语义记 skipped (not yet synced)，后续
+  # update/close 路径会补挂。
   sync_linear_project
   exit 0
 fi
