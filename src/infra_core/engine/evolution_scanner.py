@@ -1499,6 +1499,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _rule_id_domain_line(findings: list[Any]) -> str:
+    """Format the rule_id domain of this tick's findings for CI-log extraction.
+
+    VAL-CROSS-007 evidence surface: the scheduled tick log must carry the full
+    (pre-dedup) rule_id domain so it can be diffed against a local
+    --report-only run at the same commit SHA.
+    """
+    rule_ids = sorted({f.rule_id for f in findings})
+    return f"[evolution] Findings rule_id domain ({len(rule_ids)}): {', '.join(rule_ids)}"
+
+
 def main(argv: list[str] | None = None) -> None:
     """Run one scanner tick.
 
@@ -1660,6 +1671,9 @@ def main(argv: list[str] | None = None) -> None:
     print(
         f"[evolution] Tick complete: {len(all_findings)} findings, {issues_created} issues created"
     )
+    # VAL-CROSS-007: 输出本轮全部 findings（去重前）的 rule_id 域，供"本地 vs CI 同源
+    # rule_id 域一致"断言从 scheduled tick 日志提取集合（与 report-only 报告可直接比对）
+    print(_rule_id_domain_line(all_findings))
 
     # P1-2: Hard exit when actionable findings exist but zero issues created.
     # INFRA-268: daily_audit findings are intentionally excluded from issue creation;
