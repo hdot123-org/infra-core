@@ -40,9 +40,12 @@ AUTO_MERGE_YML = REPO_ROOT / ".github/workflows/auto-merge.yml"
 # thin caller 载体）。防毒/字节一致不变量与自仓 caller 完全同构，逐条锁定。
 AUTO_MERGE_PIPELINE_YML = REPO_ROOT / ".github/workflows/auto-merge-pipeline.yml"
 AUTO_MERGE_CARRIERS = (AUTO_MERGE_YML, AUTO_MERGE_PIPELINE_YML)
-SHARED_WORKFLOWS_PIN = (
-    "hdot123-org/shared-workflows/auto-merge@5a0fc1b8946a170a12687d8614d56189e1f8dab5"
-)
+# M6 harden-consolidate-shared-workflows（VAL-HARD-104）：shared-workflows 仓退役
+# （README 重定向 + 归档），merge action 行为等价移植为本仓 actions/auto-merge。
+# 引用走 owner/repo 全路径 + @main（引擎仓内部引用惯例，与消费仓引用
+# auto-merge-pipeline.yml@main 对齐；回滚 = revert 本 PR，main 上的引用一并还原，
+# 归档仓的旧 pin 仍可解析，无第二处 pin 需要同步）。
+AUTO_MERGE_ACTION_REF = "hdot123-org/infra-core/actions/auto-merge@main"
 TRIAGE_SH = REPO_ROOT / "src/infra_core/shell/auto_merge_triage.sh"
 GUARDED_CHECKOUT_WORKFLOWS = ("ci.yml", "qa.yml", "droid-review.yml")
 GUARD_MARKER = 'rm -rf "$GITHUB_WORKSPACE/.git"'
@@ -210,7 +213,8 @@ class TestReusablePipelineTemplateContract:
     锁定 memory-core thin caller（VAL-GATE-106）所依赖的不变量：
     触发面归 caller（workflow_run 四名单 / pull_request_target / schedule /
     workflow_dispatch + 事件门控 + concurrency 全部不进本文件）；本文件只承载
-    resolve+triage+merge 执行体；shared-workflows merge pin 在 M4 冻结不动。
+    resolve+triage+merge 执行体；merge 步引用本仓 actions/auto-merge
+    （M6 VAL-HARD-104 自 shared-workflows@5a0fc1b 行为等价收编，该仓退役归档）。
     """
 
     def test_workflow_name(self) -> None:
@@ -259,23 +263,40 @@ class TestReusablePipelineTemplateContract:
         matrix = jobs["auto-merge"]["strategy"]["matrix"]
         assert matrix["pr_number"] == "${{ fromJSON(needs.resolve.outputs.pr_numbers) }}"
 
-    def test_merge_step_shared_workflows_pin_frozen(self) -> None:
-        """VAL-GATE-106：merge 步引用 shared-workflows/auto-merge@5a0fc1b… 冻结不动（M6 才合并）。"""
+    def test_merge_step_uses_consolidated_infra_core_action(self) -> None:
+        """VAL-HARD-104：merge 步引用本仓 actions/auto-merge（shared-workflows 已退役）。"""
         steps = _load_doc(AUTO_MERGE_PIPELINE_YML)["jobs"]["auto-merge"]["steps"]
         merge_step = next(
-            (s for s in steps if "shared-workflows/auto-merge" in str(s.get("uses", ""))),
+            (s for s in steps if str(s.get("uses", "")).endswith("/actions/auto-merge@main")),
             None,
         )
-        assert merge_step is not None, "shared-workflows/auto-merge merge 步缺失"
-        assert merge_step["uses"] == SHARED_WORKFLOWS_PIN, (
-            f"shared-workflows pin 必须字节级冻结，实际: {merge_step['uses']}"
+        assert merge_step is not None, "actions/auto-merge merge 步缺失"
+        assert merge_step["uses"] == AUTO_MERGE_ACTION_REF, (
+            f"merge 步必须引用本仓 actions/auto-merge@main，实际: {merge_step['uses']}"
         )
+
+    def test_no_shared_workflows_residual(self) -> None:
+        """VAL-HARD-104：shared-workflows 退役后两载体零 live 引用（uses: 面，防回潮）。
+
+        断言面是 step 的 uses: 引用（真正会被 GitHub 解析执行的部分）；
+        注释中的移植溯源文字（含仓名+SHA）不算引用，允许保留。
+        """
+        for carrier in AUTO_MERGE_CARRIERS:
+            offenders = [
+                f"{job}: {step.get('uses')}"
+                for job, step in _steps(_load_doc(carrier))
+                if "shared-workflows" in str(step.get("uses", ""))
+            ]
+            assert not offenders, (
+                f"{carrier.name} 残留 shared-workflows uses: 引用——该仓已退役归档，"
+                f"merge action 在本仓 actions/auto-merge：{offenders}"
+            )
 
     def test_merge_step_uses_dispatch_token_not_github_token(self) -> None:
         """合并凭证必须来自 dispatch_token secret 输入（PAT 防递归抑制），绝不回退 GITHUB_TOKEN。"""
         steps = _load_doc(AUTO_MERGE_PIPELINE_YML)["jobs"]["auto-merge"]["steps"]
         merge_step = next(
-            s for s in steps if "shared-workflows/auto-merge" in str(s.get("uses", ""))
+            s for s in steps if str(s.get("uses", "")).endswith("/actions/auto-merge@main")
         )
         env = merge_step.get("env", {})
         assert env.get("GITHUB_TOKEN") == (
@@ -310,3 +331,62 @@ class TestReusablePipelineTemplateContract:
         guard_run = str(steps[0].get("run", ""))
         assert "pyproject.toml" in guard_run
         assert ".github/actions/setup-venv" not in guard_run
+
+
+class TestAutoMergeCompositeActionContract:
+    """VAL-HARD-104：actions/auto-merge composite action 移植契约。
+
+    自 shared-workflows 仓 auto-merge action @5a0fc1b 行为等价移植
+    （该仓已退役归档）。本类锁定移植保真面：composite 形态与
+    元数据、零红扫描语义（全 check-runs 直查 + 四类非绿结论拦截）、
+    squash + 删分支合并命令、凭证经 env GITHUB_TOKEN 注入（caller 侧铁律
+    绑定 DISPATCH_TOKEN PAT，禁默认 GITHUB_TOKEN）。
+    """
+
+    ACTION_YML = REPO_ROOT / "actions/auto-merge/action.yml"
+
+    def _load_action(self) -> dict[str, Any]:
+        assert self.ACTION_YML.exists(), "actions/auto-merge/action.yml 必须存在"
+        doc = yaml.safe_load(self.ACTION_YML.read_text(encoding="utf-8"))
+        assert isinstance(doc, dict), "action.yml 必须是 YAML mapping"
+        return doc
+
+    @staticmethod
+    def _action_script(doc: dict[str, Any]) -> str:
+        return " ".join(str(step.get("run", "")) for step in doc["runs"]["steps"])
+
+    def test_composite_with_pr_number_input(self) -> None:
+        doc = self._load_action()
+        assert doc["name"] == "Auto Merge PR"
+        assert doc["runs"]["using"] == "composite"
+        inputs = doc.get("inputs") or {}
+        assert inputs.get("pr-number", {}).get("required") is True
+        assert inputs.get("pr-number", {}).get("type") == "string"
+
+    def test_zero_red_scan_semantics_preserved(self) -> None:
+        """零红铁律载体：merge 前全 check-runs 扫描（四类非绿结论全部拦截）。"""
+        script = self._action_script(self._load_action())
+        for conclusion in ("failure", "cancelled", "timed_out", "action_required"):
+            assert conclusion in script, f"零红扫描缺少 {conclusion} 判定"
+        assert "check-runs" in script, "必须直查 check-runs（含 advisory 层全量）"
+
+    def test_squash_delete_branch_merge_command(self) -> None:
+        script = self._action_script(self._load_action())
+        assert "--squash" in script and "--delete-branch" in script, (
+            "合并命令必须保持 gh pr merge --squash --delete-branch"
+        )
+
+    def test_credential_via_env_github_token(self) -> None:
+        """composite 步凭证取自 env GITHUB_TOKEN——由 caller 注入 DISPATCH_TOKEN PAT。"""
+        first = self._load_action()["runs"]["steps"][0]
+        assert first.get("env", {}).get("GH_TOKEN") == "${{ env.GITHUB_TOKEN }}"
+
+    def test_no_shared_workflows_reference(self) -> None:
+        """action 内部 step 不得引用已退役仓（uses: 面；溯源注释不算）。"""
+        doc = self._load_action()
+        offenders = [
+            step.get("uses")
+            for step in doc["runs"]["steps"]
+            if "shared-workflows" in str(step.get("uses", ""))
+        ]
+        assert not offenders, f"actions/auto-merge 内残留 shared-workflows 引用：{offenders}"

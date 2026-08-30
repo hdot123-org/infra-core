@@ -658,7 +658,8 @@ class TestAutoMergeTriggerContract:
       + pull_request_target(opened/synchronize/reopened) + schedule */30 + workflow_dispatch
     - INFRA-428 concurrency 组级排队：group=auto-merge-pipeline, cancel-in-progress=false
     - triage 脚本路径必须真实存在（M2 桩引用旧 scripts/ 路径的 exit-127 回归守卫）
-    - 合并动作钉住 shared-workflows action + DISPATCH_TOKEN（GITHUB_TOKEN 递归防护铁律）
+    - 合并动作引用本仓 actions/auto-merge（VAL-HARD-104 收编）+ DISPATCH_TOKEN
+      （GITHUB_TOKEN 递归防护铁律）
     - runner 铁律：jobs 一律 [self-hosted, pve-linux]
     """
 
@@ -735,16 +736,19 @@ class TestAutoMergeTriggerContract:
         )
         assert (REPO_ROOT / "src/infra_core/shell/auto_merge_triage.sh").exists()
 
-    def test_auto_merge_merge_step_pins_shared_action_and_dispatch_token(self):
-        """合并动作钉住 shared-workflows action（M6 前不动）且用 DISPATCH_TOKEN。
+    def test_auto_merge_merge_step_pins_consolidated_action_and_dispatch_token(self):
+        """合并动作引用本仓 actions/auto-merge（VAL-HARD-104 收编）且用 DISPATCH_TOKEN。
 
         GITHUB_TOKEN 必须绑定 DISPATCH_TOKEN：GitHub 递归防护会抑制
         GITHUB_TOKEN 产生的 push 事件，导致 release-please push 触发器断链。
+        shared-workflows 已退役归档（M6 harden-consolidate-shared-workflows），
+        引用迁移至本仓 actions/auto-merge@main，shared-workflows 零残留。
         """
         content = _read(".github/workflows/auto-merge.yml")
-        assert (
-            "hdot123-org/shared-workflows/auto-merge@5a0fc1b8946a170a12687d8614d56189e1f8dab5"
-            in content
+        assert "hdot123-org/infra-core/actions/auto-merge@main" in content
+        # uses: 面零 shared-workflows（注释中的移植溯源文字不算引用）
+        assert not re.search(r"uses:.*shared-workflows", content), (
+            "merge 步不得引用已退役的 shared-workflows（本仓 actions/auto-merge）"
         )
         assert "${{ secrets.DISPATCH_TOKEN }}" in content
 
