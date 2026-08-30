@@ -6,9 +6,13 @@
 #   - error_patterns：引擎仓 CI 无宿主 ~/.memory-core 输入源，且 pack 模板
 #     --repo-root 会在仓库根创建 memory/kb/patterns/（公开仓 gitignore 该树），
 #     凭空制造 CURRENT_MEMORY 误报——禁用。
-#   - evolution_self_audit：检查对象是消费仓管线（memory 仓 issue 同步、
-#     宿主 ~/.factory 设施），引擎仓 CI 无对应对象，且其 check_config_yml
-#     断言 audit_tools >= 6 与 pack 化配置结构性不符——禁用。
+#   - evolution_self_audit：INFRA-659 时的禁用依据之一（check_config_yml
+#     断言 audit_tools >= 6 与 pack 化配置结构性不符）已被引擎 v0.7.1
+#     （#104：改按 resolve_rule_packs 展开生效数断言，MIN_AUDIT_TOOLS
+#     6→5）消除；但本仓生效工具仅 3（audit_layout / code_hygiene_audit /
+#     evolution_self_audit，另两个 pack 工具的禁用依据仍然成立），启用即
+#     自报 EVOLUTION_CONFIG_INSUFFICIENT（生效 3 < MIN 5）——待引擎 MIN
+#     语义支持部分禁用配置再评估解禁，暂维持禁用。
 #   - daily_kb_audit / consistency_check / validate_project：memory 协议栈
 #     工具，属消费仓（memory-core）所有，引擎仓自扫不含——禁用。
 # 生效工具：audit_layout（布局误报由 suppress.json 精确抑制，INFRA-659）
