@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.0](https://github.com/hdot123-org/infra-core/compare/v0.6.1...v0.7.0) (2026-08-30)
+
+
+### Features
+
+* **actions:** auto-merge 动作收编入本仓，退役 shared-workflows pin（VAL-HARD-104） ([#98](https://github.com/hdot123-org/infra-core/issues/98)) ([cda47d7](https://github.com/hdot123-org/infra-core/commit/cda47d7012b2a5a04d01ecec0261516581b02625))
+* **engine:** auto_close_resolved 与 rule_id 域恒定落日志——VAL-CROSS-006/007 证据面 ([#99](https://github.com/hdot123-org/infra-core/issues/99)) ([3954109](https://github.com/hdot123-org/infra-core/commit/395410992eca5bf117919095bca3ed4b79b82629))
+
+
+### Bug Fixes
+
+* **evolution:** 探针失败不再冒充 severe outage，未知 staleness 用 None 表示 (INFRA-639) ([#87](https://github.com/hdot123-org/infra-core/issues/87)) ([c23eab9](https://github.com/hdot123-org/infra-core/commit/c23eab98d4647887aab18aaac4931845a518c834))
+
+
+### Documentation
+
+* **onboarding:** config 示例补齐引擎必填键，新增指南契约测试防回归（VAL-CROSS-008） ([#100](https://github.com/hdot123-org/infra-core/issues/100)) ([3bf890b](https://github.com/hdot123-org/infra-core/commit/3bf890bc86d4100b8849603d6a0cff6b6d7be283))
+* QA 家族上线后同步命名契约与门禁矩阵（INFRA-596） ([#41](https://github.com/hdot123-org/infra-core/issues/41)) ([77d5f0e](https://github.com/hdot123-org/infra-core/commit/77d5f0e6a0600797c8255ea8726c86bb6d4bd4b9))
+* **roadmap:** 中央调度路线图（VAL-HARD-106） ([#97](https://github.com/hdot123-org/infra-core/issues/97)) ([698dff8](https://github.com/hdot123-org/infra-core/commit/698dff834db2dfeb802ca87ebcb657ebb6dd1af5))
+
 ## [0.6.1](https://github.com/hdot123-org/infra-core/compare/v0.6.0...v0.6.1) (2026-08-30)
 
 
