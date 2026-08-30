@@ -117,6 +117,11 @@ def test_registered_categories_accepted(tmp_path):
     guide_file = fake_guide / "tutorial.md"
     guide_file.write_text("# Tutorial guide")
 
+    fake_roadmap = tmp_path / "docs" / "roadmap"
+    fake_roadmap.mkdir(parents=True)
+    roadmap_file = fake_roadmap / "central-scheduling.md"
+    roadmap_file.write_text("# Central scheduling roadmap")
+
     # Use parameterized scan_root and repo_root
     findings = mod.scan_doc_classification(
         scan_root=tmp_path / "docs",
