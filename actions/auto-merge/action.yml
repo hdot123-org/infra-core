@@ -1,0 +1,91 @@
+# M6 harden-consolidate-shared-workflows（VAL-HARD-104）：自 shared-workflows 仓
+# auto-merge action @5a0fc1b8946a170a12687d8614d56189e1f8dab5 行为等价移植
+# （该仓已退役：README 重定向 + 归档）。
+#
+# 凭证铁律：本 action 经 env GITHUB_TOKEN 取凭证，由 caller workflow 注入
+# DISPATCH_TOKEN PAT——禁用默认 GITHUB_TOKEN（GitHub 递归防护会抑制其
+# push 事件，release-please 的 push 触发器断链，2026-08-15 两次事故）。
+name: 'Auto Merge PR'
+description: 'Automatically merge a PR when all CI checks pass'
+
+inputs:
+  pr-number:
+    description: 'PR number to merge'
+    required: true
+    type: string
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check CI and auto-merge
+      shell: bash
+      env:
+        GH_TOKEN: ${{ env.GITHUB_TOKEN }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        REPO: ${{ github.repository }}
+      run: |
+        echo "=== Auto-merge check for PR #$PR_NUMBER on $REPO ==="
+
+        # Get PR info
+        PR_INFO=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state,mergeable,headRefOid 2>&1)
+        STATE=$(echo "$PR_INFO" | jq -r '.state // empty' 2>/dev/null)
+
+        if [ -z "$STATE" ]; then
+          echo "Could not get PR info: $PR_INFO"
+          exit 0
+        fi
+
+        if [ "$STATE" != "OPEN" ]; then
+          echo "PR is $STATE, not OPEN. Skipping."
+          exit 0
+        fi
+
+        HEAD_SHA=$(echo "$PR_INFO" | jq -r '.headRefOid')
+
+        # Get all check runs for this commit
+        echo "Checking CI status for commit $HEAD_SHA..."
+        CHECK_RUNS=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" --paginate --jq '.check_runs' 2>/dev/null)
+
+        if [ -z "$CHECK_RUNS" ] || [ "$CHECK_RUNS" = "null" ]; then
+          echo "No check runs found, skipping."
+          exit 0
+        fi
+
+        # Count incomplete checks
+        INCOMPLETE=$(echo "$CHECK_RUNS" | jq '[.[] | select(.status != "completed")] | length')
+        echo "Incomplete checks: $INCOMPLETE"
+
+        if [ "$INCOMPLETE" -gt 0 ]; then
+          echo "CI still running, will retry on next check_run event."
+          exit 0
+        fi
+
+        # Count failed checks
+        FAILED=$(echo "$CHECK_RUNS" | jq '[.[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required")] | length')
+        echo "Failed checks: $FAILED"
+
+        if [ "$FAILED" -gt 0 ]; then
+          echo "CI has failures, not merging."
+          exit 0
+        fi
+
+        # Check mergeable status
+        MERGEABLE=$(echo "$PR_INFO" | jq -r '.mergeable')
+        if [ "$MERGEABLE" = "UNKNOWN" ]; then
+          echo "Mergeable status unknown, waiting 5s..."
+          sleep 5
+          MERGEABLE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json mergeable --jq '.mergeable')
+        fi
+
+        if [ "$MERGEABLE" != "MERGEABLE" ]; then
+          echo "PR is not mergeable ($MERGEABLE), skipping."
+          exit 0
+        fi
+
+        # All checks pass, merge!
+        echo "=== All CI checks passed. Merging PR #$PR_NUMBER ==="
+        if gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch 2>&1; then
+          echo "PR #$PR_NUMBER merged successfully."
+        else
+          echo "Merge command failed (may need branch protection bypass or PR review)."
+        fi
