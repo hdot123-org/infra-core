@@ -28,7 +28,15 @@ EVOLUTION_CONFIG = EVOLUTION_DIR / "config.yml"
 MIN_AUDIT_TOOLS = 5
 
 HEARTBEAT_FILE = EVOLUTION_DIR / "heartbeat.json"
-HEARTBEAT_STALE_THRESHOLD_HOURS = 2  # Scanner runs every 30 min; 2h = 4 missed ticks
+# INFRA-651: marker 新鲜度阈值 2h → 8h。self-audit 在 tick 内部运行，读到的是
+# cache 恢复来的上一次成功 tick 的 marker（当前 tick 的 marker 要到 tick 尾部
+# write_heartbeat 才落盘），所以本检查实测的是「tick 间隔」而非「scanner 存活」。
+# self-hosted runner + concurrency 串行下 2h+ 间隔是结构性常态（2026-08-30 19:29
+# → 21:37 tick 间隔 2.1h，误报 reopen #1082）。权威存活告警在 heartbeat monitor
+# （无状态 gh run list 探针 + INFRA-578/588 双向自愈）；本阈值与 INFRA-597 的
+# SCANNER_SEVERE_STALENESS_HOURS = 8 严重故障教义对齐——低于 8h 的间隔属瞬态
+# cron 漂移，不构成停摆证据。真阳性案例（11.6h / 20h+）均远超 8h，不受影响。
+HEARTBEAT_STALE_THRESHOLD_HOURS = 8
 
 FACTORY_HOME = Path.home() / ".factory"
 LOCK_DIR = FACTORY_HOME / "webhook" / "locks"
@@ -712,9 +720,15 @@ def check_heartbeat_channel() -> list[dict[str, Any]]:
     """Check 9: verify evolution heartbeat marker is fresh (INFRA-204).
 
     Unlike Check 2 (which reads findings_over_time.json with a 48h threshold),
-    this check reads the dedicated heartbeat.json marker with a 2h threshold.
-    The heartbeat is written at the END of a successful tick, so staleness
-    here means the scanner is either not running or failing mid-tick.
+    this check reads the dedicated heartbeat.json marker with an 8h threshold
+    (INFRA-651). The heartbeat is written at the END of a successful tick, and
+    this check runs mid-tick against the PREVIOUS tick's marker (restored via
+    actions-cache), so the measured age is effectively the tick interval —
+    not a liveness probe. Authoritative liveness alerting lives in the
+    heartbeat monitor (stateless gh run list probe + INFRA-578/588 bidirectional
+    self-heal); this file-based check only catches long outages (≥ 8h, aligned
+    with SCANNER_SEVERE_STALENESS_HOURS per INFRA-597 doctrine) where
+    self-heal dispatch repeatedly succeeded but no tick completed.
     """
     findings: list[dict[str, Any]] = []
 

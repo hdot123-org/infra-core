@@ -6943,13 +6943,13 @@ def test_check_heartbeat_channel_fresh(tmp_path, monkeypatch):
 
 
 def test_check_heartbeat_channel_stale(tmp_path, monkeypatch):
-    """INFRA-204: check_heartbeat_channel reports STALE when heartbeat older than 2h."""
+    """INFRA-204: check_heartbeat_channel reports STALE when heartbeat older than 8h (INFRA-651)."""
     import evolution_self_audit  # noqa: F401 — engine-dir compat module
 
     heartbeat_path = tmp_path / "heartbeat.json"
     monkeypatch.setattr(evolution_self_audit, "HEARTBEAT_FILE", heartbeat_path)
 
-    old_time = datetime.now(UTC) - timedelta(hours=3)
+    old_time = datetime.now(UTC) - timedelta(hours=9)
     data = {"timestamp": old_time.isoformat(), "status": "ok"}
     heartbeat_path.write_text(json.dumps(data))
 
@@ -6958,6 +6958,49 @@ def test_check_heartbeat_channel_stale(tmp_path, monkeypatch):
     assert result[0]["rule_id"] == "EVOLUTION_HEARTBEAT_STALE"
     assert result[0]["severity"] == "critical"
     assert "age=" in result[0]["evidence"]
+
+
+def test_check_heartbeat_channel_no_alert_on_structural_tick_gap(tmp_path, monkeypatch):
+    """INFRA-651: tick 间隔在 self-hosted runner 排队下可结构性超过旧 2h 阈值。
+
+    2026-08-30 事故：19:29 tick 写入 marker → 21:37 tick 内 self-audit 经
+    actions-cache 读到该 marker，age≈2.15h > 旧阈值 2h，误报 reopen #1082
+    （mirror INFRA-651）。本检查实测的是「tick 间隔」而非「scanner 存活」
+    （当前 tick 的 marker 要到 tick 尾部 write_heartbeat 才落盘），2h+ 间隔
+    是 concurrency 串行下的常规现象。阈值已对齐 INFRA-597 的 8h 严重故障
+    教义（SCANNER_SEVERE_STALENESS_HOURS），2-8h 区间不再告警。
+    """
+    import evolution_self_audit  # noqa: F401 — engine-dir compat module
+
+    heartbeat_path = tmp_path / "heartbeat.json"
+    monkeypatch.setattr(evolution_self_audit, "HEARTBEAT_FILE", heartbeat_path)
+
+    # 事故精确场景：上一次 tick 的 marker，age=2.1h（旧阈值下会误报）
+    previous_tick_time = datetime.now(UTC) - timedelta(hours=2, minutes=6)
+    data = {"timestamp": previous_tick_time.isoformat(), "status": "ok"}
+    heartbeat_path.write_text(json.dumps(data))
+
+    result = evolution_self_audit.check_heartbeat_channel()
+    assert result == [], "tick gap of 2.1h must not alert (structural, not an outage)"
+
+
+def test_check_heartbeat_channel_threshold_is_severe_staleness_aligned():
+    """INFRA-651: 文件阈值必须与 INFRA-597 严重故障教义对齐（8h）。
+
+    heartbeat monitor 的 SCANNER_SEVERE_STALENESS_HOURS = 8 裁定「<8h 的间隔
+    属瞬态 cron 漂移，不构成停摆证据」。self-audit 的文件检查是冗余弱信号，
+    阈值不得低于该教义边界，否则结构性 tick 间隔会重新进入告警区间。
+    """
+    import evolution_heartbeat
+    import evolution_self_audit  # noqa: F401 — engine-dir compat module
+
+    assert (
+        evolution_self_audit.HEARTBEAT_STALE_THRESHOLD_HOURS
+        >= evolution_heartbeat.SCANNER_SEVERE_STALENESS_HOURS
+    ), (
+        "self-audit heartbeat threshold must stay >= SCANNER_SEVERE_STALENESS_HOURS "
+        "(INFRA-597 doctrine); lowering it re-introduces structural tick-gap false positives"
+    )
 
 
 def test_check_heartbeat_channel_invalid_json(tmp_path, monkeypatch):
