@@ -1,0 +1,26 @@
+# Evolution Heartbeat thin caller（消费仓模板）
+# 复制后保持 name: Evolution Heartbeat 与 cron '47 */2 * * *'（INFRA-578 错峰）。
+
+name: Evolution Heartbeat
+
+on:
+  schedule:
+    - cron: '47 */2 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: evolution-heartbeat
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  heartbeat:
+    uses: hdot123-org/infra-core/.github/workflows/evolution-heartbeat.yml@main
+    permissions:
+      contents: read
+      issues: write
+    secrets:
+      dispatch_token: ${{ secrets.DISPATCH_TOKEN }}
