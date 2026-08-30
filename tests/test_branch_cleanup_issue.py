@@ -838,7 +838,11 @@ class TestLinearProjectSync:
 
     @staticmethod
     def _mutation_ok_response() -> str:
-        return json.dumps({"data": {"issueAddProjectRelation": {"success": True}}})
+        # VAL-GATE-118 真红根因修复：现行 API 是 issueUpdate，响应形状
+        # {"data": {"issueUpdate": {"success": true, "issue": {"id": ...}}}}。
+        return json.dumps(
+            {"data": {"issueUpdate": {"success": True, "issue": {"id": "lin-issue"}}}}
+        )
 
     def test_linear_sync_scopes_to_own_repository(self, tmp_path: Path):
         """VAL-GATE-118: title alone is ambiguous across repos — memory and
@@ -874,8 +878,8 @@ class TestLinearProjectSync:
         assert exit_code == 0, stdout
         assert "issue_action=updated" in stdout
         assert "linear_sync=success" in stdout
-        mutations = harness.curl_calls_matching("issueAddProjectRelation")
-        assert len(mutations) == 1, "只有本仓的 Linear issue 应被加 project relation"
+        mutations = harness.curl_calls_matching("issueUpdate")
+        assert len(mutations) == 1, "只有本仓的 Linear issue 应被设置 project"
         assert "lin-memory-issue" in mutations[0]["data"]
         assert "lin-infra-issue" not in mutations[0]["data"]
 
@@ -905,11 +909,11 @@ class TestLinearProjectSync:
 
         assert exit_code == 0, stdout
         assert "linear_sync=skipped (Linear issue not found or not yet synced)" in stdout
-        assert harness.curl_calls_matching("issueAddProjectRelation") == []
+        assert harness.curl_calls_matching("issueUpdate") == []
 
     def test_linear_sync_tags_all_same_repo_matches(self, tmp_path: Path):
         """All same-repo tracking issues (current + historical) get the project
-        relation; the mutation is idempotent so this is safe."""
+        assignment; issueUpdate+projectId is idempotent so this is safe."""
         harness = GhMockHarness(
             tmp_path,
             issues={781: tracker_body(["old-branch"])},
@@ -941,10 +945,37 @@ class TestLinearProjectSync:
         exit_code, stdout, _ = harness.run_script(deleted=["new-branch"])
 
         assert exit_code == 0, stdout
-        mutations = harness.curl_calls_matching("issueAddProjectRelation")
+        mutations = harness.curl_calls_matching("issueUpdate")
         tagged = [c for c in mutations if "lin-own" in c["data"]]
         assert len(tagged) == 2, "本仓新旧两个 tracking issue 都应挂上 project"
         assert all("lin-foreign" not in c["data"] for c in mutations)
+
+    # ------------------------------------------------------------------
+    # VAL-GATE-118 真红根因修复（2026-08-30, run 33284405687）
+    # Linear 当前 GraphQL schema 已无 issueAddProjectRelation 字段——直连复现
+    # 返回 GRAPHQL_VALIDATION_FAILED "Cannot query field issueAddProjectRelation
+    # on type Mutation"。该路径长期被空 secret 掩盖（同步从未 eligible），
+    # LINEAR_API_KEY 轮换后首次 live 执行即三次 linear_sync=failed。
+    # 现行 API：issueUpdate(id, input: {projectId})。契约钉死新写法，
+    # 死名不得复现。
+    # ------------------------------------------------------------------
+    def test_mutation_uses_current_issue_update_api(self):
+        """同步 mutation 必须是 issueUpdate(id, input: {projectId}) 现行写法。"""
+        content = get_script_path().read_text()
+        assert "mutation { issueUpdate(id: " in content, (
+            "Linear 同步必须使用现行 issueUpdate mutation"
+        )
+        assert "input: { projectId: " in content, "issueUpdate input 必须携带 projectId"
+        assert "{ success issue { id } }" in content, "mutation 返回形状必须 pin"
+        assert ".data.issueUpdate.success" in content, "成功判定必须读取 issueUpdate.success"
+
+    def test_dead_mutation_name_must_not_reappear(self):
+        """回归：issueAddProjectRelation 已从 Linear schema 移除，禁止复现。"""
+        content = get_script_path().read_text()
+        assert "issueAddProjectRelation" not in content, (
+            "issueAddProjectRelation 在 Linear 当前 schema 中不存在"
+            "（GRAPHQL_VALIDATION_FAILED），死名不得复现"
+        )
 
 
 # ============================================================================

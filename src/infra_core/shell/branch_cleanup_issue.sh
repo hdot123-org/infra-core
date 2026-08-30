@@ -240,18 +240,23 @@ sync_linear_project() {
     return 0
   fi
 
-  # Sync every same-repo match (current + historical trackers); the
-  # issueAddProjectRelation mutation is idempotent.
+  # Sync every same-repo match (current + historical trackers); issueUpdate
+  # with projectId is idempotent (re-assigning an issue already in the project
+  # is a no-op). VAL-GATE-118 真红根因（2026-08-30, run 33284405687）：此前使用的
+  # project-relation mutation 已从 Linear GraphQL schema 移除（直连复现
+  # GRAPHQL_VALIDATION_FAILED），LINEAR_API_KEY 轮换后首次 live 执行即三次
+  # linear_sync=failed；改用现行 issueUpdate API。回归钉死见
+  # tests/test_branch_cleanup_issue.py::test_dead_mutation_name_must_not_reappear。
   while IFS= read -r LINEAR_ISSUE_ID; do
     [[ -z "$LINEAR_ISSUE_ID" ]] && continue
 
     MUTATION_RESULT=$(curl -s -X POST \
       -H "Content-Type: application/json" \
       -H "Authorization: ${LINEAR_API_KEY}" \
-      -d "{\"query\": \"mutation { issueAddProjectRelation(input: { issueId: \\\"${LINEAR_ISSUE_ID}\\\", projectId: \\\"${LINEAR_PROJECT_ID}\\\" }) { success } }\"}" \
+      -d "{\"query\": \"mutation { issueUpdate(id: \\\"${LINEAR_ISSUE_ID}\\\", input: { projectId: \\\"${LINEAR_PROJECT_ID}\\\" }) { success issue { id } } }\"}" \
       https://api.linear.app/graphql 2>/dev/null)
 
-    if echo "$MUTATION_RESULT" | jq -e '.data.issueAddProjectRelation.success' >/dev/null; then
+    if echo "$MUTATION_RESULT" | jq -e '.data.issueUpdate.success' >/dev/null; then
       echo "linear_sync=success (issue=${LINEAR_ISSUE_ID} project=${LINEAR_PROJECT_ID})"
     else
       # Fail silently - sync failures must not break the workflow
