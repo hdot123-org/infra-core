@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/hdot123-org/infra-core/compare/v0.6.0...v0.6.1) (2026-08-30)
+
+
+### Bug Fixes
+
+* **engine:** 修复 audit_layout adapter schema 漂移——消费真实 findings 输出并补 rule_id 全工具契约测试 ([#91](https://github.com/hdot123-org/infra-core/issues/91)) ([8bf173c](https://github.com/hdot123-org/infra-core/commit/8bf173cae5f8ec6ee0030e3763d95b0b1573a380))
+
 ## [0.6.0](https://github.com/hdot123-org/infra-core/compare/v0.5.1...v0.6.0) (2026-08-30)
 
 

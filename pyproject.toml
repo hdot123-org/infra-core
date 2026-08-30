@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "infra-core"
-version = "0.6.0"
+version = "0.6.1"
 description = "组织级演进引擎：自进化/审计/门禁体系的共享基础设施"
 readme = "README.md"
 license = {text = "MIT"}
