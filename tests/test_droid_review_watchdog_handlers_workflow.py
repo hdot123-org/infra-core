@@ -48,7 +48,18 @@ class TestWorkflowCallSurface:
 
     def test_inputs_declared(self, workflow_call):
         inputs = workflow_call.get("inputs", {})
-        for name in ("mode", "run_id", "run_attempt", "head_sha", "max_attempt"):
+        for name in (
+            "mode",
+            "run_id",
+            "run_attempt",
+            "head_sha",
+            "max_attempt",
+            # hyphen 过渡变体（双形态并存，CONSUMER-GATE-DEADLOCK 修复）
+            "run-id",
+            "run-attempt",
+            "head-sha",
+            "max-attempt",
+        ):
             assert name in inputs, f"workflow_call 缺少 input: {name}"
 
     def test_mode_required_string(self, workflow_call):
@@ -136,9 +147,9 @@ class TestSelfHealHandlerBody:
 
     def test_env_wired_from_inputs(self, handlers_data):
         env = _handler_step(handlers_data, "self-heal-rerun", "rerun").get("env", {})
-        assert env["RUN_ID"] == "${{ inputs.run_id }}"
-        assert env["RUN_ATTEMPT"] == "${{ inputs.run_attempt }}"
-        assert env["MAX_ATTEMPT"] == "${{ inputs.max_attempt }}"
+        assert env["RUN_ID"] == "${{ inputs.run_id || inputs['run-id'] }}"
+        assert env["RUN_ATTEMPT"] == "${{ inputs.run_attempt || inputs['run-attempt'] }}"
+        assert env["MAX_ATTEMPT"] == "${{ inputs.max_attempt || inputs['max-attempt'] }}"
 
 
 class TestCancelOnCiFailHandlerBody:
@@ -162,7 +173,51 @@ class TestCancelOnCiFailHandlerBody:
 
     def test_env_wired_from_inputs(self, handlers_data):
         env = _handler_step(handlers_data, "cancel-on-ci-fail", "cancel").get("env", {})
-        assert env["HEAD_SHA"] == "${{ inputs.head_sha }}"
+        assert env["HEAD_SHA"] == "${{ inputs.head_sha || inputs['head-sha'] }}"
+
+
+class TestDualFormInputs:
+    """双形态键声明 + 取值熔合（CONSUMER-GATE-DEADLOCK 修复，2026-08-30）。
+
+    GitHub 对 caller with: 传键做声明面严格校验：caller 传了 callee 未声明键
+    → run 级 startup_failure（零 job）。memory #1075 双写 caller × 单侧声明
+    callee 即 04:00Z watchdog 断链根因。每个 snake 键必须带 hyphen 变体
+    （required: false），消费点统一熔合 `inputs.x_snake || inputs['x-hyphen']`。
+    mode 无变体（caller 单形态传键，不在本契约面）。两步终态：memory 统一
+    snake-only 后本契约随删变体键的 PR 一并退役。
+    """
+
+    DUAL_FORM_SNAKE_KEYS = ("run_id", "run_attempt", "head_sha", "max_attempt")
+
+    def test_hyphen_variants_declared_optional(self, workflow_call):
+        inputs = workflow_call.get("inputs", {})
+        for snake in self.DUAL_FORM_SNAKE_KEYS:
+            hyphen = snake.replace("_", "-")
+            assert hyphen in inputs, f"缺少 hyphen 变体 input: {hyphen}"
+            assert inputs[hyphen]["required"] is False, f"{hyphen} 变体必须可选"
+
+    def test_number_variants_default_zero(self, workflow_call):
+        """number 变体默认 0（GitHub 表达式 falsy）——熔合 `||` 自然落到另一形态。"""
+        inputs = workflow_call.get("inputs", {})
+        assert inputs["run-id"]["type"] == "number"
+        assert inputs["run-id"]["default"] == 0
+        assert inputs["run-attempt"]["type"] == "number"
+        assert inputs["run-attempt"]["default"] == 0
+
+    def test_string_variants_empty_default(self, workflow_call):
+        inputs = workflow_call.get("inputs", {})
+        assert inputs["head-sha"]["default"] == ""
+        assert inputs["max-attempt"]["default"] == ""
+
+    def test_no_bare_snake_input_consumption(self, handlers_data):
+        """声明了 hyphen 变体的 snake 键禁止裸取（防未来新增消费点漏熔合）。"""
+        raw = WORKFLOW_PATH.read_text(encoding="utf-8")
+        for snake in self.DUAL_FORM_SNAKE_KEYS:
+            bare = "${{ inputs.%s }}" % snake
+            assert bare not in raw, (
+                f"inputs.{snake} 存在裸取消费点——必须熔合 inputs.{snake} "
+                f"|| inputs['{snake.replace('_', '-')}']"
+            )
 
 
 class TestSelfHostedSafety:

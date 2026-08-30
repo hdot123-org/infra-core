@@ -96,6 +96,78 @@ class TestReusableNoTopLevelConcurrency:
         )
 
 
+class TestReusableDualFormKeyContract:
+    """跨仓 workflow_call 键严格校验的声明面契约（CONSUMER-GATE-DEADLOCK 修复）。
+
+    GitHub 对 caller `with:`/`secrets:` 传键做声明面严格校验——caller 传了
+    callee 未声明的键 → run 级 startup_failure（零 job）；callee required 键
+    caller 未传同理。跨仓改名没有原子同步窗口（pull_request_target 恒用
+    main 定义），memory #1075 双写 caller × 单侧声明 callee 即 2026-08-30
+    04:00Z 起 memory 三 workflow（Droid Auto Review / Auto Merge / Watchdog）
+    全量 startup_failure、#1076/#1077 死锁的根因。
+
+    本契约钉住被消费仓引用的 5 个 reusable：每个 snake 键必须带 hyphen 变体
+    （required: false），且消费点熔合 `x_snake || x['x-hyphen']`（禁止裸取），
+    防再次单侧删键。两步终态：memory 统一 snake-only 后，删变体键的 PR
+    必须同步收缩本契约的 DUAL_FORM_FILES。
+    """
+
+    DUAL_FORM_FILES = (
+        ".github/workflows/auto-merge-pipeline.yml",
+        ".github/workflows/droid-review-shards.yml",
+        ".github/workflows/droid-review-watchdog-handlers.yml",
+        ".github/workflows/evolution-scan.yml",
+        ".github/workflows/evolution-heartbeat.yml",
+    )
+
+    @classmethod
+    def _dual_form_keys(cls, path: Path) -> list[tuple[str, str]]:
+        """返回 (context, snake 键) 列表：workflow_call 下声明了 hyphen 变体的 snake 键。"""
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        triggers = data.get("on") or data.get(True) or {}
+        call = triggers.get("workflow_call", {}) or {}
+        pairs: list[tuple[str, str]] = []
+        for context in ("inputs", "secrets"):
+            block = call.get(context, {}) or {}
+            for key in block:
+                if "_" in key and key.replace("_", "-") in block:
+                    pairs.append((context, key))
+        return pairs
+
+    def test_dual_form_files_have_snake_keys_with_variants(self):
+        """契约面自检：5 个文件各自至少存在一个双形态键（防清单失效/漂移）。"""
+        for rel in self.DUAL_FORM_FILES:
+            pairs = self._dual_form_keys(REPO_ROOT / rel)
+            assert pairs, f"{rel} 未发现任何双形态键对——清单或声明面漂移"
+
+    @pytest.mark.parametrize("rel", DUAL_FORM_FILES)
+    def test_variants_declared_optional(self, rel: str):
+        """hyphen 变体必须 required: false（required snake 会挡死未迁移 caller）。"""
+        data = yaml.safe_load((REPO_ROOT / rel).read_text(encoding="utf-8"))
+        triggers = data.get("on") or data.get(True) or {}
+        call = triggers.get("workflow_call", {}) or {}
+        offenders = []
+        for context, snake in self._dual_form_keys(REPO_ROOT / rel):
+            hyphen = snake.replace("_", "-")
+            variant = (call.get(context, {}) or {}).get(hyphen, {})
+            if variant.get("required") is not False:
+                offenders.append(f"{context}:{hyphen}")
+        assert not offenders, f"{rel} hyphen 变体必须可选（required: false）：{offenders}"
+
+    @pytest.mark.parametrize("rel", DUAL_FORM_FILES)
+    def test_no_bare_consumption_of_dual_form_keys(self, rel: str):
+        """双形态键的消费点必须熔合，禁止裸取（防新增消费点漏熔合回退单侧语义）。"""
+        raw = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        offenders = []
+        for context, snake in self._dual_form_keys(REPO_ROOT / rel):
+            bare = "${{ %s.%s }}" % (context, snake)
+            if bare in raw:
+                offenders.append(bare)
+        assert not offenders, (
+            f"{rel} 双形态键存在裸取消费点（必须熔合 x_snake || x['x-hyphen']）：{offenders}"
+        )
+
+
 class TestGovernanceJobNameContract:
     def test_governance_job_display_name(self):
         content = _read(".github/workflows/evolution-governance.yml")

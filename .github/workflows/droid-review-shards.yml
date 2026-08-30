@@ -40,14 +40,31 @@ name: Droid Review Shards
 
 on:
   workflow_call:
+    # 双形态键声明（CONSUMER-GATE-DEADLOCK 修复 2026-08-30）：GitHub 对 caller
+    # with: 传键做声明面严格校验——caller 传了未声明键 → run 级 startup_failure
+    # （零 job）。memory #1075 双写 caller（snake + hyphen 并传）× 本文件单侧
+    # snake-only 声明即 04:08Z Droid Auto Review 断链根因。每个 snake 键带一个
+    # hyphen 变体（required: false，default 空），取值处统一熔合
+    # `inputs.x_snake || inputs['x-hyphen']`（bracket 语法——hyphen 键不允许
+    # 点号取值）。两步终态：memory 统一 snake-only 后本仓删全部 hyphen 变体。
     inputs:
       engine_ref:
         description: 'infra-core ref for engine scripts (plan_shards.py / run_shard.sh)'
         required: false
         type: string
         default: 'main'
+      engine-ref:
+        description: 'hyphen 过渡变体（与 engine_ref 等价）'
+        required: false
+        type: string
+        default: ''
       pr_number:
         description: 'PR number (workflow_dispatch passthrough; empty for pull_request_target)'
+        required: false
+        type: string
+        default: ''
+      pr-number:
+        description: 'hyphen 过渡变体（与 pr_number 等价）'
         required: false
         type: string
         default: ''
@@ -56,26 +73,51 @@ on:
         required: false
         type: string
         default: ''
+      head-sha:
+        description: 'hyphen 过渡变体（与 head_sha 等价）'
+        required: false
+        type: string
+        default: ''
       shard_max_files:
         description: 'Layer 3: shard size cap in files (caller 转发 vars.SHARD_MAX_FILES)'
         required: false
         type: string
         default: '25'
+      shard-max-files:
+        description: 'hyphen 过渡变体（与 shard_max_files 等价）'
+        required: false
+        type: string
+        default: ''
       shard_max_count:
         description: 'Layer 3: shard count cap (caller 转发 vars.SHARD_MAX_COUNT)'
         required: false
         type: string
         default: '6'
+      shard-max-count:
+        description: 'hyphen 过渡变体（与 shard_max_count 等价）'
+        required: false
+        type: string
+        default: ''
       shard_timeout_minutes:
         description: 'Layer 1: shard job timeout in minutes (caller 转发 vars.SHARD_TIMEOUT_MINUTES)'
         required: false
         type: string
         default: '45'
+      shard-timeout-minutes:
+        description: 'hyphen 过渡变体（与 shard_timeout_minutes 等价）'
+        required: false
+        type: string
+        default: ''
       shard_max_parallel:
         description: 'Layer 4: matrix concurrency cap (caller 转发 vars.SHARD_MAX_PARALLEL)'
         required: false
         type: string
         default: '3'
+      shard-max-parallel:
+        description: 'hyphen 过渡变体（与 shard_max_parallel 等价）'
+        required: false
+        type: string
+        default: ''
     outputs:
       pr_number:
         description: 'Resolved PR number'
@@ -134,12 +176,12 @@ jobs:
             echo "Resolved PR context from pull_request_target event"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # workflow_dispatch trigger: fetch PR data via API
-            PR_NUMBER="${{ inputs.pr_number }}"
+            PR_NUMBER="${{ inputs.pr_number || inputs['pr-number'] }}"
             echo "Fetching PR #$PR_NUMBER data via API..."
 
             PR_DATA=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")
             BASE_SHA=$(echo "$PR_DATA" | jq -r '.base.sha')
-            HEAD_SHA="${{ inputs.head_sha }}"
+            HEAD_SHA="${{ inputs.head_sha || inputs['head-sha'] }}"
             if [ -z "$HEAD_SHA" ] || [ "$HEAD_SHA" = "null" ]; then
               HEAD_SHA=$(echo "$PR_DATA" | jq -r '.head.sha')
             fi
@@ -188,7 +230,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: hdot123-org/infra-core
-          ref: ${{ inputs.engine_ref }}
+          ref: ${{ inputs.engine_ref || inputs['engine-ref'] }}
           fetch-depth: 1
           path: engine
 
@@ -222,8 +264,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ needs.setup.outputs.pr_number }}
-          MAX_FILES: ${{ inputs.shard_max_files }}
-          MAX_COUNT: ${{ inputs.shard_max_count }}
+          MAX_FILES: ${{ inputs.shard_max_files || inputs['shard-max-files'] }}
+          MAX_COUNT: ${{ inputs.shard_max_count || inputs['shard-max-count'] }}
         run: |
           set -eu
           # Get changed files from PR (with status for deleted-file handling)
@@ -266,10 +308,10 @@ jobs:
       needs.plan-shards.outputs.shards != '[]' &&
       needs.plan-shards.outputs.shards != ''
     runs-on: [self-hosted, pve-linux]
-    timeout-minutes: ${{ fromJSON(inputs.shard_timeout_minutes) }}
+    timeout-minutes: ${{ fromJSON(inputs.shard_timeout_minutes || inputs['shard-timeout-minutes']) }}
     strategy:
       fail-fast: false
-      max-parallel: ${{ fromJSON(inputs.shard_max_parallel) }}
+      max-parallel: ${{ fromJSON(inputs.shard_max_parallel || inputs['shard-max-parallel']) }}
       matrix:
         shard: ${{ fromJSON(needs.plan-shards.outputs.shards) }}
     env:
@@ -307,7 +349,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: hdot123-org/infra-core
-          ref: ${{ inputs.engine_ref }}
+          ref: ${{ inputs.engine_ref || inputs['engine-ref'] }}
           fetch-depth: 1
           path: engine
 
