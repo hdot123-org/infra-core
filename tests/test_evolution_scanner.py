@@ -2303,29 +2303,25 @@ def test_workflow_generates_error_patterns():
 
 
 def test_config_error_patterns_no_dead_command():
-    """INFRA-81: error_patterns entry has no misleading dead command field."""
-    config_path = Path(__file__).parent.parent / ".evolution" / "config.yml"
-    with config_path.open() as f:
-        lines = f.read().splitlines()
+    """INFRA-647：error_patterns inline override 已移除，由 pack 模板原生提供。
 
-    # Find the error_patterns block
-    in_block = False
-    block_lines = []
-    for line in lines:
-        if line.strip().startswith("- name: error_patterns"):
-            in_block = True
-            block_lines.append(line)
-            continue
-        if in_block:
-            if line.startswith("  - ") or (line and not line.startswith(" ")):
-                break
-            block_lines.append(line)
-    block_text = "\n".join(block_lines)
-    assert "name: error_patterns" in block_text
-    assert "output_format: registry_jsonl" in block_text
-    assert "source_file:" in block_text
-    # No active command key (only a comment referencing the CI step)
-    assert "command:" not in block_text
+    曾为 INFRA-81 契约（registry_jsonl 文件模式 + 无死 command 键）；引擎
+    run_audit_tool 补 jsonl stdout 逐行解析分支（#80）后，registry_jsonl
+    inline override 退场（对齐 memory-core m6-harden 同款迁移），本测试改锁
+    新契约：error_patterns 不再有 inline 条目。
+    完整展开契约（pack 模板 jsonl）见 tests/test_evolution_config_contract.py。
+    """
+    import yaml
+
+    config_path = Path(__file__).parent.parent / ".evolution" / "config.yml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    inline_tools = {t["name"]: t for t in config.get("audit_tools", [])}
+    assert "error_patterns" not in inline_tools, (
+        "error_patterns 不得再有 inline audit_tools 条目（pack 模板原生 jsonl 路径）"
+    )
+    # rule_packs 必须声明 memory（error_patterns 的提供方）
+    assert config.get("rule_packs") == [{"pack": "memory"}]
 
 
 # ============================================================================
