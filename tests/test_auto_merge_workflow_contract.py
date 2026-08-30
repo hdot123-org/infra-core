@@ -233,7 +233,9 @@ class TestReusablePipelineTemplateContract:
     def test_dispatch_token_secret_input_required(self) -> None:
         pipeline_data = _load_doc(AUTO_MERGE_PIPELINE_YML)
         secrets_block = pipeline_data[True]["workflow_call"].get("secrets", {})
-        assert "dispatch_token" in secrets_block, "必须声明 dispatch_token secret 输入（M5 R1(3) snake_case 统一）"
+        assert "dispatch_token" in secrets_block, (
+            "必须声明 dispatch_token secret 输入（M5 R1(3) snake_case 统一）"
+        )
         assert secrets_block["dispatch_token"]["required"] is True
 
     def test_job_topology(self) -> None:
