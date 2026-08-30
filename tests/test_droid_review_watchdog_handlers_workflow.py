@@ -2,7 +2,7 @@
 
 锁定 memory-core watchdog thin caller（VAL-GATE-107）所依赖的 reusable workflow
 不变量：
-- workflow_call 触发面：inputs（mode / run-id / run-attempt / head-sha / max-attempt）
+- workflow_call 触发面：inputs（mode / run_id / run_attempt / head_sha / max_attempt，M5 R1(3) snake_case）
 - mode 门控：self-heal-rerun / cancel-on-ci-fail 两 job 各按 inputs.mode 精确选择
 - 本文件不引用具体 workflow 名（事件守卫由 caller 承载，防双份守卫漂移）
 - 503 特征表 / rerun-failed-jobs / attempt 限界 / cancel 过滤逻辑与原内联实现等价
@@ -48,7 +48,7 @@ class TestWorkflowCallSurface:
 
     def test_inputs_declared(self, workflow_call):
         inputs = workflow_call.get("inputs", {})
-        for name in ("mode", "run-id", "run-attempt", "head-sha", "max-attempt"):
+        for name in ("mode", "run_id", "run_attempt", "head_sha", "max_attempt"):
             assert name in inputs, f"workflow_call 缺少 input: {name}"
 
     def test_mode_required_string(self, workflow_call):
@@ -57,14 +57,14 @@ class TestWorkflowCallSurface:
         assert mode["type"] == "string"
 
     def test_run_id_and_attempt_are_numbers(self, workflow_call):
-        assert workflow_call["inputs"]["run-id"]["type"] == "number"
-        assert workflow_call["inputs"]["run-attempt"]["type"] == "number"
-        assert workflow_call["inputs"]["run-id"]["required"] is True
-        assert workflow_call["inputs"]["run-attempt"]["required"] is True
+        assert workflow_call["inputs"]["run_id"]["type"] == "number"
+        assert workflow_call["inputs"]["run_attempt"]["type"] == "number"
+        assert workflow_call["inputs"]["run_id"]["required"] is True
+        assert workflow_call["inputs"]["run_attempt"]["required"] is True
 
     def test_optional_inputs_have_empty_defaults(self, workflow_call):
-        """head-sha / max-attempt 可选且默认空串（脚本内 -z 回退兜底）"""
-        for name in ("head-sha", "max-attempt"):
+        """head_sha / max_attempt 可选且默认空串（脚本内 -z 回退兜底）"""
+        for name in ("head_sha", "max_attempt"):
             inp = workflow_call["inputs"][name]
             assert inp["required"] is False, f"{name} 必须可选"
             assert inp["default"] == "", f"{name} 默认必须为空串"
@@ -136,9 +136,9 @@ class TestSelfHealHandlerBody:
 
     def test_env_wired_from_inputs(self, handlers_data):
         env = _handler_step(handlers_data, "self-heal-rerun", "rerun").get("env", {})
-        assert env["RUN_ID"] == "${{ inputs.run-id }}"
-        assert env["RUN_ATTEMPT"] == "${{ inputs.run-attempt }}"
-        assert env["MAX_ATTEMPT"] == "${{ inputs.max-attempt }}"
+        assert env["RUN_ID"] == "${{ inputs.run_id }}"
+        assert env["RUN_ATTEMPT"] == "${{ inputs.run_attempt }}"
+        assert env["MAX_ATTEMPT"] == "${{ inputs.max_attempt }}"
 
 
 class TestCancelOnCiFailHandlerBody:
@@ -162,7 +162,7 @@ class TestCancelOnCiFailHandlerBody:
 
     def test_env_wired_from_inputs(self, handlers_data):
         env = _handler_step(handlers_data, "cancel-on-ci-fail", "cancel").get("env", {})
-        assert env["HEAD_SHA"] == "${{ inputs.head-sha }}"
+        assert env["HEAD_SHA"] == "${{ inputs.head_sha }}"
 
 
 class TestSelfHostedSafety:

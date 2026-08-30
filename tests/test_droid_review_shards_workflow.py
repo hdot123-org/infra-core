@@ -46,20 +46,20 @@ class TestWorkflowCallSurface:
             "engine_ref",
             "pr_number",
             "head_sha",
-            "shard-max-files",
-            "shard-max-count",
-            "shard-timeout-minutes",
-            "shard-max-parallel",
+            "shard_max_files",
+            "shard_max_count",
+            "shard_timeout_minutes",
+            "shard_max_parallel",
         ):
             assert name in inputs, f"workflow_call 缺少 input: {name}"
 
     def test_input_defaults_match_budget_layers(self, workflow_call):
         """预算层默认值与 VAL-SHARD-011 一致（caller 未转发时兜底）"""
         inputs = workflow_call.get("inputs", {})
-        assert inputs["shard-max-files"]["default"] == "25"
-        assert inputs["shard-max-count"]["default"] == "6"
-        assert inputs["shard-timeout-minutes"]["default"] == "45"
-        assert inputs["shard-max-parallel"]["default"] == "3"
+        assert inputs["shard_max_files"]["default"] == "25"
+        assert inputs["shard_max_count"]["default"] == "6"
+        assert inputs["shard_timeout_minutes"]["default"] == "45"
+        assert inputs["shard_max_parallel"]["default"] == "3"
         assert inputs["engine_ref"]["default"] == "main"
 
     def test_secrets_declared(self, workflow_call):

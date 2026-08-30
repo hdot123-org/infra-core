@@ -34,20 +34,20 @@ on:
         description: 'Handler to run: self-heal-rerun | cancel-on-ci-fail'
         required: true
         type: string
-      run-id:
+      run_id:
         description: '上游 workflow_run.id'
         required: true
         type: number
-      run-attempt:
+      run_attempt:
         description: '上游 workflow_run.run_attempt'
         required: true
         type: number
-      head-sha:
+      head_sha:
         description: '上游 workflow_run.head_sha（cancel-on-ci-fail 用）'
         required: false
         type: string
         default: ''
-      max-attempt:
+      max_attempt:
         description: 'rerun 限界（caller 转发 vars.WATCHDOG_MAX_ATTEMPT；空时脚本回退 3）'
         required: false
         type: string
@@ -68,13 +68,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          RUN_ID: ${{ inputs.run-id }}
-          RUN_ATTEMPT: ${{ inputs.run-attempt }}
-          MAX_ATTEMPT: ${{ inputs.max-attempt }}
+          RUN_ID: ${{ inputs.run_id }}
+          RUN_ATTEMPT: ${{ inputs.run_attempt }}
+          MAX_ATTEMPT: ${{ inputs.max_attempt }}
         run: |
           set -eu
           # max-attempt fallback（变量缺失时使用默认值并打日志）
-          if [ -z "${MAX_ATTEMPT:-}" ]; then MAX_ATTEMPT=3; echo "max-attempt 未设置、使用默认值 3"; fi
+          if [ -z "${MAX_ATTEMPT:-}" ]; then MAX_ATTEMPT=3; echo "max_attempt 未设置、使用默认值 3"; fi
           if [ "$RUN_ATTEMPT" -ge "$MAX_ATTEMPT" ]; then
             echo "Run $RUN_ID already at attempt $RUN_ATTEMPT (>=$MAX_ATTEMPT). Skipping; needs manual attention."
             exit 0
@@ -108,7 +108,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ inputs.head-sha }}
+          HEAD_SHA: ${{ inputs.head_sha }}
         run: |
           set -eu
           echo "CI failed for $HEAD_SHA; cancelling in-progress Droid Auto Review runs..."

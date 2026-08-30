@@ -12,7 +12,7 @@ name: Evolution Heartbeat Reusable
 on:
   workflow_call:
     secrets:
-      dispatch-token:
+      dispatch_token:
         required: true
         description: PAT (hdot123) for issue/label writes and self-heal dispatch
   workflow_dispatch: {}
@@ -34,14 +34,14 @@ jobs:
         run: pip install -e .
       - name: Ensure labels exist
         env:
-          GH_TOKEN: ${{ secrets.dispatch-token }}
+          GH_TOKEN: ${{ secrets.dispatch_token }}
         run: |
           # INFRA-601: 显式仓库上下文，免疫 runner insteadOf 镜像重写
           gh --repo "$GITHUB_REPOSITORY" label create "evolution-heartbeat" --color D93F0B --description "Evolution heartbeat alert" --force || true
       - name: Run heartbeat check
         run: python -m infra_core.engine.evolution_heartbeat
         env:
-          GH_TOKEN: ${{ secrets.dispatch-token }}
+          GH_TOKEN: ${{ secrets.dispatch_token }}
           # P1-A: Prevent module poisoning — blocks automatic insertion of scripts/ into sys.path.
           PYTHONSAFEPATH: '1'
 # 并发治理归属 caller：reusable 本体禁止携带 concurrency（同组名自死锁陷阱，

@@ -233,8 +233,8 @@ class TestReusablePipelineTemplateContract:
     def test_dispatch_token_secret_input_required(self) -> None:
         pipeline_data = _load_doc(AUTO_MERGE_PIPELINE_YML)
         secrets_block = pipeline_data[True]["workflow_call"].get("secrets", {})
-        assert "dispatch-token" in secrets_block, "必须声明 dispatch-token secret 输入"
-        assert secrets_block["dispatch-token"]["required"] is True
+        assert "dispatch_token" in secrets_block, "必须声明 dispatch_token secret 输入（M5 R1(3) snake_case 统一）"
+        assert secrets_block["dispatch_token"]["required"] is True
 
     def test_job_topology(self) -> None:
         jobs = _load_doc(AUTO_MERGE_PIPELINE_YML)["jobs"]
@@ -256,14 +256,14 @@ class TestReusablePipelineTemplateContract:
         )
 
     def test_merge_step_uses_dispatch_token_not_github_token(self) -> None:
-        """合并凭证必须来自 dispatch-token secret 输入（PAT 防递归抑制），绝不回退 GITHUB_TOKEN。"""
+        """合并凭证必须来自 dispatch_token secret 输入（PAT 防递归抑制），绝不回退 GITHUB_TOKEN。"""
         steps = _load_doc(AUTO_MERGE_PIPELINE_YML)["jobs"]["auto-merge"]["steps"]
         merge_step = next(
             s for s in steps if "shared-workflows/auto-merge" in str(s.get("uses", ""))
         )
         env = merge_step.get("env", {})
-        assert env.get("GITHUB_TOKEN") == "${{ secrets.dispatch-token }}", (
-            f"merge 步 GITHUB_TOKEN env 必须经 dispatch-token secret 传入，实际: {env.get('GITHUB_TOKEN')}"
+        assert env.get("GITHUB_TOKEN") == "${{ secrets.dispatch_token }}", (
+            f"merge 步 GITHUB_TOKEN env 必须经 dispatch_token secret 传入，实际: {env.get('GITHUB_TOKEN')}"
         )
 
     def test_permissions_block(self) -> None:

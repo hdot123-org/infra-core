@@ -19,10 +19,10 @@ name: Evolution Scan Reusable
 on:
   workflow_call:
     secrets:
-      dispatch-token:
+      dispatch_token:
         required: true
         description: PAT (hdot123) for issue/label writes and self-heal dispatch
-      linear-api-key:
+      linear_api_key:
         required: false
         description: LINEAR_API_KEY for auto_close_resolved Linear state verification
   workflow_dispatch: {}
@@ -61,7 +61,7 @@ jobs:
           restore-keys: evolution-history-
       - name: Ensure labels exist
         env:
-          GH_TOKEN: ${{ secrets.dispatch-token }}
+          GH_TOKEN: ${{ secrets.dispatch_token }}
         run: |
           # INFRA-601: 显式仓库上下文，免疫 runner insteadOf 镜像重写
           gh --repo "$GITHUB_REPOSITORY" label create "evolution-found" --color FBCA04 --description "Evolution scanner finding" --force || true
@@ -69,11 +69,11 @@ jobs:
       - name: Run evolution scanner
         run: python -m infra_core.engine.evolution_scanner
         env:
-          GH_TOKEN: ${{ secrets.dispatch-token }}
+          GH_TOKEN: ${{ secrets.dispatch_token }}
           # LINEAR_API_KEY enables Linear issue state verification in auto_close_resolved.
           # Without it, the scanner cannot verify Linear terminal state and will
           # fail-closed (block close) for Linear-linked issues to prevent churn.
-          LINEAR_API_KEY: ${{ secrets.linear-api-key }}
+          LINEAR_API_KEY: ${{ secrets.linear_api_key }}
           # P1-A: Prevent module poisoning — blocks automatic insertion of scripts/ into sys.path.
           # The scanner explicitly re-adds its own directory via sys.path.insert.
           PYTHONSAFEPATH: '1'
