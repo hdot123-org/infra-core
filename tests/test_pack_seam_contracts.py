@@ -14,6 +14,7 @@
 
 import json
 import sys
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from infra_core.engine.evolution_adapters import ADAPTER_MAP, TOOL_TO_CATEGORIES
@@ -249,3 +250,128 @@ class TestDailyAuditConsumerSafety:
         # 宿主状态目录零写入（越界写禁令）
         assert not (sandbox_home / ".memory-core").exists()
         assert not (sandbox_home / ".memory").exists()
+
+
+class TestFindingRuleIdContract:
+    """契约：pack 工具经 engine run_audit_tool 执行的 findings 必须携带非空 rule_id。
+
+    m5 shrink 实测债（feature engine-jsonl-and-pack-adapters）：7/7 executed 无
+    crash 但契约不完整——raw 透传 / adapter schema 漂移导致 finding 缺 rule_id
+    （典型：layout_audit 实际输出 {findings: [{kind, path, ...}]}，adapter 只认
+    {violations: [...]}，真实输出静默 []）。每个 pack 工具在最小 fixture 上
+    真实子进程执行，经 run_audit_tool 全链路（含 adapter）断言 rule_id 完整。
+    """
+
+    @staticmethod
+    def _assert_rule_id_complete(result: list[dict[str, Any]] | None, tool_name: str) -> None:
+        assert result is not None, f"{tool_name}: run_audit_tool 返回 tool failure（解析断链）"
+        assert len(result) >= 1, f"{tool_name}: fixture 应保证 ≥1 finding（防空转假绿）"
+        for finding in result:
+            rule_id = finding.get("rule_id")
+            assert rule_id, f"{tool_name}: finding 缺 rule_id: {finding}"
+            assert rule_id != "UNKNOWN", (
+                f"{tool_name}: rule_id 退化为 UNKNOWN（schema 漂移信号）: {finding}"
+            )
+
+    def test_daily_kb_audit_findings_carry_rule_id(self, tmp_path, monkeypatch):
+        sandbox_home = tmp_path / "sandbox-home"
+        sandbox_home.mkdir()
+        project = tmp_path / "proj"
+        (project / "memory" / "system").mkdir(parents=True)
+        (project / "memory" / "system" / "memory.lock").write_text(
+            '[memory]\nmemory_version = "0.0.0"\n', encoding="utf-8"
+        )
+        monkeypatch.setenv("HOME", str(sandbox_home))
+        monkeypatch.delenv("INFRA_MEMORY_CORE_HOME", raising=False)
+        monkeypatch.delenv("INFRA_GLOBAL_KB_ROOT", raising=False)
+        tool = {
+            "name": "daily_kb_audit",
+            "output_format": "json",
+            "command": (
+                f"{sys.executable} -m infra_core.packs.memory.daily_audit"
+                " --repo-root {repo_root} --no-infra --report-only --json"
+            ),
+        }
+        result = run_audit_tool(tool, project)
+        self._assert_rule_id_complete(result, "daily_kb_audit")
+        assert any(f["rule_id"] == "HASH_MISMATCH" for f in result)
+
+    def test_audit_layout_findings_carry_rule_id(self, tmp_path):
+        # memory/system 存在但无 ownership.toml → OWNERSHIP_MISSING（P1）必然产出
+        (tmp_path / "memory" / "system").mkdir(parents=True)
+        tool = {
+            "name": "audit_layout",
+            "output_format": "json",
+            "command": (
+                f"{sys.executable} -m infra_core.packs.memory.layout_audit"
+                " --target {repo_root} --json"
+            ),
+        }
+        result = run_audit_tool(tool, tmp_path)
+        self._assert_rule_id_complete(result, "audit_layout")
+        assert any(f["rule_id"] == "OWNERSHIP_MISSING" for f in result)
+
+    def test_code_hygiene_audit_findings_carry_rule_id(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "buggy.py").write_text(
+            "try:\n    risky()\nexcept Exception:\n    pass\n", encoding="utf-8"
+        )
+        tool = {
+            "name": "code_hygiene_audit",
+            "output_format": "json",
+            "command": (
+                f"{sys.executable} -m infra_core.packs.memory.hygiene"
+                " --repo-root {repo_root} --json"
+            ),
+        }
+        result = run_audit_tool(tool, tmp_path)
+        self._assert_rule_id_complete(result, "code_hygiene_audit")
+        assert any(f["rule_id"] == "SILENT_SWALLOW" for f in result)
+
+    def test_error_patterns_findings_carry_rule_id(self, tmp_path):
+        log_dir = tmp_path / "memory" / "log"
+        log_dir.mkdir(parents=True)
+        entries = []
+        for day in ("2026-08-28", "2026-08-29"):
+            for i in range(3):
+                entries.append(
+                    {
+                        "ts": f"{day}T10:00:0{i}+08:00",
+                        "type": "llm_api_error",
+                        "script": "svc_a",
+                        "project": str(tmp_path),
+                        "msg": "boom alpha",
+                    }
+                )
+        (log_dir / "session-errors.jsonl").write_text(
+            "\n".join(json.dumps(e, ensure_ascii=False) for e in entries) + "\n",
+            encoding="utf-8",
+        )
+        tool = {
+            "name": "error_patterns",
+            "output_format": "jsonl",
+            "command": (
+                f"{sys.executable} -m infra_core.packs.memory.error_patterns"
+                " --repo-root {repo_root} --json"
+            ),
+        }
+        result = run_audit_tool(tool, tmp_path)
+        self._assert_rule_id_complete(result, "error_patterns")
+        assert any(f["rule_id"] == "ERROR_PATTERN_LLM_API_ERROR" for f in result)
+
+    def test_evolution_self_audit_findings_carry_rule_id(self, tmp_path, monkeypatch):
+        sandbox_home = tmp_path / "sandbox-home"
+        sandbox_home.mkdir()
+        monkeypatch.setenv("HOME", str(sandbox_home))
+        tool = {
+            "name": "evolution_self_audit",
+            "output_format": "json",
+            "command": (
+                f"{sys.executable} -m infra_core.engine.evolution_self_audit"
+                " --repo-root {repo_root} --json"
+            ),
+        }
+        result = run_audit_tool(tool, tmp_path)
+        self._assert_rule_id_complete(result, "evolution_self_audit")
+        assert any(f["rule_id"] == "EVOLUTION_FINDINGS_MISSING" for f in result)

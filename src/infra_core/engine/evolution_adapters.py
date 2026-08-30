@@ -281,15 +281,46 @@ def adapt_error_patterns(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return findings
 
 
+# audit_layout 的 P 档严重度 → 归一化 severity 映射。scanner 的 severity_order
+# 为 critical/warning/info，P0/P1/P2 直接透传会被 _valid_severity 降级为 info，
+# 丢失 P0/P1 的优先级信号。
+_LAYOUT_SEVERITY_MAP = {"P0": "critical", "P1": "warning", "P2": "info"}
+
+
 def adapt_audit_layout(raw: dict[str, Any]) -> list[dict[str, str]]:
     """Convert audit layout output to Finding dicts.
 
-    Input format: parsed JSON object {violations: [{type, severity, file, detail}]}
+    Primary input: infra-layout-audit --json 的 AuditResult.to_dict() 实际 schema ——
+    {findings: [{severity: P0|P1|P2, kind, path, message, suggested_bucket}], summary}。
+    rule_id 取 kind（工具侧稳定违规标识）；P 档映射归一化 severity
+    （P0→critical / P1→warning / P2→info）。
+
+    Legacy input（历史 schema，无现存生产者，兜底保留）:
+    parsed JSON object {violations: [{type, severity, file, detail}]}.
     Scanner passes json.loads() result directly, so raw is the parsed dict.
     """
     data = raw if isinstance(raw, dict) else {}
 
-    findings = []
+    findings: list[dict[str, str]] = []
+    entries = data.get("findings")
+    if isinstance(entries, list):
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            severity = str(item.get("severity") or "P2")
+            kind = str(item.get("kind") or "UNKNOWN")
+            message = str(item.get("message") or "")
+            findings.append(
+                {
+                    "rule_id": kind.upper(),
+                    "severity": _LAYOUT_SEVERITY_MAP.get(severity, severity),
+                    "category": "audit_layout",
+                    "description": message,
+                    "location": normalize_location(item.get("path", "")),
+                    "evidence": f"suggested_bucket: {item.get('suggested_bucket', '')}",
+                }
+            )
+        return findings
     for violation in data.get("violations", []):
         findings.append(
             {
