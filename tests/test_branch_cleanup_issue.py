@@ -977,6 +977,51 @@ class TestLinearProjectSync:
             "（GRAPHQL_VALIDATION_FAILED），死名不得复现"
         )
 
+    # ------------------------------------------------------------------
+    # create-path gap 修复（2026-08-30 live 发现：run 33285476683 / INFRA-632）
+    # 创建路径此前读到的 TRACKER_URL 仍为空 → sync_linear_project 恒走
+    # skipped (no tracker issue)，新建 tracker 的 Linear mirror 永远挂不上
+    # project（后续 run 走 reused-silent 不再触发同步，null 无限期滞留）。
+    # ------------------------------------------------------------------
+    def test_create_path_captures_tracker_and_syncs(self, tmp_path: Path):
+        """create path 必须回填新建 tracker URL 再发起 Linear 同步。"""
+        harness = GhMockHarness(
+            tmp_path,
+            env={
+                "LINEAR_API_KEY": "test-key",
+                "LINEAR_PROJECT_ID": "proj-infra-core",
+            },
+            curl_responses=[
+                self._issues_response(
+                    [
+                        (
+                            "lin-new-tracker",
+                            "run https://github.com/example-org/memory/actions/runs/9",
+                        )
+                    ]
+                ),
+                self._mutation_ok_response(),
+            ],
+        )
+
+        exit_code, stdout, _ = harness.run_script(deleted=["brand-new-branch"])
+
+        assert exit_code == 0, stdout
+        assert "issue_action=created" in stdout
+        # 不得再走 no-tracker skip：TRACKER_URL 必须在 create 后回填
+        assert "linear_sync=skipped (no tracker issue)" not in stdout, (
+            "create path 不得以空 TRACKER_URL 跳过同步（INFRA-632 回归）"
+        )
+        # 以新建 issue 的 URL（mock gh create 返回 .../issues/101）发起同步
+        assert (
+            "Attempting to sync Linear project for issue"
+            " https://github.com/hdot123-org/memory/issues/101" in stdout
+        )
+        mutations = harness.curl_calls_matching("issueUpdate")
+        assert len(mutations) == 1, "创建当轮就应完成 Linear project 挂载"
+        assert "lin-new-tracker" in mutations[0]["data"]
+        assert "linear_sync=success" in stdout
+
 
 # ============================================================================
 # 仓库上下文双重防线（2026-08-28，mirror memory PR #1060 / INFRA-597）
