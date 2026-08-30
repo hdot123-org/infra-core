@@ -10521,8 +10521,8 @@ def test_rule_packs_parsing_known_pack(tmp_path):
 
     expected_tool_names = {
         "daily_kb_audit",
-        "layout_audit",
-        "code_hygiene",
+        "audit_layout",
+        "code_hygiene_audit",
         "error_patterns",
         "evolution_self_audit",
     }
@@ -10567,8 +10567,8 @@ def test_rule_packs_with_inline_override(tmp_path):
     names = [t["name"] for t in config["audit_tools"] if isinstance(t, dict)]
     assert "test_tool" in names
     assert "daily_kb_audit" in names
-    assert "layout_audit" in names
-    assert "code_hygiene" in names
+    assert "audit_layout" in names
+    assert "code_hygiene_audit" in names
     assert "error_patterns" in names
     assert "evolution_self_audit" in names
 
@@ -10595,10 +10595,10 @@ def test_rule_packs_enabled_false_disables_tool(tmp_path):
     names = [t["name"] for t in config["audit_tools"] if isinstance(t, dict)]
     assert "enabled_tool" in names
     assert "disabled_tool" not in names  # 被 enabled: false 移除
-    # 验证 5 个 pack 工具都在
+    # 验证 5 个 pack 工具都在（engine 侧键名）
     assert "daily_kb_audit" in names
-    assert "layout_audit" in names
-    assert "code_hygiene" in names
+    assert "audit_layout" in names
+    assert "code_hygiene_audit" in names
     assert "error_patterns" in names
     assert "evolution_self_audit" in names
 
@@ -10621,15 +10621,15 @@ def test_pack_tool_reference_form(tmp_path):
     config["rule_packs"] = [{"pack": "memory"}]
     evolution_scanner.resolve_rule_packs(config)
 
-    # pack_tool: hygiene 在 memory pack 里找不到对应工具（pack 有 code_hygiene 而非 hygiene），
-    # 所以 entry 降级为 standalone（剥离 pack_tool key，保留其余字段）
+    # pack_tool: hygiene 在 memory pack 里找不到对应工具（pack 有 code_hygiene_audit
+    # 而非 hygiene），所以 entry 降级为 standalone（剥离 pack_tool key，保留其余字段）
     # 同时 memory pack 的 5 个工具也保留，共 6 个工具
     assert len(config["audit_tools"]) == 6
     names = {t["name"] for t in config["audit_tools"] if isinstance(t, dict)}
     assert "ref_tool" in names
     assert "daily_kb_audit" in names
-    assert "layout_audit" in names
-    assert "code_hygiene" in names
+    assert "audit_layout" in names
+    assert "code_hygiene_audit" in names
     assert "error_patterns" in names
     assert "evolution_self_audit" in names
     # 验证 ref_tool 已剥离 pack_tool key
@@ -10657,8 +10657,8 @@ def test_resolve_rule_packs_lazy_loads_memory_pack(tmp_path):
     # 验证懒加载触发后 KNOWN_RULE_PACKS['memory'] 含 5 工具
     expected_tool_names = {
         "daily_kb_audit",
-        "layout_audit",
-        "code_hygiene",
+        "audit_layout",
+        "code_hygiene_audit",
         "error_patterns",
         "evolution_self_audit",
     }
@@ -10680,15 +10680,15 @@ def test_resolve_rule_packs_lazy_loads_memory_pack(tmp_path):
 def test_rule_packs_enabled_false_disables_pack_tool(tmp_path):
     """VAL-SEAM-009 行为契约：rule_packs + audit_tools 中 enabled: false 覆盖 pack 工具。
 
-    配置 memory pack 并禁用 code_hygiene，验证：
-    - code_hygiene 被移除（不执行）
+    配置 memory pack 并禁用 code_hygiene_audit，验证：
+    - code_hygiene_audit 被移除（不执行）
     - 其他 4 个 pack 工具保留
     """
     _write_hotfix_config(
         tmp_path,
         "rule_packs:\n  - pack: memory\n"
         "audit_tools:\n"
-        "  - name: code_hygiene\n    pack_tool: code_hygiene\n    enabled: false\n",
+        "  - name: code_hygiene_audit\n    pack_tool: code_hygiene_audit\n    enabled: false\n",
     )
 
     # 重置懒加载状态（确保测试隔离）
@@ -10698,14 +10698,14 @@ def test_rule_packs_enabled_false_disables_pack_tool(tmp_path):
     config = evolution_scanner.load_config(tmp_path)
     evolution_scanner.resolve_rule_packs(config)
 
-    # 验证 code_hygiene 被移除
+    # 验证 code_hygiene_audit 被移除
     tool_names = {t["name"] for t in config["audit_tools"] if isinstance(t, dict)}
-    assert "code_hygiene" not in tool_names, "code_hygiene 应被 enabled: false 禁用"
+    assert "code_hygiene_audit" not in tool_names, "code_hygiene_audit 应被 enabled: false 禁用"
 
     # 验证其他 4 个 pack 工具保留
     expected_remaining = {
         "daily_kb_audit",
-        "layout_audit",
+        "audit_layout",
         "error_patterns",
         "evolution_self_audit",
     }

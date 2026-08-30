@@ -22,9 +22,11 @@ INFRA-571 迁入的 memory 规则包工具以独立 `infra-*` 命令分发，同
 - `--repo-root <path>` / `--target <path>`：目标路径。迁移时已去除
   memory-core 时代的硬编码宿主路径；`infra-layout-audit` 两者互为别名
   （`--repo-root` 为 `--target` 别名）。
-- `--json`：机器可读输出（scanner 适配器按 JSON 消费）。
+- `--json`：机器可读输出（`infra-error-patterns` 输出 JSONL，scanner 按
+  `output_format: jsonl` 逐行消费；其余工具输出单 JSON 对象，按 `json` 消费）。
 - `--report-only`：只读模式（`infra-daily-audit` 在该模式下不写默认
-  审计目录，仅 `--output` 显式给定时落盘）。
+  审计目录，仅 `--output` 显式给定时落盘）。pack 的 `daily_kb_audit`
+  ToolSpec 固定带 `--no-infra --report-only`，保证消费者扫描零宿主写。
 
 ## 用法示例
 
