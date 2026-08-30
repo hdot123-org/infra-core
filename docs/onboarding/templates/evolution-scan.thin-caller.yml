@@ -1,0 +1,29 @@
+# Evolution Scanner thin caller（消费仓模板）
+# 复制后保持文件名 evolution-scan.yml 与 name: Evolution Scan（字节级契约）：
+# heartbeat 引擎按 SCANNER_WORKFLOW = "evolution-scan.yml" 经 gh run list 解析。
+# INFRA-578：cron 分钟位避开 :00/:30 高峰 load-shed 窗口。
+
+name: Evolution Scan
+
+on:
+  schedule:
+    - cron: '13,43 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: evolution-scan
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  scan:
+    uses: hdot123-org/infra-core/.github/workflows/evolution-scan.yml@main
+    permissions:
+      contents: read
+      issues: write
+    secrets:
+      dispatch_token: ${{ secrets.DISPATCH_TOKEN }}
+      linear_api_key: ${{ secrets.LINEAR_API_KEY }}

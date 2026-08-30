@@ -1,0 +1,53 @@
+# Branch Cleanup thin caller（消费仓模板）
+# 复制后保持 name: Branch Cleanup（auto-merge / workflow_run 消费方依赖该名）。
+# 双触发面保留：schedule 全量清扫 + pull_request closed 即时模式。
+
+name: Branch Cleanup
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Cleanup mode: scheduled (sweep all) or immediate (specific branch)'
+        required: true
+        default: 'scheduled'
+        type: choice
+        options:
+          - scheduled
+          - immediate
+      branch:
+        description: 'Branch to clean (required for immediate mode)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: cleanup
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - name: Branch Cleanup
+        uses: hdot123-org/infra-core/actions/branch-cleanup@main
+        with:
+          mode: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || (github.event_name == 'pull_request' && 'immediate' || 'scheduled') }}
+          trigger-branch: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.event.pull_request.head.ref || '' }}
+          # composite action 入参沿用其声明的连字符命名（R1(3) 统一面仅限
+          # workflow_call inputs；composite inputs 以 action.yml 声明为准）
+          dispatch-token: ${{ secrets.DISPATCH_TOKEN }}
+          branch-age-merged-hours: ${{ vars.BRANCH_AGE_MERGED_HOURS }}
+          branch-age-closed-hours: ${{ vars.BRANCH_AGE_CLOSED_HOURS }}
+          branch-age-orphan-hours: ${{ vars.BRANCH_AGE_ORPHAN_HOURS }}
+          linear-api-key: ${{ secrets.LINEAR_API_KEY }}
+          linear-project-id: ${{ vars.LINEAR_PROJECT_ID }}

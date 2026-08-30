@@ -1,0 +1,27 @@
+# Evolution Governance thin caller（消费仓模板）
+# 复制后保持 name: Evolution Governance 与 job 显示名
+# "Block non-owner governance modifications"（branch protection required check
+# 的精确名，字节级契约，NEVER break）。
+# protected-patterns 按消费仓实际治理面调整；默认含 .evolution/、scripts/、
+# evolution workflows 与 CODEOWNERS。
+
+name: Evolution Governance
+
+on:
+  pull_request_target:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  governance:
+    name: Block non-owner governance modifications
+    runs-on: [self-hosted, pve-linux]
+    steps:
+      - name: Governance check
+        uses: hdot123-org/infra-core/actions/governance-check@main
+        with:
+          owner-login: hdot123
+          protected-patterns: '.evolution/**,scripts/**,.github/workflows/evolution-*.yml,.github/CODEOWNERS'
+          github-token: ${{ secrets.GITHUB_TOKEN }}

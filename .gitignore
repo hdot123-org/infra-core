@@ -11,6 +11,9 @@ downloads/
 eggs/
 .eggs/
 lib/
+# 例外：webhook-scripts/lib/ 是 webhook 受管件（posthog.sh / op-mcp.sh），
+# 非构建产物——生产同步真源，必须入库（M5）。
+!webhook-scripts/lib/
 lib64/
 parts/
 sdist/
