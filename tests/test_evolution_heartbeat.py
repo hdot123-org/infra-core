@@ -1159,3 +1159,181 @@ def test_infra588_threshold_covers_cron_drift():
         f"Threshold must cover cron + 1h drift slack, got {threshold}h"
     )
     assert threshold <= cron_hours * 3, f"Threshold too loose for a 2h cron, got {threshold}h"
+
+
+# ---------------------------------------------------------------------------
+# INFRA-639: unknown staleness must never impersonate a severe outage
+# ---------------------------------------------------------------------------
+
+
+def test_infra639_probe_failure_yields_none_age_not_inf():
+    """INFRA-639: gh failure → hours_since_last_run is None, never float('inf').
+
+    2026-08-30 05:54 alert root cause: the probe initialized the age to inf,
+    so a transient gh failure (TLS timeout) was classified as a severe outage
+    and leaked "for infh" into the alert body.
+    """
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result(returncode=1, stderr="TLS handshake timeout")
+        result = evolution_heartbeat.check_scanner_liveness()
+
+    assert result["alive"] is False
+    assert result["hours_since_last_run"] is None
+    assert result["liveness_data_ok"] is False
+    assert result["hours_since_last_run"] != float("inf")
+
+
+def test_infra639_no_runs_yields_none_age():
+    """INFRA-639: zero runs in history → None age with data flag unset, no inf."""
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result("[]")
+        result = evolution_heartbeat.check_scanner_liveness()
+
+    assert result["alive"] is False
+    assert result["hours_since_last_run"] is None
+    assert result["liveness_data_ok"] is False
+
+
+def test_infra639_unparseable_timestamps_yield_none_age():
+    """INFRA-639: runs exist but no parseable createdAt → None age, stale message
+    must not attempt to format the unknown duration."""
+    runs = [{"status": "completed", "conclusion": "success", "createdAt": "not-a-date"}]
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result(json.dumps(runs))
+        result = evolution_heartbeat.check_scanner_liveness()
+
+    assert result["alive"] is False
+    assert result["hours_since_last_run"] is None
+    assert result["liveness_data_ok"] is False
+    assert "unreadable" in result["message"]
+
+
+def test_infra639_unknown_age_accepted_dispatch_suppresses_alert():
+    """INFRA-639: probe failed (age=None) + dispatch ACCEPTED → no alert, exit 0.
+
+    The incident scenario: the probe could not read scanner run history, the
+    age defaulted to inf, inf > 8h classified the outage as severe, and the
+    alert fired despite the self-heal dispatch succeeding (2026-08-30 05:54).
+    Unknown age must suppress exactly like a non-severe stale.
+    """
+    with (
+        patch("evolution_heartbeat.subprocess.run") as mock_run,
+        patch("evolution_heartbeat.check_heartbeat_marker") as mock_hb,
+        patch("evolution_heartbeat.check_history_freshness") as mock_hist,
+        patch("evolution_heartbeat.check_pr_coverage") as mock_cov,
+        patch("evolution_heartbeat.alert_issue_exists") as mock_exists,
+        patch("evolution_heartbeat.create_alert_issue") as mock_create,
+        patch("evolution_heartbeat.write_monitor_heartbeat"),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=True),
+    ):
+        # gh run list fails → liveness probe error path (age None)
+        mock_run.return_value = _gh_result(returncode=1, stderr="TLS handshake timeout")
+        mock_hb.return_value = {"stale": True, "message": "advisory"}
+        mock_hist.return_value = {"stale": True, "message": "advisory"}
+        mock_cov.return_value = {
+            "issues_without_pr": 0,
+            "total_issues": 0,
+            "missing": [],
+        }
+        rc = evolution_heartbeat.main()
+
+    assert rc == 0
+    mock_create.assert_not_called()
+    mock_exists.assert_not_called()
+
+
+def test_infra639_unknown_age_dispatch_rejected_still_alerts_without_inf():
+    """INFRA-639: probe failed + dispatch REJECTED → alert still fires (correct),
+    but the body must say "duration unknown" instead of formatting inf as "infh"."""
+    with (
+        patch("evolution_heartbeat.subprocess.run") as mock_run,
+        patch("evolution_heartbeat.check_heartbeat_marker") as mock_hb,
+        patch("evolution_heartbeat.check_history_freshness") as mock_hist,
+        patch("evolution_heartbeat.check_pr_coverage") as mock_cov,
+        patch("evolution_heartbeat.alert_issue_exists", return_value=False),
+        patch("evolution_heartbeat.create_alert_issue") as mock_create,
+        patch("evolution_heartbeat.write_monitor_heartbeat"),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=False),
+    ):
+        mock_run.return_value = _gh_result(returncode=1, stderr="TLS handshake timeout")
+        mock_hb.return_value = {"stale": True, "message": "advisory"}
+        mock_hist.return_value = {"stale": True, "message": "advisory"}
+        mock_cov.return_value = {
+            "issues_without_pr": 0,
+            "total_issues": 0,
+            "missing": [],
+        }
+        rc = evolution_heartbeat.main()
+
+    assert rc == 1
+    mock_create.assert_called_once()
+    kwargs = mock_create.call_args.kwargs
+    assert kwargs["scanner_stale"] is True
+    assert kwargs["scanner_stale_hours"] is None
+
+    # The rendered body must never contain an inf artifact
+    body = evolution_heartbeat._build_alert_body(
+        scanner_stale=True, issues_without_pr=0, scanner_stale_hours=kwargs["scanner_stale_hours"]
+    )
+    assert "inf" not in body.replace("info", ""), "Body must not leak float('inf') as 'infh'"
+    assert "duration unknown" in body
+    # Roundtrip must still parse so self-heal close keeps working
+    assert evolution_heartbeat.extract_recorded_anomalies(body) == {"scanner_stale"}
+
+
+def test_infra639_severe_classification_requires_measured_age():
+    """INFRA-639: only a *measured* age above the threshold is severe.
+
+    Guards the main() classification contract: None (unknown) must never
+    satisfy the severe condition, while a real 12h measurement still does.
+    """
+    with (
+        patch("evolution_heartbeat.subprocess.run") as mock_run,
+        patch("evolution_heartbeat.check_heartbeat_marker") as mock_hb,
+        patch("evolution_heartbeat.check_history_freshness") as mock_hist,
+        patch("evolution_heartbeat.check_pr_coverage") as mock_cov,
+        patch("evolution_heartbeat.alert_issue_exists", return_value=False),
+        patch("evolution_heartbeat.create_alert_issue") as mock_create,
+        patch("evolution_heartbeat.write_monitor_heartbeat"),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=True),
+    ):
+        # Real measured 12h stale → severe → alert despite accepted dispatch
+        runs = [_recent_run(12.0, "success")]
+        mock_run.return_value = _gh_result(json.dumps(runs))
+        mock_hb.return_value = {"stale": True, "message": "advisory"}
+        mock_hist.return_value = {"stale": True, "message": "advisory"}
+        mock_cov.return_value = {
+            "issues_without_pr": 0,
+            "total_issues": 0,
+            "missing": [],
+        }
+        rc = evolution_heartbeat.main()
+
+    assert rc == 1, "A measured 12h outage is severe and must alert"
+    mock_create.assert_called_once()
+    assert mock_create.call_args.kwargs["scanner_stale_hours"] > 11.0
+
+
+def test_infra639_alive_probe_reports_data_ok():
+    """INFRA-639: successful probe (alive) → liveness_data_ok=True, age numeric."""
+    runs = [_recent_run(0.5, "success")]
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result(json.dumps(runs))
+        result = evolution_heartbeat.check_scanner_liveness()
+
+    assert result["alive"] is True
+    assert result["liveness_data_ok"] is True
+    assert isinstance(result["hours_since_last_run"], float)
+
+
+def test_infra639_measured_stale_reports_data_ok():
+    """INFRA-639: stale but measured (5h) → age numeric and data_ok=True."""
+    runs = [_recent_run(5.0, "success")]
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result(json.dumps(runs))
+        result = evolution_heartbeat.check_scanner_liveness()
+
+    assert result["alive"] is False
+    assert result["liveness_data_ok"] is True
+    assert result["hours_since_last_run"] is not None
+    assert result["hours_since_last_run"] > 4.0

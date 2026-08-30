@@ -243,7 +243,9 @@ def check_scanner_liveness(
 
     Returns a dict with:
       - alive (bool): True if the scanner ran within threshold_hours
-      - hours_since_last_run (float): age of the most recent run (inf if unknown)
+      - hours_since_last_run (float | None): age of the most recent run
+        (None if unknown — INFRA-639: probe failure or zero runs must never
+        be treated as a numeric, let alone severe, outage)
       - last_status (str): conclusion of the most recent run
       - message (str): human-readable status
     """
@@ -271,10 +273,18 @@ def _check_workflow_liveness(workflow: str, threshold_hours: int) -> dict[str, A
 
     Used by both check_scanner_liveness (scanner) and
     check_heartbeat_workflow_liveness (heartbeat reverse-watch, INFRA-588).
+
+    INFRA-639: an unknown age (gh failure / zero runs / no parseable
+    timestamps) is reported as hours_since_last_run=None with
+    liveness_data_ok=False — never float("inf"). `inf` compared numerically
+    against SCANNER_SEVERE_STALENESS_HOURS always wins, which reclassified a
+    mere probe failure as a "severe outage" and forced an alert even after a
+    successful self-heal dispatch (2026-08-30 05:54 alert "for infh").
     """
     result: dict[str, Any] = {
         "alive": True,
-        "hours_since_last_run": float("inf"),
+        "hours_since_last_run": None,
+        "liveness_data_ok": False,
         "last_status": "unknown",
         "message": "",
     }
@@ -315,21 +325,32 @@ def _check_workflow_liveness(workflow: str, threshold_hours: int) -> dict[str, A
             except (ValueError, TypeError):
                 continue
             age_hours = (now - created).total_seconds() / 3600
-            if age_hours < result["hours_since_last_run"]:
+            prev = result["hours_since_last_run"]
+            if prev is None or age_hours < prev:
                 result["hours_since_last_run"] = age_hours
                 result["last_status"] = run.get("conclusion") or run.get("status", "unknown")
             if age_hours <= threshold_hours:
                 result["alive"] = True
+                result["liveness_data_ok"] = True
                 result["message"] = (
                     f"Scanner alive: last run {age_hours:.1f}h ago (status: {result['last_status']})"
                 )
                 return result
 
         result["alive"] = False
-        result["message"] = (
-            f"Scanner stale: last run {result['hours_since_last_run']:.1f}h ago "
-            f"(threshold: {threshold_hours}h, status: {result['last_status']})"
-        )
+        # INFRA-639: if no run had a parseable timestamp the age stays None —
+        # "stale" without a measurable duration; never fabricate a number.
+        result["liveness_data_ok"] = result["hours_since_last_run"] is not None
+        if result["liveness_data_ok"]:
+            result["message"] = (
+                f"Scanner stale: last run {result['hours_since_last_run']:.1f}h ago "
+                f"(threshold: {threshold_hours}h, status: {result['last_status']})"
+            )
+        else:
+            result["message"] = (
+                "Scanner stale: run history unreadable (no parseable run timestamps; "
+                "probe may be failing)"
+            )
     except Exception as exc:
         result["alive"] = False
         result["message"] = f"Scanner liveness check failed: {exc}"
@@ -692,7 +713,13 @@ def _build_alert_body(
                 "(scanner may have stopped; self-heal dispatch failed or outage is severe)"
             )
         else:
-            anomalies.append(f"{_ANOMALY_SCANNER_STALE_MARKER} (scanner may have stopped)")
+            # INFRA-639: unknown duration (probe failed / no run history).
+            # Never format a non-finite float here — "for infh" leaked into the
+            # 2026-08-30 alert and obscured the real trigger.
+            anomalies.append(
+                f"{_ANOMALY_SCANNER_STALE_MARKER} (duration unknown: liveness probe "
+                "returned no readable run history)"
+            )
     if issues_without_pr > 0:
         anomalies.append(f"{issues_without_pr} {_ANOMALY_ISSUES_WITHOUT_PR_MARKER}")
 
@@ -772,8 +799,8 @@ def main(history_path: Path = HISTORY_PATH) -> int:
         # waiting for the next cron slot (peak-minute slots get load-shed).
         dispatch_accepted = trigger_scanner_dispatch()
         if dispatch_accepted:
-            stale_hours = liveness.get("hours_since_last_run", float("inf"))
-            if stale_hours > SCANNER_SEVERE_STALENESS_HOURS:
+            stale_hours = liveness.get("hours_since_last_run")
+            if stale_hours is not None and stale_hours > SCANNER_SEVERE_STALENESS_HOURS:
                 # INFRA-597: severe outage — the dispatch alone is not credible
                 # recovery (repeated dispatch success with no new run implies
                 # systemic failure). Keep the alert for human visibility.
@@ -782,6 +809,8 @@ def main(history_path: Path = HISTORY_PATH) -> int:
                     f"{SCANNER_SEVERE_STALENESS_HOURS}h): alerting despite successful dispatch"
                 )
             else:
+                # INFRA-639: unknown age (stale_hours None) must NOT count as
+                # severe — a failed/empty probe is not evidence of an 8h+ outage.
                 print(
                     "[heartbeat] Self-heal dispatch accepted; suppressing scanner_stale alert "
                     "(transient cron load-shed, INFRA-597)"
@@ -809,8 +838,13 @@ def main(history_path: Path = HISTORY_PATH) -> int:
     # non-severe outage downgrades the scanner_stale anomaly to "handled".
     # compute_current_anomalies consumers (self-heal close, monitor marker) see
     # the post-recovery state, matching what the next tick will observe.
+    # INFRA-639: severity requires a *measured* staleness. hours_since_last_run
+    # is None when the probe failed or found no readable run history; treating
+    # that as inf (> any threshold) forced alerts through the INFRA-597
+    # suppression even after a successful self-heal dispatch (2026-08-30).
+    measured_hours = liveness.get("hours_since_last_run")
     severe_outage = (not liveness["alive"]) and (
-        liveness.get("hours_since_last_run", float("inf")) > SCANNER_SEVERE_STALENESS_HOURS
+        measured_hours is not None and measured_hours > SCANNER_SEVERE_STALENESS_HOURS
     )
     stale_alertable = not liveness["alive"] and (not dispatch_accepted or severe_outage)
 
@@ -835,10 +869,10 @@ def main(history_path: Path = HISTORY_PATH) -> int:
             create_alert_issue(
                 scanner_stale=stale_alertable,
                 issues_without_pr=coverage["issues_without_pr"],
+                # INFRA-639: pass through the measured age only; None keeps the
+                # "duration unknown" wording and can never format as "infh".
                 scanner_stale_hours=(
-                    liveness.get("hours_since_last_run")
-                    if stale_alertable and not liveness["alive"]
-                    else None
+                    measured_hours if stale_alertable and not liveness["alive"] else None
                 ),
             )
         write_monitor_heartbeat(anomaly_count)
