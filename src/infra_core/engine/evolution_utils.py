@@ -1062,10 +1062,12 @@ def auto_close_resolved(
 
     # P0-A: Partial-output protection — skip tick if findings drop significantly
     if history_path is not None and _should_skip_partial_output(findings, history_path):
+        print("[evolution] auto_close_resolved: skipped (P0-A partial-output protection)")
         return
 
     issues = _fetch_open_issues(dedup_label)
     if issues is None:
+        print("[evolution] auto_close_resolved: skipped (failed to fetch open issues)")
         return
 
     # Close issues not in current findings
@@ -1094,6 +1096,14 @@ def auto_close_resolved(
 
     if counters["closed"] > 0:
         print(f"[evolution] Auto-closed {counters['closed']} resolved issues")
+    # VAL-CROSS-006: 恒定输出一行含 auto_close_resolved 标识的摘要，供门禁日志审计
+    # （scheduled tick 日志 grep auto_close_resolved >0 的证据面；此前仅 closed>0 时有输出）
+    print(
+        f"[evolution] auto_close_resolved: examined={len(issues)} open issue(s), "
+        f"closed={counters['closed']}, protected={counters['protected']}, "
+        f"grace_deferred={counters['grace_deferred']}, "
+        f"self_audit_skip={counters['self_audit_skip']}"
+    )
     _log_auto_close_summary(
         counters["protected"], counters["grace_deferred"], counters["self_audit_skip"]
     )
