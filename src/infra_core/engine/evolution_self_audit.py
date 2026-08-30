@@ -1,6 +1,8 @@
 """Evolution self-audit tool: 9 checks for pipeline health."""
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -19,6 +21,11 @@ SUPPRESS_JSON = EVOLUTION_DIR / "suppress.json"
 FINDINGS_OVER_TIME = EVOLUTION_DIR / "findings_over_time.json"
 STALE_THRESHOLD_HOURS = 48
 EVOLUTION_CONFIG = EVOLUTION_DIR / "config.yml"
+# config.yml 审计工具数下限。pack 化（M5 收缩）后满编 memory pack = 5 个生效
+# 工具，仅声明 rule_packs 的配置应判 PASS；旧值 6 是 pack 化前 inline 清单的
+# 历史长度，对 pack 化配置结构性不符（engine 仓自扫曾因此整体禁用
+# evolution_self_audit 工具，INFRA-659 注）。
+MIN_AUDIT_TOOLS = 5
 
 HEARTBEAT_FILE = EVOLUTION_DIR / "heartbeat.json"
 HEARTBEAT_STALE_THRESHOLD_HOURS = 2  # Scanner runs every 30 min; 2h = 4 missed ticks
@@ -361,7 +368,13 @@ def check_repositories_yml() -> list[dict[str, Any]]:
 
 
 def check_config_yml() -> list[dict[str, Any]]:
-    """Check 6: verify .evolution/config.yml has 6 audit tools."""
+    """Check 6: verify .evolution/config.yml has a sufficient effective tool set.
+
+    计数语义与 scanner 一致：裸 audit_tools + rule_packs 展开后的 enabled
+    工具数（经 resolve_rule_packs）。只数裸列表会对 pack 化配置恒报
+    EVOLUTION_CONFIG_INSUFFICIENT（M5 收缩后 memory 仓 findings 恒 1，
+    issue 永久 open，heartbeat 持续告警）。
+    """
     findings: list[dict[str, Any]] = []
 
     if not EVOLUTION_CONFIG.exists():
@@ -395,14 +408,44 @@ def check_config_yml() -> list[dict[str, Any]]:
             return findings
 
         audit_tools = data.get("audit_tools", [])
-        if not isinstance(audit_tools, list) or len(audit_tools) < 6:
+        effective_count = len(audit_tools) if isinstance(audit_tools, list) else 0
+        if data.get("rule_packs"):
+            # Pack 展开：rule_packs 引用的 pack 工具与 scanner 实际生效集一致
+            # （enabled:false 移除、inline 同名覆盖均在 resolve 内完成）。
+            # 提示行重定向进 sink——self-audit 的 stdout 必须保持纯 JSON。
+            sink = io.StringIO()
+            try:
+                try:
+                    from evolution_scanner import resolve_rule_packs
+                except ImportError:  # 安装态入口进程：引擎目录不在 sys.path
+                    from infra_core.engine.evolution_scanner import resolve_rule_packs
+                with contextlib.redirect_stdout(sink):
+                    resolve_rule_packs(data)
+            except SystemExit:
+                # resolve_rule_packs 对畸形 rule_packs（非列表/缺 pack 键/
+                # 未知 pack 名）sys.exit(1)——转为 finding 而非中止整个
+                # self-audit run。
+                findings.append(
+                    {
+                        "rule_id": "EVOLUTION_CONFIG_INVALID",
+                        "severity": "critical",
+                        "description": "config.yml rule_packs failed to resolve",
+                        "location": str(EVOLUTION_CONFIG),
+                        "evidence": sink.getvalue().strip() or "rule_packs resolution exited",
+                        "category": CATEGORY,
+                    }
+                )
+                return findings
+            merged = data.get("audit_tools", [])
+            effective_count = len(merged) if isinstance(merged, list) else 0
+        if effective_count < MIN_AUDIT_TOOLS:
             findings.append(
                 {
                     "rule_id": "EVOLUTION_CONFIG_INSUFFICIENT",
                     "severity": "warning",
                     "description": "config.yml has insufficient audit tools",
                     "location": str(EVOLUTION_CONFIG),
-                    "evidence": f"count={len(audit_tools) if isinstance(audit_tools, list) else 0}, min=6",
+                    "evidence": f"count={effective_count}, min={MIN_AUDIT_TOOLS}",
                     "category": CATEGORY,
                 }
             )
