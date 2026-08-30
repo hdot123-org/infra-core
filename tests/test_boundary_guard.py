@@ -1,13 +1,18 @@
 """Contract tests for scripts/check_boundary.py (INFRA-569)."""
 
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 pytestmark = [pytest.mark.security, pytest.mark.business_policy]
 
+from tests.script_guard_helpers import (
+    guard_cli_json_output,
+    guard_exit_codes,
+    guard_live_repo_clean,
+    guard_script_exists,
+    guard_script_is_python,
+)
 from tests.script_module_helpers import load_script_module
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -16,26 +21,17 @@ SCRIPT_PATH = REPO_ROOT / "scripts" / "check_boundary.py"
 
 def test_script_exists():
     """check_boundary.py must exist in scripts/."""
-    assert SCRIPT_PATH.exists(), f"Script not found: {SCRIPT_PATH}"
+    guard_script_exists(SCRIPT_PATH)
 
 
 def test_script_is_python():
     """check_boundary.py must be valid Python syntax."""
-    with open(SCRIPT_PATH) as f:
-        compile(f.read(), SCRIPT_PATH, "exec")
+    guard_script_is_python(SCRIPT_PATH)
 
 
 def test_live_repo_clean():
     """Live infra-core repo must pass boundary check (exit 0)."""
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT_PATH)],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, (
-        f"Live repo failed boundary check:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
+    guard_live_repo_clean(SCRIPT_PATH, REPO_ROOT, "boundary check")
 
 
 def test_detects_local_path_leak(tmp_path):
@@ -107,23 +103,9 @@ def test_exempt_paths():
 
 def test_cli_json_output():
     """CLI must support --json output mode."""
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT_PATH), "--json"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, f"CLI failed: {result.stderr}"
-    assert "findings" in result.stdout, "JSON output must contain 'findings'"
-    assert "count" in result.stdout, "JSON output must contain 'count'"
+    guard_cli_json_output(SCRIPT_PATH, REPO_ROOT)
 
 
 def test_exit_codes():
     """Exit code contract: 0=clean, 1=findings, 2=error."""
-    # Test clean case (live repo)
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT_PATH)],
-        cwd=REPO_ROOT,
-        capture_output=True,
-    )
-    assert result.returncode in (0, 1), "Exit code must be 0 or 1 for valid run"
+    guard_exit_codes(SCRIPT_PATH, REPO_ROOT)

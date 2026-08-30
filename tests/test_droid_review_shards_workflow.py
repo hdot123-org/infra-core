@@ -17,6 +17,11 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.dual_form_inputs_helpers import (
+    assert_hyphen_variants_declared_optional,
+    assert_no_bare_snake_input_consumption,
+)
+
 pytestmark = [pytest.mark.schema, pytest.mark.business_policy]
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -110,12 +115,9 @@ class TestDualFormInputs:
     )
 
     def test_hyphen_variants_declared_optional(self, workflow_call):
-        inputs = workflow_call.get("inputs", {})
-        for snake in self.DUAL_FORM_SNAKE_KEYS:
-            hyphen = snake.replace("_", "-")
-            assert hyphen in inputs, f"缺少 hyphen 变体 input: {hyphen}"
-            assert inputs[hyphen]["required"] is False, f"{hyphen} 变体必须可选"
-            assert inputs[hyphen]["type"] == "string"
+        assert_hyphen_variants_declared_optional(
+            workflow_call, self.DUAL_FORM_SNAKE_KEYS, value_type="string"
+        )
 
     def test_fusion_expressions_at_every_consumption(self, shards_data):
         raw = WORKFLOW_PATH.read_text(encoding="utf-8")
@@ -139,13 +141,7 @@ class TestDualFormInputs:
 
     def test_no_bare_snake_input_consumption(self, shards_data):
         """声明了 hyphen 变体的 snake 键禁止裸取（防未来新增消费点漏熔合）。"""
-        raw = WORKFLOW_PATH.read_text(encoding="utf-8")
-        for snake in self.DUAL_FORM_SNAKE_KEYS:
-            bare = "${{ inputs.%s }}" % snake
-            assert bare not in raw, (
-                f"inputs.{snake} 存在裸取消费点——必须熔合 inputs.{snake} "
-                f"|| inputs['{snake.replace('_', '-')}']"
-            )
+        assert_no_bare_snake_input_consumption(WORKFLOW_PATH, self.DUAL_FORM_SNAKE_KEYS)
 
 
 class TestShardPipelineStructure:

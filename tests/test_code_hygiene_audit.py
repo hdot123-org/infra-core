@@ -13,7 +13,9 @@ from infra_core.packs.memory.hygiene import (
     RULE_ID,
     SEVERITY,
     SwallowVisitor,
+    _matches_exclude,
     audit_file,
+    compile_exclude_patterns,
     main,
     scan_directory,
     should_skip_dir,
@@ -1220,3 +1222,104 @@ except:
         assert "SILENT_SWALLOW" in rule_ids
         assert "CODE_HYGIENE_UNTRACKED_TODO" in rule_ids
         assert "CODE_HYGIENE_DUPLICATE_BLOCK" in rule_ids
+
+
+class TestExcludePatterns:
+    """--exclude path exclusion (INFRA-670).
+
+    Deployment-snapshot trees (webhook-scripts/cross-dir/, actions/) hold
+    byte-identical production copies of engine/ files; comparing them
+    against the engine evolution line produces CODE_HYGIENE_DUPLICATE_BLOCK
+    false positives. --exclude removes such trees from every check.
+    """
+
+    DUP_FN = (
+        "def process_data(data):\n"
+        "    result = []\n"
+        "    for item in data:\n"
+        "        if item > 0:\n"
+        "            result.append(item * 2)\n"
+        "        elif item < 0:\n"
+        "            result.append(item * -1)\n"
+        "        else:\n"
+        "            result.append(0)\n"
+        "    return result\n"
+    )
+
+    def _setup_tree(self, tmp_path: Path) -> None:
+        """snapshot/ and src/ hold the same-named identical function pair."""
+        snap = tmp_path / "snapshot"
+        snap.mkdir()
+        (snap / "mod.py").write_text(self.DUP_FN + "\ntry:\n    pass\nexcept:\n    pass\n")
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "mod.py").write_text(self.DUP_FN + "\n# TODO fix later\n")
+
+    def test_exclude_suppresses_duplicate_findings(self, tmp_path: Path) -> None:
+        """Excluding one side of the snapshot pair removes the duplicate finding."""
+        self._setup_tree(tmp_path)
+        findings = scan_directory(tmp_path, tmp_path, ["snapshot/**"])
+        assert [f for f in findings if f["rule_id"] == "CODE_HYGIENE_DUPLICATE_BLOCK"] == []
+
+    def test_exclude_suppresses_swallow_and_todo(self, tmp_path: Path) -> None:
+        """Excluded files contribute no findings of any rule (swallow/TODO)."""
+        self._setup_tree(tmp_path)
+        findings = scan_directory(tmp_path, tmp_path, ["snapshot/**"])
+        locations = {f["location"].split("::")[0] for f in findings}
+        assert "snapshot/mod.py" not in locations
+        # src side keeps its own findings
+        assert "src/mod.py" in locations
+
+    def test_exclude_directory_shorthand_prefix(self, tmp_path: Path) -> None:
+        """Directory form without wildcards excludes everything beneath it."""
+        self._setup_tree(tmp_path)
+        findings = scan_directory(tmp_path, tmp_path, ["snapshot"])
+        assert findings == [] or all(not f["location"].startswith("snapshot/") for f in findings)
+
+    def test_exclude_comma_separated_normalization(self) -> None:
+        """Whitespace/empty entries are stripped from comma-separated lists."""
+        assert compile_exclude_patterns([" a/** , ,b/** "]) == ["a/**", "b/**"]
+        assert compile_exclude_patterns(None) == []
+        assert compile_exclude_patterns([]) == []
+
+    def test_matches_exclude_semantics(self) -> None:
+        """Glob and directory-prefix matching semantics."""
+        assert _matches_exclude(
+            "webhook-scripts/cross-dir/anchor_gate.py", ["webhook-scripts/cross-dir/**"]
+        )
+        assert _matches_exclude(
+            "webhook-scripts/cross-dir/anchor_gate.py", ["webhook-scripts/cross-dir"]
+        )
+        assert _matches_exclude("actions/governance-check/governance_check.py", ["actions/**"])
+        assert not _matches_exclude(
+            "src/infra_core/engine/anchor_gate.py", ["webhook-scripts/cross-dir/**"]
+        )
+        # Prefix must respect path boundaries (webhook-scripts/cross must not match)
+        assert not _matches_exclude("webhook-scripts/cross-dir/x.py", ["webhook-scripts/cross"])
+
+    def test_cli_exclude_flag(self, tmp_path: Path) -> None:
+        """--exclude CLI flag threads through to scan results."""
+        self._setup_tree(tmp_path)
+        old_argv = sys.argv
+        import io as _io
+
+        try:
+            sys.argv = [
+                "memory-code-hygiene-audit",
+                "--repo-root",
+                str(tmp_path),
+                "--exclude",
+                "snapshot/**",
+                "--json",
+            ]
+            old_stdout = sys.stdout
+            sys.stdout = _io.StringIO()
+            main()
+            output = sys.stdout.getvalue()
+            sys.stdout = old_stdout
+
+            findings = json.loads(output)
+            locations = {f["location"].split("::")[0] for f in findings}
+            assert "snapshot/mod.py" not in locations
+        finally:
+            sys.argv = old_argv

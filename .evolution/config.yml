@@ -15,6 +15,14 @@
 #     语义支持部分禁用配置再评估解禁，暂维持禁用。
 #   - daily_kb_audit / consistency_check / validate_project：memory 协议栈
 #     工具，属消费仓（memory-core）所有，引擎仓自扫不含——禁用。
+#   - code_hygiene_audit：保留 pack 模板，仅 inline 覆写 --exclude
+#     （INFRA-670）：webhook-scripts/cross-dir/ 是生产部署血统的逐字节
+#     快照（MANIFEST.sh 声明、sync-webhook-scripts.sh 同步，README 明令
+#     禁止用 engine/ 版本替换），actions/ 是 composite action 自包含脚本
+#     （消费仓任意 base 上使用，不能假设 infra-core 包已安装）。二者与
+#     src/infra_core/engine/ 的同名函数是文档化的固有重复，不构成
+#     CODE_HYGIENE_DUPLICATE_BLOCK 信号——从扫描对象中排除，真实源码
+#     重复（如 tests 内部）仍会浮出。
 # 生效工具：audit_layout（布局误报由 suppress.json 精确抑制，INFRA-659）
 # 与 code_hygiene_audit（代码卫生，对象是本仓源码）。
 max_issues_per_tick: 5
@@ -27,6 +35,11 @@ isolation_threshold: 3
 rule_packs:
   - pack: memory
 audit_tools:
+  - name: code_hygiene_audit
+    pack_tool: code_hygiene_audit
+    command: >-
+      infra-hygiene-audit --repo-root {repo_root}
+      --exclude 'webhook-scripts/cross-dir/**,actions/**' --json
   - name: daily_kb_audit
     pack_tool: daily_kb_audit
     enabled: false

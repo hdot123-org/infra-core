@@ -644,6 +644,31 @@ def test_config_self_scan_tools_resolve():
         )
 
 
+def test_config_hygiene_excludes_deployment_snapshots():
+    """INFRA-670: code_hygiene_audit inline 覆写必须携带部署血统目录排除。
+
+    webhook-scripts/cross-dir/（生产部署快照，MANIFEST.sh 声明）与 actions/
+    （composite action 自包含脚本）和 src/infra_core/engine/ 的同名函数是
+    文档化固有重复，恒定触发 CODE_HYGIENE_DUPLICATE_BLOCK 误报
+    （INFRA-670/671/672 及更早 499/500/501/511 一串取消 issue 的根因）。
+    防回归：exclude 模式丢字会让误报洪水复发。
+    """
+    import yaml
+
+    repo_root = Path(__file__).parent.parent
+    config = yaml.safe_load((repo_root / ".evolution" / "config.yml").read_text())
+    evolution_scanner.resolve_rule_packs(config)
+    hygiene = next(t for t in config["audit_tools"] if t["name"] == "code_hygiene_audit")
+    command = hygiene["command"]
+    assert "webhook-scripts/cross-dir/**" in command, (
+        f"code_hygiene_audit 必须排除 cross-dir 部署快照: {command}"
+    )
+    assert "actions/**" in command, (
+        f"code_hygiene_audit 必须排除 actions 自包含脚本: {command}"
+    )
+    assert command.rstrip().endswith("--json"), f"pack 模板 --json 尾缀必须保留: {command}"
+
+
 def test_suppress_json_covers_inherent_layout_findings():
     """INFRA-659: suppress.json 精确抑制引擎仓固有布局 finding（干净 checkout 实测集）。
 

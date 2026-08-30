@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import ast
 import codecs
+import fnmatch
 import io
 import json
 import os
@@ -250,6 +251,37 @@ def should_skip_file(path: Path) -> bool:
 def should_skip_dir(dirpath: Path) -> bool:
     """Check if a directory should be skipped."""
     return dirpath.name in EXCLUDE_DIRS
+
+
+def compile_exclude_patterns(excludes: list[str] | None) -> list[str]:
+    """Normalize --exclude patterns: strip whitespace, drop empties.
+
+    Patterns are fnmatch globs matched against repo-relative posix paths
+    (e.g. ``webhook-scripts/cross-dir/**``). Directory-prefix form without
+    wildcards (``webhook-scripts/cross-dir``) is kept verbatim and handled
+    by ``_matches_exclude`` via prefix matching, so both spellings work.
+    """
+    if not excludes:
+        return []
+    return [p.strip() for p in ",".join(excludes).split(",") if p.strip()]
+
+
+def _matches_exclude(relpath: str, patterns: list[str]) -> bool:
+    """Check whether a repo-relative posix path matches any exclude pattern.
+
+    A pattern matches when either:
+    - ``fnmatch(relpath, pattern)`` is True (glob semantics), or
+    - the pattern contains no wildcard and is a path prefix of relpath
+      (directory shorthand: ``webhook-scripts/cross-dir`` excludes
+      everything beneath it).
+    """
+    for pattern in patterns:
+        if fnmatch.fnmatch(relpath, pattern):
+            return True
+        if not any(ch in pattern for ch in "*?["):
+            if relpath == pattern or relpath.startswith(pattern.rstrip("/") + "/"):
+                return True
+    return False
 
 
 def check_todos(filepath: Path, relpath: str) -> list[dict[str, str]]:
@@ -525,11 +557,25 @@ def audit_file(filepath: Path, repo_root: Path) -> list[dict[str, str]]:
         return []
 
 
-def scan_directory(target: Path, repo_root: Path) -> list[dict[str, str]]:
+def scan_directory(
+    target: Path, repo_root: Path, exclude_patterns: list[str] | None = None
+) -> list[dict[str, str]]:
     """Scan a directory recursively for Python files with silent exception swallowing.
 
-    Returns a list of all findings.
+    Args:
+        target: Directory to scan.
+        repo_root: Repository root for relative path computation.
+        exclude_patterns: Optional fnmatch globs (repo-relative posix paths).
+            Excluded files contribute no findings and their functions are
+            excluded from duplicate-pair collection (INFRA-670: deployment
+            snapshot trees such as webhook-scripts/cross-dir/ are byte-identical
+            production copies of engine/ files and must not be compared
+            against the engine evolution line).
+
+    Returns:
+        A list of all findings.
     """
+    excludes = exclude_patterns or []
     all_findings: list[dict[str, str]] = []
     all_funcs: list[FuncInfo] = []
 
@@ -555,6 +601,11 @@ def scan_directory(target: Path, repo_root: Path) -> list[dict[str, str]]:
                 relpath = filepath.relative_to(repo_root).as_posix()
             except ValueError:
                 relpath = filepath.name
+
+            # INFRA-670: user-supplied excludes suppress every check for the
+            # file (swallow / TODO / duplicate participation alike).
+            if excludes and _matches_exclude(relpath, excludes):
+                continue
 
             # Get silent swallow findings
             findings = audit_file(filepath, repo_root)
@@ -606,10 +657,22 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Target directory or file to scan (default: --repo-root)",
     )
+    parser.add_argument(
+        "--exclude",
+        action="append",
+        default=None,
+        help=(
+            "Comma-separated fnmatch glob(s) of repo-relative paths to exclude "
+            "(repeatable). Excluded files produce no findings and do not "
+            "participate in duplicate-pair comparison, e.g. "
+            "--exclude 'webhook-scripts/cross-dir/**,actions/**'"
+        ),
+    )
     args = parser.parse_args(argv)
 
     repo_root = Path(args.repo_root).resolve() if args.repo_root else Path.cwd()
     target_path = Path(args.target).resolve() if args.target else repo_root
+    exclude_patterns = compile_exclude_patterns(args.exclude)
 
     if not target_path.exists():
         print(
@@ -626,6 +689,16 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
+        try:
+            file_relpath = target_path.relative_to(repo_root).as_posix()
+        except ValueError:
+            file_relpath = target_path.name
+        if exclude_patterns and _matches_exclude(file_relpath, exclude_patterns):
+            print(
+                f"[code_hygiene_audit] Info: file excluded by --exclude: {args.target}",
+                file=sys.stderr,
+            )
+            return 0
         findings = audit_file(target_path, repo_root)
         # Also check for TODOs in single-file mode
         try:
@@ -638,7 +711,7 @@ def main(argv: list[str] | None = None) -> int:
         findings.extend(check_duplicates(funcs))
     else:
         # Directory mode
-        findings = scan_directory(target_path, repo_root)
+        findings = scan_directory(target_path, repo_root, exclude_patterns)
 
     # Sort findings by location for consistent output
     findings.sort(key=lambda f: f.get("location", ""))
