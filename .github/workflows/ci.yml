@@ -559,6 +559,7 @@ jobs:
           WEBHOOK_URL: ${{ secrets.N8N_CI_WEBHOOK_URL }}
           N8N_CI_TOKEN: ${{ secrets.N8N_CI_TOKEN }}
           BRANCH: ${{ github.head_ref || github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
         run: |
           PAYLOAD=$(jq -n \
@@ -567,7 +568,8 @@ jobs:
             --arg branch "$BRANCH" \
             --arg sha "${{ github.sha }}" \
             --arg status "${{ needs.ci-ok.result }}" \
-            '{repo:$repo, pr_number:$pr_number, branch:$branch, sha:$sha, status:$status}')
+            --arg run_url "$RUN_URL" \
+            '{repo:$repo, pr_number:$pr_number, branch:$branch, sha:$sha, status:$status, run_url:$run_url}')
 
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             --retry 3 --retry-delay 5 --retry-all-errors \

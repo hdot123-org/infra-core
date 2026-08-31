@@ -182,6 +182,45 @@ class TestAdvisorySemantics:
         )
 
 
+class TestNotifyCiComplete:
+    """notify-ci-complete webhook 通知契约（INFRA-690）。
+
+    INFRA-690 要求 payload 同时携带 CI status 与 run URL：status 供
+    trigger-ci-droid.sh 注入链判定绿红，run_url 供 n8n 下游自动化与
+    人工排查直达 CI 运行页。#137 已落地 job 骨架但 payload 缺 run_url，
+    本契约锁定该字段不可回退。
+    """
+
+    def test_notify_job_needs_ci_ok_and_always(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """通知 job 必须 needs ci-ok 且 always()：CI 红也要通知（下游
+        需要感知失败并触发修复流程），仅限 PR 事件。"""
+        job = ci_jobs["notify-ci-complete"]
+        raw_needs = job.get("needs")
+        needs = {raw_needs} if isinstance(raw_needs, str) else set(raw_needs or [])
+        assert needs == {"ci-ok"}, "notify-ci-complete 必须 needs ci-ok（聚合后通知）"
+        assert job.get("if") == "always() && github.event_name == 'pull_request'"
+
+    def test_payload_includes_status_and_run_url(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """payload 必须同时含 status 与 run_url（INFRA-690 核心要求）。"""
+        script = _job_run_script(ci_jobs, "notify-ci-complete")
+        assert "needs.ci-ok.result" in script, "payload status 必须取自 ci-ok 结果"
+        # run_url 源自 step env（github.run_id），run 脚本经 $RUN_URL 引用
+        job_dump = yaml.safe_dump(ci_jobs["notify-ci-complete"], allow_unicode=True)
+        assert "github.run_id" in job_dump, "payload 缺 run_url 源（github.run_id 未注入 env）"
+        assert "run_url" in script, "payload 缺 run_url 字段"
+        jq_build = "{repo:$repo, pr_number:$pr_number, branch:$branch, sha:$sha, status:$status, run_url:$run_url}"
+        assert jq_build in script, "jq payload 构造缺 run_url 键（字段不可回退）"
+
+    def test_delivery_failure_non_blocking_with_telemetry(
+        self, ci_jobs: dict[str, dict[str, Any]]
+    ) -> None:
+        """通知失败不得阻断（exit 0 + PostHog 事件）：通知是旁路，红 CI
+        不能因 webhook 投递失败而误报为通过。"""
+        script = _job_run_script(ci_jobs, "notify-ci-complete")
+        assert "ci_webhook_send_failed" in script, "投递失败必须上报 PostHog 事件"
+        assert "exit 0" in script, "通知失败必须 exit 0（旁路语义）"
+
+
 class TestRunnerLabels:
     @pytest.mark.parametrize("job", sorted(EXPECTED_JOBS))
     def test_all_jobs_on_self_hosted_runner(
