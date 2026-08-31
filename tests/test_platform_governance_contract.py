@@ -51,8 +51,7 @@ def _gh_api_get(endpoint: str) -> dict:
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f"gh api GET {endpoint} failed (rc={result.returncode}): "
-            f"{result.stderr.strip()[:200]}"
+            f"gh api GET {endpoint} failed (rc={result.returncode}): {result.stderr.strip()[:200]}"
         )
     return json.loads(result.stdout)
 
@@ -111,8 +110,7 @@ class TestSelectedActionsAllowlist:
         # 其他非零返回 = 环境问题，raise 给上层 skip 逻辑
         if result.returncode != 0:
             raise RuntimeError(
-                f"gh api GET selected-actions 异常失败: "
-                f"{result.stderr.strip()[:200]}"
+                f"gh api GET selected-actions 异常失败: {result.stderr.strip()[:200]}"
             )
 
         data = json.loads(result.stdout)
@@ -143,8 +141,7 @@ class TestForkPRApprovalPolicy:
         """VAL-M3-003: approval_policy=all_external_contributors."""
         data = _gh_api_get("actions/permissions/fork-pr-contributor-approval")
         assert data["approval_policy"] == "all_external_contributors", (
-            f"approval_policy 应为 'all_external_contributors', "
-            f"实际 '{data['approval_policy']}'"
+            f"approval_policy 应为 'all_external_contributors', 实际 '{data['approval_policy']}'"
         )
 
 
