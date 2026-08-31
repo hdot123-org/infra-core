@@ -40,6 +40,12 @@ on:
   workflow_dispatch: {}
 
 
+# F4/INFRA-688: 显式最小权限基线——scan job 已带 job 级声明；顶层基线兜底
+# 未来新增 job 忘记声明时回落到只读（而非仓库默认权限）。
+permissions:
+  contents: read
+
+
 jobs:
   scan:
     runs-on: [self-hosted, pve-linux]
