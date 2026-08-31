@@ -37,7 +37,7 @@ runs:
         SHARDS: ${{ inputs.shards }}
         SHARDS_RESULT: ${{ inputs.shards-result }}
       run: |
-        set -eu
+        set -euo pipefail
 
         if [ "$DOCS_ONLY" = "true" ]; then
           echo "docs-only PR — skipping aggregation"
@@ -76,7 +76,7 @@ runs:
         REPOSITORY: ${{ github.repository }}
         COMMIT_ID: ${{ inputs.head-sha }}
       run: |
-        set -eu
+        set -euo pipefail
         # 自包含发布脚本（$GITHUB_ACTION_PATH 解析，禁止相对路径越出 action 目录）；
         # 与 src/infra_core/engine/droid_review/publish_findings.py 字节一致
         # （tests/test_droid_review_aggregate_action.py 锁定）。

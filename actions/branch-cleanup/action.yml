@@ -45,6 +45,7 @@ runs:
     - name: Configure git
       shell: bash
       run: |
+        set -euo pipefail
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
 
@@ -59,6 +60,7 @@ runs:
         BRANCH_AGE_CLOSED_HOURS: ${{ inputs.branch-age-closed-hours }}
         BRANCH_AGE_ORPHAN_HOURS: ${{ inputs.branch-age-orphan-hours }}
       run: |
+        set -euo pipefail
         # Per-run scratch dir (INFRA-589): RUNNER_TEMP is isolated per job by
         # GitHub Actions. Fixed /tmp paths previously leaked state across runs
         # AND across repositories on shared self-hosted runners: a later run
@@ -84,8 +86,8 @@ runs:
         fi
 
         # Parse script output and set environment variables
-        DELETED_COUNT=$(grep '^deleted_count=' "$OUTPUT_FILE" | cut -d'=' -f2)
-        PROTECTED_COUNT=$(grep '^protected_count=' "$OUTPUT_FILE" | cut -d'=' -f2)
+        DELETED_COUNT=$(grep '^deleted_count=' "$OUTPUT_FILE" | cut -d'=' -f2 || echo "0")
+        PROTECTED_COUNT=$(grep '^protected_count=' "$OUTPUT_FILE" | cut -d'=' -f2 || echo "0")
 
         echo "deleted_count=${DELETED_COUNT:-0}" >> "$GITHUB_ENV"
         echo "protected_count=${PROTECTED_COUNT:-0}" >> "$GITHUB_ENV"
@@ -112,6 +114,7 @@ runs:
         LINEAR_API_KEY: ${{ inputs.linear-api-key }}
         LINEAR_PROJECT_ID: ${{ inputs.linear-project-id }}
       run: |
+        set -euo pipefail
         RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         RUN_DATE=$(date -u '+%Y-%m-%d %H:%M UTC')
 

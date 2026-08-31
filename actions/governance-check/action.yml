@@ -26,6 +26,7 @@ runs:
         OWNER_LOGIN: ${{ inputs.owner-login }}
         PROTECTED_PATTERNS: ${{ inputs.protected-patterns }}
       run: |
+        set -euo pipefail
         # 拉取 PR 变更文件列表（含 rename 前路径），fail-closed：
         # API 失败即退出非零，绝不静默放行
         ERR_BUF=$(mktemp)

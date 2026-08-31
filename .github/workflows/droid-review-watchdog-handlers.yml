@@ -99,7 +99,7 @@ jobs:
           RUN_ATTEMPT: ${{ inputs.run_attempt || inputs['run-attempt'] }}
           MAX_ATTEMPT: ${{ inputs.max_attempt || inputs['max-attempt'] }}
         run: |
-          set -eu
+          set -euo pipefail
           # max-attempt fallback（变量缺失时使用默认值并打日志）
           if [ -z "${MAX_ATTEMPT:-}" ]; then MAX_ATTEMPT=3; echo "max_attempt 未设置、使用默认值 3"; fi
           if [ "$RUN_ATTEMPT" -ge "$MAX_ATTEMPT" ]; then
@@ -137,7 +137,7 @@ jobs:
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ inputs.head_sha || inputs['head-sha'] }}
         run: |
-          set -eu
+          set -euo pipefail
           echo "CI failed for $HEAD_SHA; cancelling in-progress Droid Auto Review runs..."
           # 列出该 head SHA 上 in_progress/queued 的 Droid Auto Review run 并取消
           RUNS=$(gh api "repos/$REPO/actions/runs?head_sha=$HEAD_SHA&status=in_progress" --paginate --jq '.workflow_runs[] | select(.name == "Droid Auto Review") | .id')

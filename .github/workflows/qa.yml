@@ -40,6 +40,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -78,6 +79,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -102,6 +104,7 @@ jobs:
         env:
           COVERAGE_FILE: ${{ runner.temp }}/cov-${{ github.run_id }}-${{ github.run_attempt }}/.coverage
         run: |
+          set -euo pipefail
           mkdir -p "$(dirname "$COVERAGE_FILE")"
           pytest -q -n 0 \
             --cov=src/infra_core \
@@ -128,6 +131,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -159,6 +163,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -190,6 +195,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -231,6 +237,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -255,6 +262,7 @@ jobs:
         env:
           COVERAGE_FILE: ${{ runner.temp }}/cov-${{ github.run_id }}-${{ github.run_attempt }}-full/.coverage
         run: |
+          set -euo pipefail
           mkdir -p "$(dirname "$COVERAGE_FILE")"
           pytest -q -n 8 --dist loadgroup \
             --cov=src/infra_core \
@@ -299,6 +307,7 @@ jobs:
     steps:
       - name: Check all required QA jobs
         run: |
+          set -euo pipefail
           FAILED=0
 
           echo "cli-e2e: ${{ needs.cli-e2e.result }}"

@@ -42,6 +42,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Create per-run venv (isolation from runner site-packages)
         run: |
+          set -euo pipefail
           python3.12 -m venv "$RUNNER_TEMP/venv"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
       - name: Install package
@@ -50,6 +51,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.dispatch_token || secrets['dispatch-token'] }}
         run: |
+          set -euo pipefail
           # INFRA-601: 显式仓库上下文，免疫 runner insteadOf 镜像重写
           gh --repo "$GITHUB_REPOSITORY" label create "evolution-heartbeat" --color D93F0B --description "Evolution heartbeat alert" --force || true
       - name: Run heartbeat check

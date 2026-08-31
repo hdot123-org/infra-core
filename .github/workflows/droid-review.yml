@@ -64,7 +64,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -eu
+          set -euo pipefail
 
           if [ "${{ github.event_name }}" = "pull_request_target" ]; then
             # pull_request_target trigger: use event context
@@ -119,6 +119,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -147,7 +148,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ needs.setup.outputs.pr_number }}
         run: |
-          set -eu
+          set -euo pipefail
           echo "Detecting whether PR #$PR_NUMBER changes only docs files (*.md)..."
           FILES=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')
           if [ -z "$FILES" ]; then
@@ -174,7 +175,7 @@ jobs:
           MAX_FILES: ${{ vars.SHARD_MAX_FILES || '25' }}
           MAX_COUNT: ${{ vars.SHARD_MAX_COUNT || '6' }}
         run: |
-          set -eu
+          set -euo pipefail
           # Get changed files from PR (with status for deleted-file handling)
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" \
             --paginate --jq '.[] | .filename + "\t" + .status' > changed_files_with_status.txt
@@ -224,6 +225,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -248,6 +250,7 @@ jobs:
 
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -276,7 +279,7 @@ jobs:
           BASE_SHA: ${{ needs.setup.outputs.base_sha }}
           HEAD_SHA: ${{ needs.setup.outputs.head_sha }}
         run: |
-          set -eu
+          set -euo pipefail
 
           # (A) Fix: Use GITHUB_ENV multi-line delimiter for SHARD_FILES.
           # The runner reads the literal value between delimiters — no quote
@@ -316,7 +319,7 @@ jobs:
 
       - name: Install Droid CLI
         run: |
-          set -eu
+          set -euo pipefail
           # 宿主优先（照抄 actionlint host-first 模式，PR #53）：ce-01 五台 pve
           # runner 已预装 /usr/local/bin/droid（Layer 1 离线化）。背景：Factory CLI
           # 下载脚本是 node-00 出口拓扑下最后一条非镜像下载路径——PR #52
@@ -362,6 +365,7 @@ jobs:
         # apiKey 字段仅为 provider 格式占位——内网 Kong 无认证（request-transformer
         # 会注入真实上游 key），且 heredoc 为单引号模式，变量从不展开。
         run: |
+          set -euo pipefail
           mkdir -p ~/.factory
           cat > ~/.factory/settings.json << 'SETTINGS_EOF'
           {
@@ -385,6 +389,7 @@ jobs:
         env:
           FACTORY_API_KEY: ${{ secrets.FACTORY_API_KEY }}
         run: |
+          set -euo pipefail
           echo "Verifying Factory API credentials before review..."
           if [ -z "$FACTORY_API_KEY" ]; then
             echo "::error::FACTORY_API_KEY secret is empty or not configured."
@@ -397,14 +402,14 @@ jobs:
           FACTORY_API_KEY: ${{ secrets.FACTORY_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -eu
+          set -euo pipefail
           chmod +x scripts/droid_review/run_shard.sh
           bash scripts/droid_review/run_shard.sh
 
       - name: Collect debug transcripts
         if: always()
         run: |
-          set -eu
+          set -euo pipefail
           # upload-artifact v4 rejects hidden directories (.factory/).
           # Copy Factory session transcripts into the workspace as .factory/sessions/
           # so the watchdog's quota-sweep grep can find them in the artifact.
@@ -455,6 +460,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -485,7 +491,7 @@ jobs:
           DOCS_ONLY: ${{ needs.plan-shards.outputs.docs_only }}
           SHARDS: ${{ needs.plan-shards.outputs.shards }}
         run: |
-          set -eu
+          set -euo pipefail
 
           if [ "$DOCS_ONLY" = "true" ]; then
             echo "docs-only PR — skipping aggregation"
@@ -522,7 +528,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           COMMIT_ID: ${{ needs.setup.outputs.head_sha }}
         run: |
-          set -eu
+          set -euo pipefail
           python3 scripts/droid_review/publish_findings.py \
             --pattern "findings/*/findings-shard-*.json" \
             --pr-number "$PR_NUMBER" \
