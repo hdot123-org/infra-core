@@ -69,8 +69,9 @@ line-length = 100
 target-version = "py312"
 exclude = [
     "scripts/**/*.sh",
-    # webhook-scripts/cross-dir/*.py 是生产部署血统的逐字节快照（非包代码），
-    # 不参与 ruff lint/format——格式化会破坏与生产同步的 sha256 一致性。
+    # webhook-scripts/** 为 shell 交付面（受管脚本 + MANIFEST），不含 Python 包代码；
+    # INFRA-679 后锚点依赖链部署源收敛到 src/infra_core/engine/（受正常
+    # ruff lint/format 约束），cross-dir/ 逐字节快照副本已随双副本退役删除。
     "webhook-scripts/**",
 ]
 

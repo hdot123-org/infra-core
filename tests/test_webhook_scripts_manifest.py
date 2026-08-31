@@ -5,9 +5,11 @@ webhook 生产同步的真源自本仓（architecture §7：webhook-scripts/MANI
 
 本测试锁定三类不变量：
 1. MANIFEST.sh 声明的每个受管文件在仓内真实存在（防 manifest 漂移）。
-2. CROSS_DIR_MAPPINGS 源路径全部解析到本仓布局（webhook-scripts/cross-dir/），
-   且不再出现 memory-core 式 scripts/ 源路径（VAL-SHRINK-005）。
-3. cross-dir 副本与 memory-core 生产血统保持 sha256 可追溯（血缘注释存在）。
+2. CROSS_DIR_MAPPINGS 源路径全部解析到引擎单源 src/infra_core/engine/
+   （INFRA-679 收敛：不再维护 cross-dir/ 逐字节快照副本，也不允许
+   memory-core 式 scripts/ 源路径或 cross-dir/ 快照复活）。
+3. 引擎单源契约：cross-dir 快照目录不得复活，manifest 血缘注释记录
+   INFRA-679 收敛决策。
 
 生产同步验证（--check 对真实生产目录）不属于单测职责（依赖宿主环境），
 由 mission 验证面（VAL-SHRINK-003/004）与 VAL-HARD-102 沙箱演练覆盖。
@@ -69,7 +71,7 @@ class TestManagedFilesExist:
 
 
 class TestCrossDirMappings:
-    """CROSS_DIR 源路径必须解析到本仓布局（不双 claim、不悬空）。"""
+    """CROSS_DIR 源路径必须解析到引擎单源（不双 claim、不悬空）。"""
 
     def test_cross_dir_sources_exist(self):
         arrays = _load_manifest_arrays()
@@ -78,13 +80,20 @@ class TestCrossDirMappings:
             src, _, _dst = mapping.partition(":")
             assert (REPO_ROOT / src).is_file(), f"CROSS_DIR 源不存在: {src}"
 
-    def test_cross_dir_sources_use_infra_core_layout(self):
-        """源路径必须是本仓 webhook-scripts/ 布局，禁止 memory-core 式 scripts/ 源。"""
+    def test_cross_dir_sources_use_engine_single_source(self):
+        """源路径必须收敛到引擎单源 src/infra_core/engine/（INFRA-679）。
+
+        禁止两类回潮：
+        - memory-core 式 scripts/ 源路径（VAL-SHRINK-005）；
+        - cross-dir/ 逐字节快照副本（INFRA-679 已删除的双副本形态，
+          与 src/infra_core/engine/ 形成 CODE_HYGIENE_DUPLICATE_BLOCK）。
+        """
         arrays = _load_manifest_arrays()
         for mapping in arrays["CROSS"]:
             src = mapping.partition(":")[0]
-            assert src.startswith("webhook-scripts/"), f"非本仓布局源路径: {src}"
+            assert src.startswith("src/infra_core/engine/"), f"非引擎单源源路径: {src}"
             assert not re.match(r"^scripts/", src), f"memory-core 式源路径残留: {src}"
+            assert "cross-dir" not in src, f"快照副本源路径回潮: {src}"
 
     def test_cross_dir_targets_are_flat_names(self):
         """部署目标名是生产目录下的平铺文件名（无子目录）。"""
@@ -102,16 +111,29 @@ class TestCrossDirMappings:
         assert not overlap, f"双 claim 生产文件名: {overlap}"
 
 
-class TestCrossDirLineage:
-    """cross-dir 副本的生产血统声明（M5 迁移快照，非引擎模块）。"""
+class TestEngineSingleSourceConvergence:
+    """INFRA-679 血统收敛契约：cross-dir 快照退役、引擎单源可追溯。"""
+
+    def test_cross_dir_snapshot_directory_stays_retired(self):
+        """webhook-scripts/cross-dir/ 快照目录不得复活（双副本根因）。"""
+        cross_dir = REPO_ROOT / "webhook-scripts" / "cross-dir"
+        assert not cross_dir.exists(), (
+            "webhook-scripts/cross-dir/ 已随 INFRA-679 退役——新增部署源请直接"
+            "登记 src/infra_core/engine/ 引擎单源，不得重建逐字节快照副本"
+        )
 
     def test_lineage_documented_in_manifest(self):
         text = MANIFEST_PATH.read_text(encoding="utf-8")
-        assert "cross-dir" in text
         assert "memory-core" in text, "manifest 应记录 cross-dir 副本的 memory-core 血统"
+        assert "INFRA-679" in text, "manifest 应记录 INFRA-679 单源收敛决策"
 
-    def test_cross_dir_readme_marks_deploy_lineage(self):
-        readme = REPO_ROOT / "webhook-scripts" / "cross-dir" / "README.md"
-        assert readme.is_file(), "cross-dir/README.md 应存在并标记部署血统"
-        content = readme.read_text(encoding="utf-8")
-        assert "sha256" in content
+    def test_engine_sources_are_the_deploy_canonical_modules(self):
+        """部署源必须是 CI/CLI 同源的引擎模块（python -m infra_core.engine.* 消费面）。"""
+        arrays = _load_manifest_arrays()
+        sources = {m.partition(":")[0] for m in arrays["CROSS"]}
+        assert sources == {
+            "src/infra_core/engine/extract_anchor.py",
+            "src/infra_core/engine/evolution_utils.py",
+            "src/infra_core/engine/evolution_adapters.py",
+            "src/infra_core/engine/anchor_gate.py",
+        }, f"CROSS_DIR 源集合漂移: {sorted(sources)}"
