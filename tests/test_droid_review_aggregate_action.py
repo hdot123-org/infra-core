@@ -8,8 +8,10 @@
   2026-08-27 branch-cleanup vars 事故先例；token 由 caller 以 input 传入）
 - artifact 下载 pattern 保持 droid-review-debug- 前缀
 - run 块引用脚本必须在 action 目录内解析（$GITHUB_ACTION_PATH，禁止 ../ 越出）
+- 字节一致副本的 duplicate findings 由 suppress.json 精确抑制且双向契约锁定（INFRA-681）
 """
 
+import json
 import re
 from pathlib import Path
 
@@ -151,6 +153,83 @@ class TestBundledPublishCopy:
         modes = [line.split()[1] for line in result.stdout.splitlines() if line.strip()]
         assert len(modes) == 2, f"git index 应含两份副本，实际: {result.stdout!r}"
         assert modes[0] == modes[1], f"git 文件模式漂移：{modes}"
+
+
+class TestDuplicateSuppressionContract:
+    """字节一致副本的 CODE_HYGIENE_DUPLICATE_BLOCK 抑制契约（INFRA-681）。
+
+    引擎权威副本与 action 自包含分发副本字节一致（TestBundledPublishCopy 锁定），
+    hygiene 审计对每个同名函数产出一条 duplicate finding——这是设计性重复的
+    固有误报，经 .evolution/suppress.json 精确抑制（INFRA-659 先例）。
+
+    本契约双向锁定：
+    - 正向：该文件对实际产出的全部 duplicate finding（两种遍历顺序各一形态，
+      location 经 sanitize_structured_field 归一化）都被 suppress.json 覆盖；
+    - 反向：suppress.json 中该文件对的抑制条目与实际发现一一对应，
+      副本消亡（如未来恢复单源）后残留条目会被测试逼出清理。
+    行号漂移（双侧同步改副本）时哈希形态变化，测试自动要求同步更新抑制条目。
+    """
+
+    RULE_ID = "CODE_HYGIENE_DUPLICATE_BLOCK"
+
+    @staticmethod
+    def _sanitize(text: str) -> str:
+        from infra_core.engine.evolution_adapters import sanitize_structured_field
+
+        return sanitize_structured_field(text)
+
+    def _duplicate_locations(self) -> set[str]:
+        """对该文件对跑 hygiene 重复检测，返回归一化 location 全集。
+
+        location 的 pair 顺序（哪个文件在前）取决于 os.walk 遍历顺序，
+        本地 macOS 与 CI Linux 文件系统顺序不同（INFRA-681 实证：issue
+        为 S-first，本地运行为 A-first）。对正反两种 funcs 顺序各跑一次，
+        覆盖双形态——抑制条目必须同时登记两种顺序。
+        """
+        from infra_core.packs.memory.hygiene import (
+            check_duplicates,
+            extract_functions_for_duplicate_check,
+        )
+
+        funcs = []
+        for path in (ACTION_DIR / "publish_findings.py", ENGINE_PUBLISH):
+            funcs.extend(extract_functions_for_duplicate_check(path, REPO_ROOT))
+
+        locations: set[str] = set()
+        for ordered in (funcs, funcs[::-1]):
+            for f in check_duplicates(ordered):
+                if f["rule_id"] == self.RULE_ID:
+                    locations.add(self._sanitize(f["location"]))
+        return locations
+
+    def _suppressed_locations(self) -> set[str]:
+        suppress = json.loads((REPO_ROOT / ".evolution" / "suppress.json").read_text())
+        return {
+            e["location"]
+            for e in suppress["suppressed"]
+            if e.get("rule_id") == self.RULE_ID
+            and (
+                "publish_findings" in e["location"]
+                or "droid-review-aggre" in e["location"]
+                or "droid_rev" in e["location"]
+            )
+        }
+
+    def test_all_duplicate_findings_suppressed(self):
+        findings = self._duplicate_locations()
+        assert findings, "字节一致副本（TestBundledPublishCopy）必然产出 duplicate findings"
+        unsuppressed = findings - self._suppressed_locations()
+        assert not unsuppressed, (
+            f"duplicate finding 未在 suppress.json 登记（INFRA-681 契约）：{unsuppressed}——"
+            "复制 sanitize 后的 location 作为新条目加入 .evolution/suppress.json"
+        )
+
+    def test_no_stale_suppression_entries(self):
+        stale = self._suppressed_locations() - self._duplicate_locations()
+        assert not stale, (
+            f"suppress.json 含该文件对的失效抑制条目（finding 已不存在）：{stale}——"
+            "副本消亡或行号漂移后必须同步清理/更新抑制条目"
+        )
 
 
 class TestFailClosedSemantics:
