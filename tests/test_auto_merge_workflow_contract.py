@@ -402,3 +402,54 @@ class TestAutoMergeCompositeActionContract:
             if "shared-workflows" in str(step.get("uses", ""))
         ]
         assert not offenders, f"actions/auto-merge 内残留 shared-workflows 引用：{offenders}"
+
+    def test_merge_failure_explicit_exit_1(self) -> None:
+        """VAL-M2-202：gh pr merge 失败路径必须显式退出（禁止静默绿）。
+
+        回归锁定：2026-08-31 F5 加固前，action.yml 第 87-91 行 else 分支仅 echo
+        未退出，导致 merge 失败后脚本继续执行、最终 exit 0 假绿。修复后必须：
+        1) 失败时 re-check PR state（gh pr view --json state）
+        2) 若 state=MERGED（竞态：已被并行腿合并）→ exit 0
+        3) 若 state≠MERGED（真失败）→ exit 1
+        4) 禁止无守卫的 echo-only 路径（防止静默吞错误）
+        """
+        script = self._action_script(self._load_action())
+
+        # 必须包含 gh pr merge 失败后的 state re-check
+        assert "gh pr merge" in script, "必须调用 gh pr merge"
+        assert "gh pr view" in script and "state" in script, (
+            "gh pr merge 失败后必须 re-check PR state（竞态守卫）"
+        )
+
+        # 必须有显式 exit 1（非竞态失败路径）
+        assert "exit 1" in script, "真失败路径必须显式 exit 1"
+
+        # 必须有 MERGED 状态判定（竞态成功降级）
+        assert "MERGED" in script, "必须识别 MERGED 状态（竞态成功降级）"
+
+        # 验证结构：失败分支不能仅 echo 而不退出（禁止静默绿）
+        # 提取 else 分支片段，检查必须包含 exit 或 exit 0（race）
+        lines = script.splitlines()
+        in_merge_else = False
+        else_block_lines = []
+        indent_level = None
+        for line in lines:
+            if "gh pr merge" in line and "then" in line:
+                # 进入 if gh pr merge ... then 结构
+                continue
+            if not in_merge_else and "else" in line and any("gh pr merge" in prev for prev in lines[:lines.index(line)]):
+                # 找到 gh pr merge 的 else 分支
+                in_merge_else = True
+                indent_level = len(line) - len(line.lstrip())
+                continue
+            if in_merge_else:
+                current_indent = len(line) - len(line.lstrip()) if line.strip() else indent_level
+                # else 块结束条件：遇到同级或更浅的非空行（fi 或后续代码）
+                if line.strip() and current_indent <= indent_level and "fi" not in line:
+                    break
+                else_block_lines.append(line)
+
+        else_block = "\n".join(else_block_lines)
+        assert "exit" in else_block or "exit 0" in else_block, (
+            "gh pr merge 失败分支必须有显式 exit（禁止静默 echo-only 路径）"
+        )
