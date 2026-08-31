@@ -20,7 +20,7 @@ jobs:
     runs-on: [self-hosted, pve-linux]
     steps:
       - name: Governance check
-        uses: hdot123-org/infra-core/actions/governance-check@main
+        uses: hdot123-org/infra-core/actions/governance-check@v0.7.2
         with:
           owner-login: hdot123
           protected-patterns: '.evolution/**,scripts/**,.github/workflows/evolution-*.yml,.github/CODEOWNERS'
