@@ -9,10 +9,10 @@
 #   - evolution_self_audit：INFRA-659 时的禁用依据之一（check_config_yml
 #     断言 audit_tools >= 6 与 pack 化配置结构性不符）已被引擎 v0.7.1
 #     （#104：改按 resolve_rule_packs 展开生效数断言，MIN_AUDIT_TOOLS
-#     6→5）消除；但本仓生效工具仅 3（audit_layout / code_hygiene_audit /
-#     evolution_self_audit，另两个 pack 工具的禁用依据仍然成立），启用即
-#     自报 EVOLUTION_CONFIG_INSUFFICIENT（生效 3 < MIN 5）——待引擎 MIN
-#     语义支持部分禁用配置再评估解禁，暂维持禁用。
+#     6→5）消除；但本仓现状生效 2（audit_layout / code_hygiene_audit，
+#     另两个 pack 工具的禁用依据仍然成立），若解禁 self_audit 则为 3，
+#     启用即自报 EVOLUTION_CONFIG_INSUFFICIENT（生效 2 或 3 < MIN 5）——
+#     待引擎 MIN 语义支持部分禁用配置再评估解禁，暂维持禁用。
 #   - daily_kb_audit / consistency_check / validate_project：memory 协议栈
 #     工具，属消费仓（memory-core）所有，引擎仓自扫不含——禁用。
 # 生效工具：audit_layout（布局误报由 suppress.json 精确抑制，INFRA-659）

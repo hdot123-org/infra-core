@@ -135,3 +135,4 @@ schedule/dispatch → release-please 扫描 conventional commits
 - M3：memory 规则包迁入 `packs/memory/`；version_sync 整体迁入 + resign 注入钩子
 - M4：workflow 抽取为 reusable workflows + composite actions，消费仓切 thin caller
 - M5：webhook 脚本同步源迁入
+- M6：引擎仓自扫配置修复（INFRA-659）+ shared-workflows 退役（VAL-HARD-104）+ check_config_yml rule_packs 展开计数（v0.7.1/#104）

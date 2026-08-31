@@ -425,10 +425,12 @@ class TestCheckVersionConsistency:
         violations = check_version_consistency(tmp_path)
         assert len(violations) == 3  # memory.lock, adapter.toml, ownership.toml
 
-    @pytest.mark.skip(reason="M5 migration: memory_core.constants not yet migrated")
+    @pytest.mark.skip(
+        reason="跨仓依赖：依赖 memory_core.constants（memory-core 仓独有符号），属已知覆盖缺口，待引擎 v0.7.2+ 提供跨仓常量桥接后解禁"
+    )
     def test_matching_version(self, tmp_path: Path):
         # Skipped: requires memory_core.constants (CURRENT_MEMORY_VERSION, SYSTEM_DIR)
-        # which will be migrated in M5 shrink phase.
+        # 跨仓依赖（memory-core 仓），infra-core 仓内无法独立覆盖
         pass
 
     def test_mismatched_version(self, tmp_path: Path):
