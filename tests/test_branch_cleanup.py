@@ -2458,3 +2458,43 @@ def test_retirement_list_tracks_infra_674() -> None:
         "infra-674 owner-abandoned branch must be listed for retirement"
     )
     assert "INFRA-674" in content, "the infra-674 entry must carry its INFRA reference"
+
+
+# ============================================================================
+# VAL-BRANCH-040 (INFRA-682): retirement list ships with infra-682 entry
+# ============================================================================
+def test_retirement_list_tracks_infra_682() -> None:
+    """The checked-in retirement list also lists the owner-abandoned
+    factory/infra-681-suppress-action-copy branch so tracking issue
+    INFRA-682 (mirror #126) can drain once the scheduled cleanup deletes
+    the branch.
+
+    Evidence chain:
+    - PR #124 (infra-core) closed unmerged at 2026-08-31T07:16:11Z by
+      the owner (hdot123, no review); GitHub mirror issue #122 closed
+      NOT_PLANNED at the same second; Linear INFRA-681 terminal-absorbed
+      to 已取消 (terminal absorption: mirror closed, no open issue).
+      The suppression work (.evolution/suppress.json 16-entry block +
+      TestDuplicateSuppressionContract tests) was discretionary and
+      abandoned by the owner's close.
+    - No equivalent implementation on main: main's .evolution/suppress.json
+      carries only ROOT_DOCS_DIR/OWNERSHIP_MISSING, no droid-review-aggregate
+      duplicate-block entries — this is NOT a
+      cross-implementation-equivalence case.
+    - Same retirement class as factory/infra-581-rule-packs-docs
+      (VAL-BRANCH-033) and factory/infra-670-hygiene-dup-falsepos
+      (VAL-BRANCH-039): the INFRA-383 merge-tree containment check
+      cannot see "owner closed without merging", so the branch would be
+      protected forever and the INFRA-682 tracking issue would never
+      drain.
+
+    Mirrors VAL-BRANCH-029/031/032/033/037/038/039: the list is the audit
+    artifact, and adding or removing entries requires PR review.
+    """
+    retired = repo_root() / "src" / "infra_core" / "shell" / "branch_cleanup_retired.txt"
+    assert retired.is_file(), "scripts/branch_cleanup_retired.txt must exist"
+    content = retired.read_text()
+    assert "factory/infra-681-suppress-action-copy" in content, (
+        "infra-682 owner-abandoned branch must be listed for retirement"
+    )
+    assert "INFRA-682" in content, "the infra-682 entry must carry its INFRA reference"
