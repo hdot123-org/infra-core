@@ -1013,6 +1013,7 @@ def test_workflow_calls_composite_action():
     F3: SHA-locked — uses value is the 40-char SHA (YAML strips # vTag comment).
     """
     import re
+
     import yaml
 
     workflow_path = Path(__file__).parent.parent / ".github" / "workflows" / "branch-cleanup.yml"
