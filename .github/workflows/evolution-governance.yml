@@ -20,7 +20,7 @@ jobs:
     runs-on: [self-hosted, pve-linux]
     steps:
       - name: Governance check
-        uses: hdot123-org/infra-core/actions/governance-check@9569b191e15b7be4a7d8cf1b3276049a69f181bd # v0.7.2 (PR #125)
+        uses: hdot123-org/infra-core/actions/governance-check@4d9bb3a92e780cd72a4ea1c630d418b30cfd134b # v0.7.2 (PR #138)
         with:
           owner-login: hdot123
           github-token: ${{ secrets.GITHUB_TOKEN }}
