@@ -8,7 +8,11 @@ import pytest
 
 pytestmark = [pytest.mark.security, pytest.mark.business_policy]
 
-from tests.script_module_helpers import load_script_module
+from tests.script_module_helpers import (
+    load_script_module,
+    run_cli_json_contract,
+    run_live_repo_clean_contract,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATH = REPO_ROOT / "scripts" / "check_boundary.py"
@@ -26,16 +30,8 @@ def test_script_is_python():
 
 
 def test_live_repo_clean():
-    """Live infra-core repo must pass boundary check (exit 0)."""
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT_PATH)],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, (
-        f"Live repo failed boundary check:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
+    """Live infra-core repo must pass boundary check (shared contract, INFRA-697)."""
+    run_live_repo_clean_contract(SCRIPT_PATH, REPO_ROOT, "boundary")
 
 
 def test_detects_local_path_leak(tmp_path):
@@ -106,16 +102,8 @@ def test_exempt_paths():
 
 
 def test_cli_json_output():
-    """CLI must support --json output mode."""
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT_PATH), "--json"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, f"CLI failed: {result.stderr}"
-    assert "findings" in result.stdout, "JSON output must contain 'findings'"
-    assert "count" in result.stdout, "JSON output must contain 'count'"
+    """CLI must support --json output mode (shared contract, INFRA-696)."""
+    run_cli_json_contract(SCRIPT_PATH, REPO_ROOT)
 
 
 def test_exit_codes():
