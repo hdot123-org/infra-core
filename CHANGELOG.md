@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.8.0](https://github.com/hdot123-org/infra-core/compare/v0.7.2...v0.8.0) (2026-08-31)
+
+
+### Features
+
+* **ci:** notify-ci-complete payload 补 run_url 字段 (INFRA-690) ([#139](https://github.com/hdot123-org/infra-core/issues/139)) ([cde4139](https://github.com/hdot123-org/infra-core/commit/cde41395ee00c2eadfddf00bc7cbcd2df4e39ae6))
+* **workflow:** F5 bash 容错统一 + PRT 安全面审计 (VAL-M2-201~210) ([#138](https://github.com/hdot123-org/infra-core/issues/138)) ([4d9bb3a](https://github.com/hdot123-org/infra-core/commit/4d9bb3a92e780cd72a4ea1c630d418b30cfd134b))
+* **workflow:** SHA 锁定所有外部 action 引用 (F3) ([#125](https://github.com/hdot123-org/infra-core/issues/125)) ([9569b19](https://github.com/hdot123-org/infra-core/commit/9569b191e15b7be4a7d8cf1b3276049a69f181bd))
+
+
+### Bug Fixes
+
+* add notify-ci-complete job to notify n8n after CI completion ([#137](https://github.com/hdot123-org/infra-core/issues/137)) ([4103a09](https://github.com/hdot123-org/infra-core/commit/4103a09961d81666000b564830d16a456c2b7b9f))
+* **evolution:** 抑制 actions 自包含分发副本的固有重复块误报 (INFRA-691) ([#142](https://github.com/hdot123-org/infra-core/issues/142)) ([7741b4b](https://github.com/hdot123-org/infra-core/commit/7741b4b90f0d92c42e95528530ed462d3dec9dfa))
+* **tests:** 修复 test_sha_references_have_version_comment 静默吞异常（INFRA-686） ([#133](https://github.com/hdot123-org/infra-core/issues/133)) ([821501d](https://github.com/hdot123-org/infra-core/commit/821501d5f85ca394a2d732d182146738585e18a1))
+* **workflow:** F4 显式最小权限声明 — ci/qa 顶层基线 + review 系 job 级 + id-token 移除 (VAL-M2-101/102/103/104/105/106/107) ([#134](https://github.com/hdot123-org/infra-core/issues/134)) ([b52961d](https://github.com/hdot123-org/infra-core/commit/b52961dc5655554ab6c7723812466163ea9f75bf))
+* **workflow:** 补全 4 个 workflow 顶层最小权限基线（INFRA-688） ([#135](https://github.com/hdot123-org/infra-core/issues/135)) ([ae622a1](https://github.com/hdot123-org/infra-core/commit/ae622a12a2225fd7580287268ad3f26c2f69d98b))
+
+
+### Documentation
+
+* F6 文档收尾 — §7 演进路线补 M6、config.yml 注释修正、skip 理由补记 ([#145](https://github.com/hdot123-org/infra-core/issues/145)) ([1f5dc02](https://github.com/hdot123-org/infra-core/commit/1f5dc023910452555dce25e9b4555150fc12cbf0))
+
 ## [0.7.2](https://github.com/hdot123-org/infra-core/compare/v0.7.1...v0.7.2) (2026-08-31)
 
 
