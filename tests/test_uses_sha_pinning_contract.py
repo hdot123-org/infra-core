@@ -6,6 +6,7 @@ and self-repo action references are content-equivalent to origin/main.
 
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -130,8 +131,14 @@ class TestUsesShaPinning:
                     # Check for # comment after uses value
                     if "#" not in line or "v" not in line.split("#")[-1]:
                         missing_comments.append(f"{file_path}:{line_num} uses: {uses_value}")
-            except Exception:
-                pass
+            except OSError as e:
+                # 文件读取失败不静默：输出 stderr 警告保留可观测性，
+                # 该检查本身为 warning 级（最终 skip），失败行不计入结果
+                print(
+                    f"[test_sha_references_have_version_comment] Warning: "
+                    f"Failed to read {file_path}:{line_num}: {e}",
+                    file=sys.stderr,
+                )
 
         # This is a warning-level check, not a hard failure
         # We just want to encourage version comments
