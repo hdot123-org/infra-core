@@ -2465,3 +2465,50 @@ def test_retirement_list_tracks_infra_674() -> None:
         "infra-674 owner-abandoned branch must be listed for retirement"
     )
     assert "INFRA-674" in content, "the infra-674 entry must carry its INFRA reference"
+
+
+# ============================================================================
+# VAL-BRANCH-040 (INFRA-698): retirement list ships with infra-698 entries
+# ============================================================================
+def test_retirement_list_tracks_infra_698() -> None:
+    """The checked-in retirement list also lists the two protected branches
+    flagged by tracking issue INFRA-698 (mirror #149) so the tracker can
+    drain once the scheduled cleanup deletes them.
+
+    Evidence chain (one entry per protected branch):
+    - factory/infra-681-suppress-action-copy: PR #124 (infra-core) closed
+      unmerged at 2026-08-31T07:16Z by the owner (hdot123); the suppress
+      work was superseded by PR #142 (7741b4b, merged 2026-08-31T13:36Z,
+      INFRA-691), whose .evolution/suppress.json ships 18
+      CODE_HYGIENE_DUPLICATE_BLOCK entries covering the publish_findings.py
+      file pair plus the INFRA-659 lock-test update the branch lacked —
+      the INFRA-383 merge-tree containment check cannot see
+      cross-implementation equivalence.
+    - factory/infra-682-retire-suppress-copy: PR #127 (infra-core) closed
+      unmerged at 2026-08-31T08:16Z by the owner after droid-review flagged
+      a P2 (stale scripts/ path in a test assertion message); the branch's
+      retirement work never landed and is re-landed by the INFRA-698 PR
+      with the defect fixed, so its 2 unique commits (1 feat + 1 stale
+      main merge) are the abandoned first attempt — again invisible to the
+      INFRA-383 containment check.
+
+    Mirrors VAL-BRANCH-029/031/032/033/037/038/039: the list is the audit
+    artifact, and adding or removing entries requires PR review.
+
+    Note: unlike VAL-BRANCH-039, this assertion references the actual
+    src/infra_core/shell/ path being tested (the stale scripts/ wording
+    in VAL-BRANCH-029..039 assertion messages is a pre-existing cosmetic
+    artifact of the path migration and is intentionally out of scope
+    here).
+    """
+    retired = repo_root() / "src" / "infra_core" / "shell" / "branch_cleanup_retired.txt"
+    assert retired.is_file(), "src/infra_core/shell/branch_cleanup_retired.txt must exist"
+    content = retired.read_text()
+    for branch in (
+        "factory/infra-681-suppress-action-copy",
+        "factory/infra-682-retire-suppress-copy",
+    ):
+        assert branch in content, (
+            f"infra-698 protected branch {branch} must be listed for retirement"
+        )
+    assert "INFRA-698" in content, "the infra-698 entries must carry their INFRA reference"
