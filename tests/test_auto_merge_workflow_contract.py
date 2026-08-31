@@ -42,10 +42,10 @@ AUTO_MERGE_PIPELINE_YML = REPO_ROOT / ".github/workflows/auto-merge-pipeline.yml
 AUTO_MERGE_CARRIERS = (AUTO_MERGE_YML, AUTO_MERGE_PIPELINE_YML)
 # M6 harden-consolidate-shared-workflows（VAL-HARD-104）：shared-workflows 仓退役
 # （README 重定向 + 归档），merge action 行为等价移植为本仓 actions/auto-merge。
-# 引用走 owner/repo 全路径 + @main（引擎仓内部引用惯例，与消费仓引用
-# auto-merge-pipeline.yml@main 对齐；回滚 = revert 本 PR，main 上的引用一并还原，
-# 归档仓的旧 pin 仍可解析，无第二处 pin 需要同步）。
-AUTO_MERGE_ACTION_REF = "hdot123-org/infra-core/actions/auto-merge@main"
+# 引用走 owner/repo 全路径 + 不可变 tag pin（INFRA-678：@main → @v0.7.2，
+# 防 CI 漂移；升级 = 显式 bump 该常量，回滚 = revert 本 PR，main 上的引用
+# 一并还原，归档仓的旧 pin 仍可解析，无第二处 pin 需要同步）。
+AUTO_MERGE_ACTION_REF = "hdot123-org/infra-core/actions/auto-merge@v0.7.2"
 TRIAGE_SH = REPO_ROOT / "src/infra_core/shell/auto_merge_triage.sh"
 GUARDED_CHECKOUT_WORKFLOWS = ("ci.yml", "qa.yml", "droid-review.yml")
 GUARD_MARKER = 'rm -rf "$GITHUB_WORKSPACE/.git"'
@@ -267,12 +267,12 @@ class TestReusablePipelineTemplateContract:
         """VAL-HARD-104：merge 步引用本仓 actions/auto-merge（shared-workflows 已退役）。"""
         steps = _load_doc(AUTO_MERGE_PIPELINE_YML)["jobs"]["auto-merge"]["steps"]
         merge_step = next(
-            (s for s in steps if str(s.get("uses", "")).endswith("/actions/auto-merge@main")),
+            (s for s in steps if str(s.get("uses", "")).endswith("/actions/auto-merge@v0.7.2")),
             None,
         )
         assert merge_step is not None, "actions/auto-merge merge 步缺失"
         assert merge_step["uses"] == AUTO_MERGE_ACTION_REF, (
-            f"merge 步必须引用本仓 actions/auto-merge@main，实际: {merge_step['uses']}"
+            f"merge 步必须引用本仓 actions/auto-merge@v0.7.2，实际: {merge_step['uses']}"
         )
 
     def test_no_shared_workflows_residual(self) -> None:
@@ -296,7 +296,7 @@ class TestReusablePipelineTemplateContract:
         """合并凭证必须来自 dispatch_token secret 输入（PAT 防递归抑制），绝不回退 GITHUB_TOKEN。"""
         steps = _load_doc(AUTO_MERGE_PIPELINE_YML)["jobs"]["auto-merge"]["steps"]
         merge_step = next(
-            s for s in steps if str(s.get("uses", "")).endswith("/actions/auto-merge@main")
+            s for s in steps if str(s.get("uses", "")).endswith("/actions/auto-merge@v0.7.2")
         )
         env = merge_step.get("env", {})
         assert env.get("GITHUB_TOKEN") == (

@@ -195,9 +195,15 @@ class TestGovernanceActionDefaults:
 
     def test_governance_workflow_uses_shipped_action(self):
         """governance workflow 必须执行 shipped action（VAL-SCAF-006 路径感知判定），
-        不能回退为只查作者不查路径的内联脚本"""
+        不能回退为只查作者不查路径的内联脚本。
+
+        INFRA-678：action 引用 pin 到不可变 tag（v0.7.2），防 CI 漂移；
+        升级 = 显式 bump 该常量。
+        """
         content = _read(".github/workflows/evolution-governance.yml")
-        assert "hdot123-org/infra-core/actions/governance-check@main" in content
+        assert "hdot123-org/infra-core/actions/governance-check@v0.7.2" in content
+        # 不得回退浮动 @main 引用（CI 漂移风险）
+        assert "hdot123-org/infra-core/actions/governance-check@main" not in content
         # 不得残留旧的内联作者检查（只对比作者、无路径感知）
         assert 'PR_AUTHOR="${{ github.event.pull_request.user.login }}"' not in content
 
@@ -742,10 +748,13 @@ class TestAutoMergeTriggerContract:
         GITHUB_TOKEN 必须绑定 DISPATCH_TOKEN：GitHub 递归防护会抑制
         GITHUB_TOKEN 产生的 push 事件，导致 release-please push 触发器断链。
         shared-workflows 已退役归档（M6 harden-consolidate-shared-workflows），
-        引用迁移至本仓 actions/auto-merge@main，shared-workflows 零残留。
+        引用迁移至本仓 actions/auto-merge@v0.7.2（INFRA-678 不可变 tag pin），
+        shared-workflows 零残留。
         """
         content = _read(".github/workflows/auto-merge.yml")
-        assert "hdot123-org/infra-core/actions/auto-merge@main" in content
+        assert "hdot123-org/infra-core/actions/auto-merge@v0.7.2" in content
+        # 不得回退浮动 @main 引用（CI 漂移风险）
+        assert "hdot123-org/infra-core/actions/auto-merge@main" not in content
         # uses: 面零 shared-workflows（注释中的移植溯源文字不算引用）
         assert not re.search(r"uses:.*shared-workflows", content), (
             "merge 步不得引用已退役的 shared-workflows（本仓 actions/auto-merge）"
