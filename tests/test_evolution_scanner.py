@@ -650,6 +650,13 @@ def test_suppress_json_covers_inherent_layout_findings():
     引擎仓 docs/ 为设计文档目录、memory/ 整树 gitignored（.gitignore），
     二者在 CI 干净 checkout 下恒定触发 audit_layout 误报。抑制条目必须精确匹配
     (rule_id, location)，禁用通配——真实违规仍会浮出。
+
+    INFRA-691: 追加抑制 actions/ 自包含分发副本与引擎权威副本的固有重复块
+    （CODE_HYGIENE_DUPLICATE_BLOCK）。composite action 在 caller 仓库运行，
+    无法 import src/，副本必须物理存在且字节一致（TestBundledPublishCopy /
+    TestActionScriptEquivalence 锁定）。location 为 sanitize_structured_field
+    截断+md5 形态，两种 os.walk 遍历顺序（src-first / actions-first）各登记一条，
+    行号漂移防护由 tests/test_suppress_drift_guard.py 守卫。
     """
     repo_root = Path(__file__).parent.parent
     suppressions = evolution_scanner.load_suppressions(repo_root)
@@ -659,6 +666,37 @@ def test_suppress_json_covers_inherent_layout_findings():
         ("ROOT_DOCS_DIR", "docs"),
         ("OWNERSHIP_MISSING", "memory/system/ownership.toml"),
     }
+    # INFRA-691: 8 个 publish_findings 同名函数 pair × 2 遍历顺序 + governance 1 pair × 2
+    dup_block_pairs = {
+        # validate_findings (L26)
+        "actions/droid-review-aggregate/publish_findings.py::L26 <-> src/infra_core/engine/droid_rev.c334ed19",
+        "src/infra_core/engine/droid_review/publish_findings.py::L26 <-> actions/droid-review-aggreg.286a7b8e",
+        # deduplicate_findings (L74)
+        "actions/droid-review-aggregate/publish_findings.py::L74 <-> src/infra_core/engine/droid_rev.45339d82",
+        "src/infra_core/engine/droid_review/publish_findings.py::L74 <-> actions/droid-review-aggreg.5266013d",
+        # group_by_shard (L88)
+        "actions/droid-review-aggregate/publish_findings.py::L88 <-> src/infra_core/engine/droid_rev.f44ed6ac",
+        "src/infra_core/engine/droid_review/publish_findings.py::L88 <-> actions/droid-review-aggreg.3fd811a0",
+        # count_by_severity (L97)
+        "actions/droid-review-aggregate/publish_findings.py::L97 <-> src/infra_core/engine/droid_rev.58cb6392",
+        "src/infra_core/engine/droid_review/publish_findings.py::L97 <-> actions/droid-review-aggreg.c83bbd9a",
+        # load_findings_files (L107)
+        "actions/droid-review-aggregate/publish_findings.py::L107 <-> src/infra_core/engine/droid_re.03afc965",
+        "src/infra_core/engine/droid_review/publish_findings.py::L107 <-> actions/droid-review-aggre.9300ca94",
+        # post_inline_comment (L129)
+        "actions/droid-review-aggregate/publish_findings.py::L129 <-> src/infra_core/engine/droid_re.407ce098",
+        "src/infra_core/engine/droid_review/publish_findings.py::L129 <-> actions/droid-review-aggre.5a892367",
+        # post_summary_comment (L176)
+        "actions/droid-review-aggregate/publish_findings.py::L176 <-> src/infra_core/engine/droid_re.70cbb575",
+        "src/infra_core/engine/droid_review/publish_findings.py::L176 <-> actions/droid-review-aggre.ba9a0b23",
+        # main (L259)
+        "actions/droid-review-aggregate/publish_findings.py::L259 <-> src/infra_core/engine/droid_re.88136774",
+        "src/infra_core/engine/droid_review/publish_findings.py::L259 <-> actions/droid-review-aggre.471b6ca6",
+        # governance _match_any（判定等价契约 TestActionScriptEquivalence 锁定，两文件行号不同）
+        "actions/governance-check/governance_check.py::L35 <-> src/infra_core/governance.py::L42",
+        "src/infra_core/governance.py::L42 <-> actions/governance-check/governance_check.py::L35",
+    }
+    expected |= {("CODE_HYGIENE_DUPLICATE_BLOCK", loc) for loc in dup_block_pairs}
     assert expected == suppressed_keys
 
 
