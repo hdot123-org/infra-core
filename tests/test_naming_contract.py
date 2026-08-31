@@ -199,9 +199,11 @@ class TestGovernanceActionDefaults:
 
         INFRA-678：action 引用 pin 到不可变 tag（v0.7.2），防 CI 漂移；
         升级 = 显式 bump 该常量。
+        F3 SHA 锁定：引用改为 40 位 SHA 格式。
         """
         content = _read(".github/workflows/evolution-governance.yml")
-        assert "hdot123-org/infra-core/actions/governance-check@v0.7.2" in content
+        # F3: SHA-locked format - check for SHA-pinned governance-check reference
+        assert re.search(r"hdot123-org/infra-core/actions/governance-check@[0-9a-f]{40}", content)
         # 不得回退浮动 @main 引用（CI 漂移风险）
         assert "hdot123-org/infra-core/actions/governance-check@main" not in content
         # 不得残留旧的内联作者检查（只对比作者、无路径感知）
@@ -750,9 +752,11 @@ class TestAutoMergeTriggerContract:
         shared-workflows 已退役归档（M6 harden-consolidate-shared-workflows），
         引用迁移至本仓 actions/auto-merge@v0.7.2（INFRA-678 不可变 tag pin），
         shared-workflows 零残留。
+        F3 SHA 锁定：引用改为 40 位 SHA 格式。
         """
         content = _read(".github/workflows/auto-merge.yml")
-        assert "hdot123-org/infra-core/actions/auto-merge@v0.7.2" in content
+        # F3: SHA-locked format - check for SHA-pinned auto-merge reference
+        assert re.search(r"hdot123-org/infra-core/actions/auto-merge@[0-9a-f]{40}", content)
         # 不得回退浮动 @main 引用（CI 漂移风险）
         assert "hdot123-org/infra-core/actions/auto-merge@main" not in content
         # uses: 面零 shared-workflows（注释中的移植溯源文字不算引用）

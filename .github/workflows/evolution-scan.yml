@@ -47,7 +47,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Create per-run venv (isolation from runner site-packages)
         run: |
           python3.12 -m venv "$RUNNER_TEMP/venv"
@@ -64,7 +64,7 @@ jobs:
             echo "✓ registry.jsonl exists"
           fi
       - name: Cache evolution history
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             .evolution/findings_over_time.json

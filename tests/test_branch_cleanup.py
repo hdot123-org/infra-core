@@ -1010,7 +1010,9 @@ def test_workflow_calls_composite_action():
     mode / trigger-branch / dispatch-token to
     hdot123-org/infra-core/actions/branch-cleanup@v0.7.2 (INFRA-678 immutable
     tag pin), mirroring the memory-core caller exactly.
+    F3: SHA-locked — uses value is the 40-char SHA (YAML strips # vTag comment).
     """
+    import re
     import yaml
 
     workflow_path = Path(__file__).parent.parent / ".github" / "workflows" / "branch-cleanup.yml"
@@ -1024,7 +1026,11 @@ def test_workflow_calls_composite_action():
     steps = data["jobs"]["cleanup"]["steps"]
     uses_steps = [s for s in steps if "uses" in s]
     assert len(uses_steps) == 1, "caller must have exactly one action step"
-    assert uses_steps[0]["uses"] == "hdot123-org/infra-core/actions/branch-cleanup@v0.7.2"
+    # F3: SHA-locked — match 40-char hex SHA pattern for branch-cleanup
+    assert re.match(
+        r"hdot123-org/infra-core/actions/branch-cleanup@[0-9a-f]{40}$",
+        uses_steps[0]["uses"],
+    ), f"branch-cleanup uses must be SHA-pinned, got: {uses_steps[0]['uses']}"
 
     with_map = uses_steps[0].get("with", {})
     # Event-based mode dispatch: PR-close → immediate, schedule → scheduled,
