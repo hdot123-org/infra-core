@@ -156,10 +156,8 @@ class TestDefaultWorkflowPermissions:
         """VAL-M3-004: default_workflow_permissions=read, can_approve=false."""
         data = _gh_api_get("actions/permissions/workflow")
         assert data["default_workflow_permissions"] == "read", (
-            f"default_workflow_permissions 应为 'read', "
-            f"实际 '{data['default_workflow_permissions']}'"
+            f"default_workflow_permissions 应为 'read', 实际 '{data['default_workflow_permissions']}'"
         )
         assert data["can_approve_pull_request_reviews"] is False, (
-            f"can_approve_pull_request_reviews 应为 False, "
-            f"实际 {data['can_approve_pull_request_reviews']}"
+            f"can_approve_pull_request_reviews 应为 False, 实际 {data['can_approve_pull_request_reviews']}"
         )
