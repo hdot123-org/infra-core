@@ -2421,3 +2421,40 @@ def test_retirement_list_tracks_infra_640() -> None:
             f"infra-640 superseded branch {branch} must be listed for retirement"
         )
     assert "INFRA-640" in content, "the infra-640 entries must carry their INFRA reference"
+
+
+# ============================================================================
+# VAL-BRANCH-039 (INFRA-674): retirement list ships with infra-674 entry
+# ============================================================================
+def test_retirement_list_tracks_infra_674() -> None:
+    """The checked-in retirement list also lists the owner-abandoned
+    factory/infra-670-hygiene-dup-falsepos branch so tracking issue
+    INFRA-674 (mirror #115) can drain once the scheduled cleanup deletes
+    the branch.
+
+    Evidence chain:
+    - PR #112 (infra-core) closed unmerged at 2026-08-30T22:16Z by the
+      owner (hdot123) after droid-review flagged 2 P3 findings
+      (sys.stdout restore placement in test_code_hygiene_audit.py);
+      the fix work (hygiene --exclude / config exclusions / test dedup)
+      was discretionary and abandoned by the owner's close.
+    - Linear INFRA-670 terminal-absorbed to 已取消 at 22:16Z the same
+      day (GitHub mirror closed, no open issue) — no re-land PR exists
+      and main's hygiene.py has no --exclude/fnmatch support, so this is
+      NOT a cross-implementation-equivalence case.
+    - Same retirement class as factory/infra-581-rule-packs-docs
+      (VAL-BRANCH-033): the INFRA-383 merge-tree containment check
+      cannot see "owner closed without merging", so the branch would be
+      protected forever and the INFRA-674 tracking issue would never
+      drain.
+
+    Mirrors VAL-BRANCH-029/031/032/033/037/038: the list is the audit
+    artifact, and adding or removing entries requires PR review.
+    """
+    retired = repo_root() / "src" / "infra_core" / "shell" / "branch_cleanup_retired.txt"
+    assert retired.is_file(), "scripts/branch_cleanup_retired.txt must exist"
+    content = retired.read_text()
+    assert "factory/infra-670-hygiene-dup-falsepos" in content, (
+        "infra-674 owner-abandoned branch must be listed for retirement"
+    )
+    assert "INFRA-674" in content, "the infra-674 entry must carry its INFRA reference"
