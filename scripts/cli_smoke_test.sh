@@ -7,7 +7,7 @@
 #   0 - all entry points callable
 #   1 - one or more entry points failed
 
-set -e
+set -euo pipefail
 
 FAILED=0
 

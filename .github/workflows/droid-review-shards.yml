@@ -169,7 +169,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -eu
+          set -euo pipefail
 
           if [ "${{ github.event_name }}" = "pull_request_target" ]; then
             # pull_request_target trigger: use event context
@@ -225,6 +225,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 无法恢复被裁剪的工作树。reusable 版探针用 pyproject.toml
           # （两仓及一般消费仓共有；用本仓特有路径做探针会造成消费仓
@@ -251,7 +252,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ needs.setup.outputs.pr_number }}
         run: |
-          set -eu
+          set -euo pipefail
           echo "Detecting whether PR #$PR_NUMBER changes only docs files (*.md)..."
           FILES=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')
           if [ -z "$FILES" ]; then
@@ -278,7 +279,7 @@ jobs:
           MAX_FILES: ${{ inputs.shard_max_files || inputs['shard-max-files'] }}
           MAX_COUNT: ${{ inputs.shard_max_count || inputs['shard-max-count'] }}
         run: |
-          set -eu
+          set -euo pipefail
           # Get changed files from PR (with status for deleted-file handling)
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" \
             --paginate --jq '.[] | .filename + "\t" + .status' > changed_files_with_status.txt
@@ -333,6 +334,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒（探针同 plan-shards：pyproject.toml）
           if [ -e "$GITHUB_WORKSPACE/.git" ]; then
             SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
@@ -371,7 +373,7 @@ jobs:
           BASE_SHA: ${{ needs.setup.outputs.base_sha }}
           HEAD_SHA: ${{ needs.setup.outputs.head_sha }}
         run: |
-          set -eu
+          set -euo pipefail
 
           # (A) Fix: Use GITHUB_ENV multi-line delimiter for SHARD_FILES.
           # The runner reads the literal value between delimiters — no quote
@@ -411,7 +413,7 @@ jobs:
 
       - name: Install Droid CLI
         run: |
-          set -eu
+          set -euo pipefail
           # 宿主优先（照抄 actionlint host-first 模式，PR #53）：ce-01 五台 pve
           # runner 已预装 /usr/local/bin/droid（Layer 1 离线化）。背景：Factory CLI
           # 下载脚本是 node-00 出口拓扑下最后一条非镜像下载路径——PR #52
@@ -457,6 +459,7 @@ jobs:
         # apiKey 字段仅为 provider 格式占位——内网 Kong 无认证（request-transformer
         # 会注入真实上游 key），且 heredoc 为单引号模式，变量从不展开。
         run: |
+          set -euo pipefail
           mkdir -p ~/.factory
           cat > ~/.factory/settings.json << 'SETTINGS_EOF'
           {
@@ -480,6 +483,7 @@ jobs:
         env:
           FACTORY_API_KEY: ${{ secrets.FACTORY_API_KEY }}
         run: |
+          set -euo pipefail
           echo "Verifying Factory API credentials before review..."
           if [ -z "$FACTORY_API_KEY" ]; then
             echo "::error::FACTORY_API_KEY secret is empty or not configured."
@@ -492,7 +496,7 @@ jobs:
           FACTORY_API_KEY: ${{ secrets.FACTORY_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -eu
+          set -euo pipefail
           # 引擎副本（engine checkout）；CWD 保持消费仓 BASE 工作区：
           # run_shard.sh 从 CWD 读取 .github/review/shard-review-prompt.md、
           # head-src/ diff 上下文，并把 findings 写到工作区根目录。
@@ -502,7 +506,7 @@ jobs:
       - name: Collect debug transcripts
         if: always()
         run: |
-          set -eu
+          set -euo pipefail
           # upload-artifact v4 rejects hidden directories (.factory/).
           # Copy Factory session transcripts into the workspace as .factory/sessions/
           # so the watchdog's quota-sweep grep can find them in the artifact.

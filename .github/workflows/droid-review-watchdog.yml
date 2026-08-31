@@ -69,7 +69,7 @@ jobs:
           # 脚本内 -z 回退保留为双保险（R1(2) 存在性校验只拦无兜底引用）
           MAX_ATTEMPT: ${{ vars.WATCHDOG_MAX_ATTEMPT || '3' }}
         run: |
-          set -eu
+          set -euo pipefail
           # repo variable fallback（变量缺失时使用默认值并打日志）
           if [ -z "${MAX_ATTEMPT:-}" ]; then MAX_ATTEMPT=3; echo "变量 WATCHDOG_MAX_ATTEMPT 未设置、使用默认值 3"; fi
           if [ "$RUN_ATTEMPT" -ge "$MAX_ATTEMPT" ]; then
@@ -111,7 +111,7 @@ jobs:
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          set -eu
+          set -euo pipefail
           echo "CI failed for $HEAD_SHA; cancelling in-progress Droid Auto Review runs..."
           # 列出该 head SHA 上 in_progress/queued 的 Droid Auto Review run 并取消
           RUNS=$(gh api "repos/$REPO/actions/runs?head_sha=$HEAD_SHA&status=in_progress" --paginate --jq '.workflow_runs[] | select(.name == "Droid Auto Review") | .id')
@@ -131,6 +131,11 @@ jobs:
     # 职责 3：BYOK 429 配额耗尽自愈（2026-08-19 PR #850 实证，见文件头注释）。
     # 只在 schedule 触发时运行，避免 workflow_run 事件误入（quota 耗尽时立即
     # rerun 无意义，必须等配额恢复窗口）。
+    #
+    # [M4 待恢复] 当前触发器已禁用为 workflow_dispatch-only（M2 HOTFIX），
+    # 本 job 处于不可达状态（if: schedule 永不为真）。M4 恢复 schedule 触发器
+    # 时本 job 自动生效。保留此处是为了不破坏 test_droid_review_watchdog_quota_sweep.py
+    # 的契约断言（quota-sweep job 必须存在 + if 条件保留）。
     if: github.event_name == 'schedule'
     runs-on: [self-hosted, pve-linux]
     timeout-minutes: 10
@@ -143,7 +148,7 @@ jobs:
           QUOTA_RECOVERY_WINDOW_SECONDS: ${{ vars.QUOTA_RECOVERY_WINDOW_SECONDS || '1800' }}
           WATCHDOG_MAX_ATTEMPT: ${{ vars.WATCHDOG_MAX_ATTEMPT || '3' }}
         run: |
-          set -eu
+          set -euo pipefail
           # repo variable fallback（变量缺失时使用默认值并打日志）
           if [ -z "${QUOTA_SCAN_WINDOW_HOURS:-}" ]; then QUOTA_SCAN_WINDOW_HOURS=6; echo "变量 QUOTA_SCAN_WINDOW_HOURS 未设置、使用默认值 6"; fi
           if [ -z "${QUOTA_RECOVERY_WINDOW_SECONDS:-}" ]; then QUOTA_RECOVERY_WINDOW_SECONDS=1800; echo "变量 QUOTA_RECOVERY_WINDOW_SECONDS 未设置、使用默认值 1800"; fi
@@ -174,7 +179,7 @@ jobs:
             # 已 rerun 过一次且仍失败的 run，等待更长（下个 sweep 周期）
             # 429 特征检测：真实报错只在 debug artifact 的 session transcript 里，
             # job log 只有无差别的 "exited with code 1"
-            ARTIFACT_NAME=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" --jq '.artifacts[] | select(.name | startswith("droid-review-debug-")) | .name' | head -1)
+            ARTIFACT_NAME=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" --jq '.artifacts[] | select(.name | startswith("droid-review-debug-")) | .name' | head -1 || echo "")
             if [ -z "$ARTIFACT_NAME" ]; then
               echo "Run $RUN_ID has no debug artifact. Cannot classify; skipping."
               continue

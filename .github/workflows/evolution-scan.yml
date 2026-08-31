@@ -56,6 +56,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Create per-run venv (isolation from runner site-packages)
         run: |
+          set -euo pipefail
           python3.12 -m venv "$RUNNER_TEMP/venv"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
       - name: Install package
@@ -64,6 +65,7 @@ jobs:
         run: infra-error-patterns --all-projects
       - name: Validate registry.jsonl exists
         run: |
+          set -euo pipefail
           if [ ! -f "memory/kb/patterns/registry.jsonl" ]; then
             echo "::warning::memory/kb/patterns/registry.jsonl not found - error_patterns adapter will have no input"
           else
@@ -81,6 +83,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.dispatch_token || secrets['dispatch-token'] }}
         run: |
+          set -euo pipefail
           # INFRA-601: 显式仓库上下文，免疫 runner insteadOf 镜像重写
           gh --repo "$GITHUB_REPOSITORY" label create "evolution-found" --color FBCA04 --description "Evolution scanner finding" --force || true
           gh --repo "$GITHUB_REPOSITORY" label create "evolution-isolated" --color B60205 --description "Stuck 3+ ticks" --force || true

@@ -24,6 +24,7 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
         REPO: ${{ github.repository }}
       run: |
+        set -euo pipefail
         echo "=== Auto-merge check for PR #$PR_NUMBER on $REPO ==="
 
         # Get PR info
@@ -87,5 +88,14 @@ runs:
         if gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch 2>&1; then
           echo "PR #$PR_NUMBER merged successfully."
         else
-          echo "Merge command failed (may need branch protection bypass or PR review)."
+          # Merge failed — check if it's a race condition (PR already merged)
+          echo "Merge command failed. Checking PR state..."
+          CURRENT_STATE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+          if [ "$CURRENT_STATE" = "MERGED" ]; then
+            echo "PR already merged (race condition). Treating as success."
+            exit 0
+          else
+            echo "PR state is $CURRENT_STATE. Merge failed for non-race reason."
+            exit 1
+          fi
         fi

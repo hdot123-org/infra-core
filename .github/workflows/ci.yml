@@ -50,6 +50,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -70,6 +71,7 @@ jobs:
 
       - name: "Run tests (parallel: 8 workers, loadgroup for shared-state safety) + coverage"
         run: |
+          set -euo pipefail
           pytest -q -n 8 --dist loadgroup \
             --cov=src/infra_core \
             --cov-report=xml \
@@ -94,6 +96,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -114,12 +117,14 @@ jobs:
 
       - name: Run ruff
         run: |
+          set -euo pipefail
           ruff check .
           ruff format --check .
 
       - name: Detect host shellcheck (Layer 1)
         shell: bash
         run: |
+          set -euo pipefail
           # Layer 1 宿主优先（与 Run actionlint #53 模式同构，清单见 runner-tools.toml
           # pin 0.10.0）：宿主命中直接使用，零外网下载；缺失时 fallback 下载并打
           # ::warning。fallback 分支保留同步 export PATH，保证本步末尾的版本校验可用
@@ -139,6 +144,7 @@ jobs:
       - name: Shell lint (find *.sh -exec shellcheck -x)
         shell: bash
         run: |
+          set -euo pipefail
           find . -name '*.sh' \
             -not -path './.venv/*' \
             -not -path './.git/*' \
@@ -147,6 +153,7 @@ jobs:
 
       - name: Run actionlint
         run: |
+          set -euo pipefail
           # Layer 1 宿主优先（2026-08-29 node-00 出口对 raw.githubusercontent.com 间歇黑洞，
           # run 33225582434/33231155505 实证 134s timeout 致 main CI 连续三轮红——这是
           # 最后一条每 run 无条件非 git 直连下载路径）。ce-01 runner 已预装
@@ -163,12 +170,12 @@ jobs:
               actionlint -color
             else
               echo "::warning::host actionlint ${HOST_VERSION:-unknown} < 1.7, falling back to download"
-              bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.11
+              bash <(curl --retry 3 --max-time 60 https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.11
               ./actionlint -color
             fi
           else
             echo "::warning::actionlint not found on host, falling back to download"
-            bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.11
+            bash <(curl --retry 3 --max-time 60 https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.11
             ./actionlint -color
           fi
 
@@ -181,6 +188,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -211,6 +219,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -250,6 +259,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -290,6 +300,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -337,6 +348,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -364,6 +376,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -394,6 +407,7 @@ jobs:
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -445,6 +459,7 @@ jobs:
     steps:
       - name: Check all required jobs
         run: |
+          set -euo pipefail
           FAILED=0
 
           echo "Checking aggregation anchor..."
@@ -477,6 +492,7 @@ jobs:
 
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
           # 使 checkout 自带的 sparse-checkout disable 无法恢复被裁剪的工作树
           # （实证：disable 后仍缺 .github/actions/setup-venv）。本步在
@@ -497,6 +513,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           # Zero-red enforcement: fetch all check-runs for this commit and fail if any
           # has a conclusion other than success/skipped/neutral. This is the
           # API-level backstop behind the needs.result gate above.
@@ -512,6 +529,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           # Poll for droid-review check run (separate workflow, not a ci.yml job).
           # droid-review runs as a parallel workflow (Droid Auto Review) and produces
           # its own check run. ci-ok must wait for it to complete before declaring

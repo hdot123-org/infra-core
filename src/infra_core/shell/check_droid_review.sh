@@ -3,7 +3,7 @@
 # Exit 0 if droid-review passed, exit 1 if failed or not found
 # Skip gracefully for non-PR events (push to main)
 
-set -e
+set -euo pipefail
 
 # Input: GitHub event name, repository, commit SHA, GitHub token
 EVENT_NAME="${1}"

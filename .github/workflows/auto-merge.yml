@@ -83,7 +83,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          set -eu
+          set -euo pipefail
           echo "Event: $EVENT_NAME"
           case "$EVENT_NAME" in
             pull_request_target)
@@ -136,6 +136,7 @@ jobs:
       # 对工作区零写入。本文件所有 job 均不得 checkout（契约测试锁定）。
       - name: Workspace guard (sparse residue detox)
         run: |
+          set -euo pipefail
           # 自愈向量（2026-08-28 污染事故）：本 job 每 sweep 在三 runner 上轮转，
           # 借此检测并清除工作区 sparse 残留——checkout 的 sparse-checkout
           # disable 实证无法恢复被裁剪的工作树（仍缺 setup-venv/action.yml）
@@ -158,7 +159,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ matrix.pr_number }}
         run: |
-          set -eu
+          set -euo pipefail
           # 获取 PR 的 mergeable 状态。
           # mergeable 由 GitHub 异步计算：push 后短暂为 UNKNOWN 属正常。
           # INFRA-416 竞态守卫：resolve 与本步之间 PR 可能已被并行腿合并
@@ -418,7 +419,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ matrix.pr_number }}
         run: |
-          set -eu
+          set -euo pipefail
           echo "::warning::PR #$PR_NUMBER is BEHIND main, attempting update-branch self-heal"
           # 幂等操作：更新 PR 分支以包含最新 main
           # INFRA-428 竞态守卫：并发腿可能刚完成 update-branch（或 main 又
@@ -438,7 +439,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ matrix.pr_number }}
         run: |
-          set -eu
+          set -euo pipefail
           echo "::error::PR #$PR_NUMBER has merge conflicts (CONFLICTING state)"
           # 幂等通知（INFRA-416）：按 head SHA 粒度去重——同一 head SHA 只发
           # 一次冲突评论，避免 schedule 每 30 分钟重复刷屏（INFRA-292 教训）。
@@ -477,7 +478,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ matrix.pr_number }}
         run: |
-          set -eu
+          set -euo pipefail
           # INFRA-428：rollup 已报齐但存在非 SUCCESS 结论（典型：某个 check
           # 失败/取消，或 shared action 自身毒化的 check 卡住 head SHA）。
           # 首次发现时以 head SHA sentinel 幂等留一条评论（可见、可追溯、
