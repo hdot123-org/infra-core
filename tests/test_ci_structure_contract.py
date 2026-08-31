@@ -28,8 +28,9 @@ pytestmark = pytest.mark.schema
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CI_YML = REPO_ROOT / ".github/workflows/ci.yml"
 
-# 10 个 job 的完整集合（19 → 10 容量收敛，2026-08-29；快照只对齐当前 main：
-# 后续 ci.yml 变更由各自 feature 同步本表）
+# 11 个 job 的完整集合（19 → 10 容量收敛，2026-08-29；+1 notify-ci-complete
+# webhook 注入，INFRA-569；快照只对齐当前 main：后续 ci.yml 变更由各自 feature
+# 同步本表）
 EXPECTED_JOBS = frozenset(
     {
         # 聚合锚点（命名契约：不可重命名，见 architecture.md §2）
@@ -46,11 +47,15 @@ EXPECTED_JOBS = frozenset(
         "health-check",
         # 聚合门禁（branch protection required check）
         "ci-ok",
+        # CI 完成 webhook 通知（INFRA-569：对齐 memory 仓同构 job）
+        "notify-ci-complete",
     }
 )
 
 ADVISORY_JOBS = frozenset({"advisory-bundle"})
-BLOCKING_JOBS = EXPECTED_JOBS - ADVISORY_JOBS - {"ci-ok"}
+# notify-ci-complete is a downstream notification job (needs ci-ok, not the
+# other way around), so exclude it from BLOCKING_JOBS.
+BLOCKING_JOBS = EXPECTED_JOBS - ADVISORY_JOBS - {"ci-ok", "notify-ci-complete"}
 
 # 独立专项测试组 → marker
 TEST_GROUP_MARKERS = {
