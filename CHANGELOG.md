@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/hdot123-org/infra-core/compare/v0.7.1...v0.7.2) (2026-08-31)
+
+
+### Bug Fixes
+
+* **evolution:** self-audit 心跳阈值 2h→8h 消除结构性 tick 间隔误报 (INFRA-651) ([#114](https://github.com/hdot123-org/infra-core/issues/114)) ([5636d68](https://github.com/hdot123-org/infra-core/commit/5636d6826379a2550ae7c4ca65930a96471f966e))
+
 ## [0.7.1](https://github.com/hdot123-org/infra-core/compare/v0.7.0...v0.7.1) (2026-08-30)
 
 
