@@ -131,6 +131,11 @@ jobs:
     # 职责 3：BYOK 429 配额耗尽自愈（2026-08-19 PR #850 实证，见文件头注释）。
     # 只在 schedule 触发时运行，避免 workflow_run 事件误入（quota 耗尽时立即
     # rerun 无意义，必须等配额恢复窗口）。
+    #
+    # [M4 待恢复] 当前触发器已禁用为 workflow_dispatch-only（M2 HOTFIX），
+    # 本 job 处于不可达状态（if: schedule 永不为真）。M4 恢复 schedule 触发器
+    # 时本 job 自动生效。保留此处是为了不破坏 test_droid_review_watchdog_quota_sweep.py
+    # 的契约断言（quota-sweep job 必须存在 + if 条件保留）。
     if: github.event_name == 'schedule'
     runs-on: [self-hosted, pve-linux]
     timeout-minutes: 10

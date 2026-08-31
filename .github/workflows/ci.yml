@@ -170,12 +170,12 @@ jobs:
               actionlint -color
             else
               echo "::warning::host actionlint ${HOST_VERSION:-unknown} < 1.7, falling back to download"
-              bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.11
+              bash <(curl --retry 3 --max-time 60 https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.11
               ./actionlint -color
             fi
           else
             echo "::warning::actionlint not found on host, falling back to download"
-            bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.11
+            bash <(curl --retry 3 --max-time 60 https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.11
             ./actionlint -color
           fi
 

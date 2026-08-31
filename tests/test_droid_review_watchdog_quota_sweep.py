@@ -54,6 +54,35 @@ class TestQuotaSweepJobStructure:
         """quota-sweep 的 if: 条件保留（M4 恢复 schedule 时直接生效）。"""
         assert _load()["jobs"]["quota-sweep"]["if"] == "github.event_name == 'schedule'"
 
+    def test_quota_sweep_unreachable_state_locked(self):
+        """锁定 quota-sweep 当前不可达状态（M2 HOTFIX → M4 恢复）。
+
+        当前触发器已禁用为 workflow_dispatch-only，quota-sweep job 的
+        if: github.event_name == 'schedule' 条件永不为真（workflow_dispatch
+        触发时 event_name 不是 schedule）。
+
+        本测试锁定这一事实：
+        1. workflow 触发器不含 schedule（已被 HOTFIX 移除）
+        2. quota-sweep job 的 if 条件仍保留（M4 恢复 schedule 时自动生效）
+        3. 状态不可达（dispatch-only 触发器 + schedule 守卫 = 永假分支）
+
+        M4 恢复路径：在 .github/workflows/droid-review-watchdog.yml 的
+        on: 块中添加 schedule 触发器，本测试会自动失败提醒更新。
+        """
+        data = _load()
+        on_block = data[True]  # yaml 把 `on:` 解析为 True
+
+        # 触发器不含 schedule（HOTFIX 已移除）
+        assert "schedule" not in on_block, "schedule 触发器不应存在（M2 HOTFIX 已移除）"
+
+        # quota-sweep job 的 if 条件保留
+        quota_sweep_job = data["jobs"]["quota-sweep"]
+        assert quota_sweep_job["if"] == "github.event_name == 'schedule'"
+
+        # 验证状态不可达：dispatch-only 触发器 + schedule 守卫 = 永假分支
+        # 这是预期状态（M2 HOTFIX），M4 恢复 schedule 时本测试会失败提醒更新
+        assert "workflow_dispatch" in on_block, "workflow_dispatch 触发器必须保留"
+
     def test_contract_name_preserved(self):
         """M2 HOTFIX: workflow name 契约字符串保留。"""
         assert _load()["name"] == "Droid Review Watchdog"

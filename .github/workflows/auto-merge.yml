@@ -254,7 +254,7 @@ jobs:
           # - CONFLICTING wins over BEHIND: a conflicting PR must never be
           #   update-branched into a blind merge.
           
-          set -euo pipefailo pipefail
+          set -euo pipefail
           
           GET_ACTION_PR=""
           GET_CATEGORY_PR=""
