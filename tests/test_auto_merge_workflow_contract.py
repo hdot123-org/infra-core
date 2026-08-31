@@ -42,10 +42,14 @@ AUTO_MERGE_PIPELINE_YML = REPO_ROOT / ".github/workflows/auto-merge-pipeline.yml
 AUTO_MERGE_CARRIERS = (AUTO_MERGE_YML, AUTO_MERGE_PIPELINE_YML)
 # M6 harden-consolidate-shared-workflows（VAL-HARD-104）：shared-workflows 仓退役
 # （README 重定向 + 归档），merge action 行为等价移植为本仓 actions/auto-merge。
-# 引用走 owner/repo 全路径 + 不可变 tag pin（INFRA-678：@main → @v0.7.2，
+# F3 SHA 锁定：自仓引用改为 40 位 SHA + # vTag 格式
+# 引用走 owner/repo 全路径 + 不可变 SHA pin（INFRA-678：@main → @v0.7.2 → SHA锁定，
 # 防 CI 漂移；升级 = 显式 bump 该常量，回滚 = revert 本 PR，main 上的引用
 # 一并还原，归档仓的旧 pin 仍可解析，无第二处 pin 需要同步）。
-AUTO_MERGE_ACTION_REF = "hdot123-org/infra-core/actions/auto-merge@v0.7.2"
+# 注意：YAML 解析会剥离 # vTag 注释，所以这里只存 SHA 部分
+AUTO_MERGE_ACTION_REF = (
+    "hdot123-org/infra-core/actions/auto-merge@cda47d7012b2a5a04d01ecec0261516581b02625"
+)
 TRIAGE_SH = REPO_ROOT / "src/infra_core/shell/auto_merge_triage.sh"
 GUARDED_CHECKOUT_WORKFLOWS = ("ci.yml", "qa.yml", "droid-review.yml")
 GUARD_MARKER = 'rm -rf "$GITHUB_WORKSPACE/.git"'
@@ -266,13 +270,18 @@ class TestReusablePipelineTemplateContract:
     def test_merge_step_uses_consolidated_infra_core_action(self) -> None:
         """VAL-HARD-104：merge 步引用本仓 actions/auto-merge（shared-workflows 已退役）。"""
         steps = _load_doc(AUTO_MERGE_PIPELINE_YML)["jobs"]["auto-merge"]["steps"]
+        # F3: SHA-locked format - match 40-char hex SHA
         merge_step = next(
-            (s for s in steps if str(s.get("uses", "")).endswith("/actions/auto-merge@v0.7.2")),
+            (
+                s
+                for s in steps
+                if re.search(r"/actions/auto-merge@[0-9a-f]{40}", str(s.get("uses", "")))
+            ),
             None,
         )
         assert merge_step is not None, "actions/auto-merge merge 步缺失"
         assert merge_step["uses"] == AUTO_MERGE_ACTION_REF, (
-            f"merge 步必须引用本仓 actions/auto-merge@v0.7.2，实际: {merge_step['uses']}"
+            f"merge 步必须引用本仓 actions/auto-merge SHA-locked，实际: {merge_step['uses']}"
         )
 
     def test_no_shared_workflows_residual(self) -> None:
@@ -295,8 +304,11 @@ class TestReusablePipelineTemplateContract:
     def test_merge_step_uses_dispatch_token_not_github_token(self) -> None:
         """合并凭证必须来自 dispatch_token secret 输入（PAT 防递归抑制），绝不回退 GITHUB_TOKEN。"""
         steps = _load_doc(AUTO_MERGE_PIPELINE_YML)["jobs"]["auto-merge"]["steps"]
+        # F3: SHA-locked format - match 40-char hex SHA
         merge_step = next(
-            s for s in steps if str(s.get("uses", "")).endswith("/actions/auto-merge@v0.7.2")
+            s
+            for s in steps
+            if re.search(r"/actions/auto-merge@[0-9a-f]{40}", str(s.get("uses", "")))
         )
         env = merge_step.get("env", {})
         assert env.get("GITHUB_TOKEN") == (
