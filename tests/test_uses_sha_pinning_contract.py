@@ -3,6 +3,7 @@
 Guard tests to ensure all remote uses references are pinned to 40-char SHA
 and self-repo action references are content-equivalent to origin/main.
 """
+
 import re
 import subprocess
 from pathlib import Path
@@ -128,18 +129,14 @@ class TestUsesShaPinning:
 
                     # Check for # comment after uses value
                     if "#" not in line or "v" not in line.split("#")[-1]:
-                        missing_comments.append(
-                            f"{file_path}:{line_num} uses: {uses_value}"
-                        )
+                        missing_comments.append(f"{file_path}:{line_num} uses: {uses_value}")
             except Exception:
                 pass
 
         # This is a warning-level check, not a hard failure
         # We just want to encourage version comments
         if missing_comments:
-            pytest.skip(
-                f"Found {len(missing_comments)} SHA references without version tag"
-            )
+            pytest.skip(f"Found {len(missing_comments)} SHA references without version tag")
 
 
 class TestSelfRepoActionFreshness:

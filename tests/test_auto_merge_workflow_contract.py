@@ -47,7 +47,9 @@ AUTO_MERGE_CARRIERS = (AUTO_MERGE_YML, AUTO_MERGE_PIPELINE_YML)
 # 防 CI 漂移；升级 = 显式 bump 该常量，回滚 = revert 本 PR，main 上的引用
 # 一并还原，归档仓的旧 pin 仍可解析，无第二处 pin 需要同步）。
 # 注意：YAML 解析会剥离 # vTag 注释，所以这里只存 SHA 部分
-AUTO_MERGE_ACTION_REF = "hdot123-org/infra-core/actions/auto-merge@cda47d7012b2a5a04d01ecec0261516581b02625"
+AUTO_MERGE_ACTION_REF = (
+    "hdot123-org/infra-core/actions/auto-merge@cda47d7012b2a5a04d01ecec0261516581b02625"
+)
 TRIAGE_SH = REPO_ROOT / "src/infra_core/shell/auto_merge_triage.sh"
 GUARDED_CHECKOUT_WORKFLOWS = ("ci.yml", "qa.yml", "droid-review.yml")
 GUARD_MARKER = 'rm -rf "$GITHUB_WORKSPACE/.git"'
@@ -270,7 +272,11 @@ class TestReusablePipelineTemplateContract:
         steps = _load_doc(AUTO_MERGE_PIPELINE_YML)["jobs"]["auto-merge"]["steps"]
         # F3: SHA-locked format - match 40-char hex SHA
         merge_step = next(
-            (s for s in steps if re.search(r"/actions/auto-merge@[0-9a-f]{40}", str(s.get("uses", "")))),
+            (
+                s
+                for s in steps
+                if re.search(r"/actions/auto-merge@[0-9a-f]{40}", str(s.get("uses", "")))
+            ),
             None,
         )
         assert merge_step is not None, "actions/auto-merge merge 步缺失"
@@ -300,7 +306,9 @@ class TestReusablePipelineTemplateContract:
         steps = _load_doc(AUTO_MERGE_PIPELINE_YML)["jobs"]["auto-merge"]["steps"]
         # F3: SHA-locked format - match 40-char hex SHA
         merge_step = next(
-            s for s in steps if re.search(r"/actions/auto-merge@[0-9a-f]{40}", str(s.get("uses", "")))
+            s
+            for s in steps
+            if re.search(r"/actions/auto-merge@[0-9a-f]{40}", str(s.get("uses", "")))
         )
         env = merge_step.get("env", {})
         assert env.get("GITHUB_TOKEN") == (
