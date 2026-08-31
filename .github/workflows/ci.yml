@@ -25,6 +25,12 @@ on:
   pull_request:
     branches: [main]
 
+# F4: Explicit least-privilege baseline (VAL-M2-101).
+# Top-level contents:read covers checkout/read-only jobs.
+# Jobs needing more (guards, ci-ok) declare job-level overrides.
+permissions:
+  contents: read
+
 # 2026-08-29 容量收敛：同一 ref 的 PR 连环 push 取消进行中的旧 run（省
 # pve 双机排队）；main push 永不取消（禁止裸 true——合并后 main 全绿验证
 # 不能被后续事件打断）。
@@ -38,6 +44,9 @@ jobs:
   pytest:
     name: pytest
     runs-on: [self-hosted, pve-linux]
+    permissions:
+      contents: read  # checkout
+      actions: write  # upload-artifact
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
@@ -273,6 +282,11 @@ jobs:
   guards:
     name: guards
     runs-on: [self-hosted, pve-linux]
+    permissions:
+      contents: read        # checkout (fetch-depth: 0 for PR diff analysis)
+      checks: read          # gh api check-runs (check_fix_has_test.py, check_pr_ref_consistency.py)
+      pull-requests: read   # gh pr view (check_fix_has_test.py)
+      issues: read          # gh issue view (check_pr_ref_consistency.py graphql)
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
@@ -422,6 +436,10 @@ jobs:
       - integration-tests
       - e2e-tests
       - health-check
+    permissions:
+      contents: read        # checkout
+      checks: read          # gh api check-runs (zero-red enforcement)
+      pull-requests: read   # gh api (check_fix_has_test.py)
     runs-on: [self-hosted, pve-linux]
     if: always()
     steps:

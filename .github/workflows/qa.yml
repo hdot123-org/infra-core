@@ -26,6 +26,9 @@ on:
     - cron: '0 2 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   # ─── CLI End-to-End Smoke Tests ──────────────────────────────────────────
   # Wires scripts/cli_smoke_test.sh (existed since step1 assets, now connected).
@@ -67,6 +70,9 @@ jobs:
   coverage-audit:
     name: Coverage Audit (threshold 45%)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read        # checkout
+      actions: write        # upload-artifact
     runs-on: [self-hosted, pve-linux]
     timeout-minutes: 45
     steps:
@@ -217,6 +223,9 @@ jobs:
   full-regression:
     name: Full Regression (Nightly only)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read  # checkout
+      actions: write  # upload-artifact
     runs-on: [self-hosted, pve-linux]
     timeout-minutes: 60
     steps:
@@ -274,6 +283,8 @@ jobs:
 
   qa-ok:
     name: qa-ok
+    permissions:
+      contents: read
     needs:
       - cli-e2e
       - coverage-audit
