@@ -19,6 +19,10 @@ PR_NUMBER="${1:-}"
 BRANCH="${2:-}"
 SHA="${3:-}"
 STATUS="${4:-}"
+# 第 5 参数（可选）：GitHub repo slug（owner/name），来自 CI payload 的 repo 字段。
+# INFRA-701：hooks.json ci-complete 钩子透传 payload.repo，用于 fallback 路由
+# 消除 PR 号跨仓撞号误路由（infra-core PR #136 被派到 memory 仓的 7 月旧 PR #136）。
+REPO_SLUG_ARG="${5:-${CI_REPO:-}}"
 
 # === 配置（VAL-INJ-010: LOG_FILE 赋值先于任何 send_posthog_event）===
 WEBHOOK_BASE="${WEBHOOK_BASE:-/Users/busiji/.factory/webhook}"
@@ -82,6 +86,65 @@ with_timeout() {
 # Derives repo path from pending-ci cwd field (if available) or script's CWD.
 SCRIPT_CWD="$(pwd)"
 
+# === INFRA-701: repo slug → 本地路径解析 ===
+# 输入: GitHub repo slug（owner/name）。查询 ~/.factory/config/repositories.yml
+# 的 githubRepo 字段反解 repoPath。找到且目录存在 → 输出本地路径；否则输出空串。
+# 解析失败一律返回空（调用方回退到后续优先级），不阻塞 fallback 派生。
+REPO_CONFIG="${REPO_CONFIG:-$HOME/.factory/config/repositories.yml}"
+resolve_repo_path() {
+    local slug="$1"
+    if [ -z "$slug" ] || [ ! -f "$REPO_CONFIG" ]; then
+        return
+    fi
+    "$PYTHON_BIN" - "$slug" "$REPO_CONFIG" <<'PYEOF' 2>/dev/null
+import sys
+slug, config_path = sys.argv[1], sys.argv[2]
+try:
+    import yaml
+except ImportError:
+    sys.exit(0)
+try:
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f) or {}
+    for team in (cfg.get("teams") or {}).values():
+        for repo in team.get("repos") or []:
+            if (repo.get("githubRepo") or "") == slug:
+                path = repo.get("repoPath") or ""
+                if path.startswith("~/"):
+                    import os
+                    path = os.path.expanduser(path)
+                print(path)
+                sys.exit(0)
+except Exception:
+    pass
+PYEOF
+}
+
+# fallback repo 选择优先级（INFRA-701）：
+#   1. PENDING_CWD（pending-ci 文件携带，发 PR 会话的确切仓库路径，最权威）
+#   2. 显式 repo slug 解析（CI payload repo 字段，经 repositories.yml 反查本地路径）
+#   3. SCRIPT_CWD（webhook 接收器的 command-working-directory，最后兜底）
+# 注意：本函数在 $( ) 命令替换中调用，log() 的 tee 已重定向 stderr，
+# 不会污染命令替换捕获的返回值。
+pick_fallback_repo() {
+    if [ -n "${PENDING_CWD:-}" ]; then
+        echo "$PENDING_CWD"
+        return
+    fi
+    if [ -n "$REPO_SLUG_ARG" ]; then
+        local resolved
+        resolved=$(resolve_repo_path "$REPO_SLUG_ARG")
+        if [ -n "$resolved" ] && [ -d "$resolved" ]; then
+            log "Fallback repo routed by CI payload repo slug: $REPO_SLUG_ARG -> $resolved"
+            echo "$resolved"
+            return
+        fi
+        log "WARN: repo slug '$REPO_SLUG_ARG' not resolvable via $REPO_CONFIG, falling back to $SCRIPT_CWD"
+    fi
+    echo "$SCRIPT_CWD"
+}
+
+
 spawn_fallback() {
   local pr_num="$1"
   local ci_status="$2"
@@ -124,7 +187,7 @@ COMPUTER_ID="d6cf2cd1-a7b8-4aad-a71f-ca89c90d2c33"
 # VAL-INJ-010: LOG_FILE 已在文件顶部提前赋值（在 PR_NUMBER 校验之前）
 # 这里只定义 log 函数
 
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE" >&2; }
 
 # === ECHO_DROID startup warning ===
 if [ "${ECHO_DROID:-0}" = "1" ]; then
@@ -141,7 +204,7 @@ if [ -z "$PR_NUMBER" ]; then
 fi
 
 log "=== trigger-ci-droid.sh started ==="
-log "PR_NUMBER=$PR_NUMBER BRANCH=$BRANCH SHA=$SHA STATUS=$STATUS"
+log "PR_NUMBER=$PR_NUMBER BRANCH=$BRANCH SHA=$SHA STATUS=$STATUS REPO=${REPO_SLUG_ARG:-none}"
 
 # === 检查 pending-ci-{PR_NUMBER}.json ===
 if [ ! -f "$PENDING_CI_FILE" ]; then
@@ -168,7 +231,8 @@ if [ ! -f "$PENDING_CI_FILE" ]; then
     }
     log "Created fallback lock: $FALLBACK_LOCK"
     log "Triggering fallback: spawning droid exec for PR #${PR_NUMBER}"
-    spawn_fallback "$PR_NUMBER" "${STATUS:-unknown}"
+    # INFRA-701: 无 pending 文件时 PENDING_CWD 为空，走 slug 解析或 SCRIPT_CWD 兜底
+    spawn_fallback "$PR_NUMBER" "${STATUS:-unknown}" "$(pick_fallback_repo)"
     exit 0
 fi
 
@@ -208,7 +272,7 @@ if [ -z "$PENDING_PR" ] || [ "$PENDING_PR" = "-" ]; then
     log "ERROR: Failed to parse pending-ci JSON — quarantining corrupted file"
     mv "$PENDING_CI_FILE" "${PENDING_CI_FILE}.corrupted.$(date +%s)"
     send_posthog_event "ci_corrupted_json" "$PR_NUMBER" "parse" "JSON parse failed"
-    spawn_fallback "$PR_NUMBER" "${STATUS:-unknown}" "${PENDING_CWD:-$SCRIPT_CWD}"
+    spawn_fallback "$PR_NUMBER" "${STATUS:-unknown}" "$(pick_fallback_repo)"
     exit 0
 fi
 
@@ -425,7 +489,7 @@ except Exception as e:
         send_posthog_event "ci_expired_pending_ci" "$PR_NUMBER" "expiry" "pending-ci older than 2 hours, created_at=$CREATED_AT"
         log "Created fallback lock: $FALLBACK_LOCK"
         log "Triggering fallback: spawning droid exec for expired PR #${PR_NUMBER}"
-        spawn_fallback "$PR_NUMBER" "${STATUS:-unknown}"
+        spawn_fallback "$PR_NUMBER" "${STATUS:-unknown}" "$(pick_fallback_repo)"
         exit 0
     else
         log "pending-ci-${PR_NUMBER}.json is fresh (created_at: $CREATED_AT)"
@@ -735,7 +799,7 @@ except Exception as e:
         send_posthog_event "ci_fallback_lock_write_failed" "$PR_NUMBER" "fallback_lock" "rebinding path"
     }
     log "Created fallback lock: $FALLBACK_LOCK"
-    FALLBACK_REPO="${PENDING_CWD:-$SCRIPT_CWD}"
+    FALLBACK_REPO="$(pick_fallback_repo)"
     # Mark pending file with fallback_dispatched
     if [ -f "$PENDING_CI_FILE" ]; then
         $PYTHON_BIN -c "
@@ -838,7 +902,7 @@ except Exception as e:
                 send_posthog_event "ci_fallback_lock_write_failed" "$PR_NUMBER" "fallback_lock" "probe path"
             }
             log "Created fallback lock: $FALLBACK_LOCK"
-            FALLBACK_REPO="${PENDING_CWD:-$SCRIPT_CWD}"
+            FALLBACK_REPO="$(pick_fallback_repo)"
             # M1: 标记 pending 文件（不删除，保留审计轨迹）
             if [ -f "$PENDING_CI_FILE" ]; then
                 $PYTHON_BIN -c "
@@ -990,8 +1054,8 @@ else
             send_posthog_event "ci_fallback_lock_write_failed" "$PR_NUMBER" "fallback_lock" "echo failed"
         }
         log "Created fallback lock: $FALLBACK_LOCK"
-        # Use cwd from pending-ci file if available, otherwise script CWD
-        FALLBACK_REPO="${PENDING_CWD:-$SCRIPT_CWD}"
+        # INFRA-701: Use cwd from pending-ci file if available, otherwise repo slug or script CWD
+        FALLBACK_REPO="$(pick_fallback_repo)"
         # M1: 标记 pending 文件（不删除，保留审计轨迹）
         if [ -f "$PENDING_CI_FILE" ]; then
             $PYTHON_BIN -c "
@@ -1036,7 +1100,7 @@ except Exception as e:
                 send_posthog_event "ci_fallback_lock_write_failed" "$PR_NUMBER" "fallback_lock" "5xx path"
             }
             log "Created fallback lock: $FALLBACK_LOCK"
-            FALLBACK_REPO="${PENDING_CWD:-$SCRIPT_CWD}"
+            FALLBACK_REPO="$(pick_fallback_repo)"
             # M1: 标记 pending 文件（不删除，保留审计轨迹）
             if [ -f "$PENDING_CI_FILE" ]; then
                 $PYTHON_BIN -c "
