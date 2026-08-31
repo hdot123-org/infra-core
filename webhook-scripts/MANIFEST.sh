@@ -4,10 +4,10 @@
 #
 # 所有权（M5 shrink，INFRA mission）：webhook 生产同步的真源自本仓库
 # （hdot123-org/infra-core）。memory-core 侧同名 manifest 已随 M5 收缩删除，
-# 过渡期两 manifest 不双 claim 同一生产文件名。memory-core 仓内保留的
+# 过渡期两 manifest 不双 claim 同一生产文件名。memory-core 仓内曾保留的
 # 4 个 CROSS_DIR 文件副本（scripts/{extract_anchor,evolution_utils,
-# evolution_adapters,anchor_gate}.py）仅为一个 release 窗口的回滚副本，
-# 不再是同步源。
+# evolution_adapters,anchor_gate}.py）已随其 INFRA-679 对偶 PR（memory
+# #1097）删除，回滚窗口关闭。
 #
 # 注意：本文件被 source 时不应改变调用方的 shell 选项（如 errexit/nounset）
 # 因此故意不使用 set -euo pipefail
@@ -40,26 +40,31 @@ MANAGED_LIB_FILES=(
 # ============================================================================
 # 跨目录同步映射 (Cross-Directory Sync Mappings)
 # ============================================================================
-# webhook-scripts/cross-dir/ 下的锚点助手依赖链部署副本（M5 起自本仓路径同步）。
+# 锚点助手依赖链部署副本（M5 起自本仓路径同步）。
 # sync-webhook-scripts.sh 会将这些文件从仓库相对路径同步到生产目录。
 # 背景 (INFRA-357): 生产 extract_anchor.py 缺少 evolution_utils.py /
 # evolution_adapters.py 依赖导致 ModuleNotFoundError —— 依赖链必须与调用方
 # 一同受管部署，堵住部署漂移。anchor_gate.py 为补偿层关闭路径的锚点守卫
 # （trigger-droid.sh L1166，与 extract_anchor.py 同链部署）。
 #
-# 血缘说明：cross-dir/ 副本 = memory-core scripts/ 生产血统的逐字节快照
-# （2026-08-30 M5 迁移时点），与生产部署文件 sha256 一致；src/infra_core/engine/
-# 下的同包名模块是引擎侧独立演化线（ruff 格式化 + INFRA-601 gh_repo_args），
-# 不用于生产同步。窗口关闭（memory-core 删除回滚副本）后如需收敛两侧，
-# 走独立行为等价评审 PR，不在同步链路上顺手替换。
+# 血缘收敛（INFRA-679）：M5 迁移时点曾在本仓 webhook-scripts/cross-dir/
+# 维护 memory-core 生产血统的逐字节快照作为同步源，与 src/infra_core/engine/
+# 的引擎演化线形成双副本（CODE_HYGIENE_DUPLICATE_BLOCK 重复块根因）。
+# memory-core 侧回滚副本删除（memory #1097）后窗口关闭，本清单收敛到
+# 引擎单源 src/infra_core/engine/——与 CI/CLI 的 python -m
+# infra_core.engine.* 消费面同源，快照副本目录 cross-dir/ 随之退役。
+# 引擎版本与旧快照在生产消费面（extract_linkback_anchor / sanitize_* /
+# quarantine_corrupted_file / anchor gate 判定）逐字等价，差异仅为
+# ruff 格式化与加性增强（INFRA-601 gh_repo_args、audit_layout P 档映射），
+# 由 INFRA-679 PR 承载行为等价评审。
 #
 # 格式: "<仓库相对路径>:<部署目标文件名>"
 
 CROSS_DIR_MAPPINGS=(
-    "webhook-scripts/cross-dir/extract_anchor.py:extract_anchor.py"
-    "webhook-scripts/cross-dir/evolution_utils.py:evolution_utils.py"
-    "webhook-scripts/cross-dir/evolution_adapters.py:evolution_adapters.py"
-    "webhook-scripts/cross-dir/anchor_gate.py:anchor_gate.py"
+    "src/infra_core/engine/extract_anchor.py:extract_anchor.py"
+    "src/infra_core/engine/evolution_utils.py:evolution_utils.py"
+    "src/infra_core/engine/evolution_adapters.py:evolution_adapters.py"
+    "src/infra_core/engine/anchor_gate.py:anchor_gate.py"
 )
 
 # ============================================================================
