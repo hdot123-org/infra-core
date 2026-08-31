@@ -149,6 +149,8 @@ jobs:
   # ── Job 0: Setup - resolve PR context for both caller trigger types ──
   # github context 关联 caller 事件：pull_request_target / workflow_dispatch 原样可用
   setup:
+    permissions:
+      contents: read
     runs-on: [self-hosted, pve-linux]
     outputs:
       pr_number: ${{ steps.resolve.outputs.pr_number }}
@@ -205,6 +207,10 @@ jobs:
   plan-shards:
     needs: setup
     if: needs.setup.outputs.draft == 'false' && needs.setup.outputs.user_login != 'dependabot[bot]'
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: write
     runs-on: [self-hosted, pve-linux]
     timeout-minutes: 5
     outputs:
@@ -319,7 +325,6 @@ jobs:
     permissions:
       contents: read
       actions: write
-      id-token: write
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |

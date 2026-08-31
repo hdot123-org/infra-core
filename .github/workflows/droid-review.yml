@@ -43,6 +43,9 @@ concurrency:
 jobs:
   # ── Job 0: Setup - resolve PR context for both trigger types ──
   setup:
+    permissions:
+      contents: read
+      pull-requests: read
     runs-on: [self-hosted, pve-linux]
     outputs:
       pr_number: ${{ steps.resolve.outputs.pr_number }}
@@ -97,6 +100,10 @@ jobs:
 
   # ── Job 1: Plan shards (no model call, ~1min) ──
   plan-shards:
+    permissions:
+      contents: read          # checkout
+      pull-requests: read     # gh api pulls (docs-only detection + file list)
+      actions: write          # upload-artifact (file-statuses)
     needs: setup
     if: needs.setup.outputs.draft == 'false' && needs.setup.outputs.user_login != 'dependabot[bot]'
     runs-on: [self-hosted, pve-linux]
@@ -206,9 +213,9 @@ jobs:
     env:
       NVIDIA_KONG_PROXY_KEY: ${{ secrets.NVIDIA_KONG_PROXY_KEY }}
     permissions:
-      contents: read
-      actions: write
-      id-token: write
+      contents: read      # checkout (BASE + HEAD)
+      actions: write      # upload-artifact (debug transcripts)
+      # id-token: write removed (F4 VAL-M2-103) — OIDC audit confirmed no dependency
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
@@ -436,10 +443,10 @@ jobs:
     runs-on: [self-hosted, pve-linux]
     timeout-minutes: ${{ fromJSON(vars.DROID_REVIEW_TIMEOUT_MINUTES || '90') }}
     permissions:
-      contents: read
-      pull-requests: write
-      issues: write
-      actions: read
+      contents: read        # checkout (BASE)
+      pull-requests: write  # publish findings as PR comment via gh api
+      issues: write         # gh api may post to issues
+      actions: write        # download-artifact (read+write scope; download requires actions:write)
     steps:
       - name: Workspace guard (sparse residue detox)
         run: |
