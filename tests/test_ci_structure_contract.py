@@ -220,6 +220,25 @@ class TestNotifyCiComplete:
         assert "ci_webhook_send_failed" in script, "投递失败必须上报 PostHog 事件"
         assert "exit 0" in script, "通知失败必须 exit 0（旁路语义）"
 
+    def test_run_steps_use_strict_mode(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """INFRA-710：notify-ci-complete 全部 run 步骤必须 bash strict mode。
+
+        PR #151 为 'Verify webhook secrets' 与 'Send CI status webhook'
+        两个 run block 补齐 set -euo pipefail（bash 加固审计 finding），
+        本契约锁定不可回退——webhook secret 验证与状态投递逻辑在宽松
+        shell 下静默失败（未定义变量展开为空、管道半失败被吞），会直接
+        破坏 n8n 注入链的可观测性与可诊断性。
+        """
+        steps = ci_jobs["notify-ci-complete"].get("steps") or []
+        run_steps = [(idx, str(step["run"])) for idx, step in enumerate(steps) if "run" in step]
+        assert run_steps, "notify-ci-complete 必须包含至少一个 run 步骤"
+        for idx, script in run_steps:
+            first_line = script.lstrip().splitlines()[0].strip()
+            assert first_line == "set -euo pipefail", (
+                f"notify-ci-complete 第 {idx} 个 run 步骤未启用 bash strict mode"
+                f"（首行应为 set -euo pipefail，实际为 {first_line!r}）"
+            )
+
 
 class TestRunnerLabels:
     @pytest.mark.parametrize("job", sorted(EXPECTED_JOBS))
