@@ -29,7 +29,61 @@ jobs:
     runs-on: [self-hosted, pve-linux]
     steps:
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           token: ${{ secrets.DISPATCH_TOKEN }}
+
+      # ─── Release PR uv.lock relock（INFRA-712 根治）───
+      # release-please 只 bump pyproject.toml 不 relock（PR #136 实证仅改
+      # manifest/CHANGELOG/pyproject/__init__），uv.lock 根包版本原地踏步，
+      # 造成 0.7.2 漂移（PR #163 补救、INFRA-678 同类）。本步骤在
+      # release-please-action 运行后检测其维护的 Release PR 分支，relock
+      # 并回推，使 Release PR 自带对齐的 uv.lock。
+      # 时序：action 每轮 schedule 维护同一 Release PR（autorelease: pending），
+      # 本步随后 relock push；下一轮 sweep 时 Release PR 已含 uv.lock，
+      # action 不会回退该文件（只重写自己管理的清单文件）。
+      # uv 用 runner 宿主预装二进制（PATH 优先，runner-tools.toml 单一
+      # 事实源），无 checkout/uv 可用时跳过并警告——发版不因 relock 失败
+      # 中断，漂移由 repo_health_check.sh Check 1b 门禁兜底拦截。
+      - name: Relock uv.lock on Release PR (INFRA-712)
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if ! command -v uv >/dev/null 2>&1; then
+            echo "::warning::uv not found on runner; skip relock (drift caught by repo_health_check.sh Check 1b)"
+            exit 0
+          fi
+
+          # release-please-action 输出 release 分支名；无 Release PR 开着
+          # （如纯 tag 发版轮）时 outputs 为空，本步无事可做
+          BRANCH="${{ steps.release.outputs.release_branch }}"
+          if [ -z "$BRANCH" ]; then
+            echo "No open Release PR this run; nothing to relock"
+            exit 0
+          fi
+          echo "Release PR branch: $BRANCH"
+
+          git config user.name "release-please[bot]"
+          git config user.email "release-please[bot]@users.noreply.github.com"
+
+          # checkout Release PR 分支（浅克隆足够 relock；不污染共享工作区）
+          git fetch origin "$BRANCH"
+          git checkout -B "$BRANCH" "origin/$BRANCH"
+
+          # relock：更新 uv.lock 根包版本至 pyproject 当前版本（幂等——
+          # 已对齐时 uv lock 不产生 diff）
+          uv lock
+
+          if git diff --quiet uv.lock; then
+            echo "uv.lock already aligned; no push needed"
+            exit 0
+          fi
+
+          git add uv.lock
+          git commit -m "chore(release): relock uv.lock root package version (INFRA-712)"
+          git push origin "$BRANCH"
+          echo "Pushed relock commit to $BRANCH"
