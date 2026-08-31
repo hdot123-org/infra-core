@@ -521,3 +521,72 @@ jobs:
             "${{ github.repository }}" \
             "${{ github.event.pull_request.head.sha || github.sha }}" \
             "$GH_TOKEN"
+
+  # ─── notify-ci-complete: webhook → n8n → trigger-ci-droid.sh ───
+  # Mirrors memory repo ci.yml:318-377 (INFRA-569). Without this job,
+  # infra-core CI completion never notifies n8n, breaking the
+  # trigger-ci-droid.sh injection chain for all infra-core PRs.
+  #
+  # NOTE: qa.yml's qa-ok is NOT covered by this job's needs (GitHub
+  # cross-workflow dependencies are not supported). This matches the
+  # memory repo's structural limitation.
+  notify-ci-complete:
+    name: Notify CI complete to n8n
+    runs-on: [self-hosted, pve-linux]
+    timeout-minutes: 10
+    needs: ci-ok
+    if: always() && github.event_name == 'pull_request'
+    steps:
+      # INFRA-569：webhook payload 组装依赖 jq，自建 runner 不保证预装，兜底安装
+      - uses: ./.github/actions/ensure-jq
+
+      - name: Verify webhook secrets
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "::warning::N8N_CI_WEBHOOK_URL secret is not configured, skipping notification"
+            exit 0
+          fi
+          if [ -z "$N8N_CI_TOKEN" ]; then
+            echo "::warning::N8N_CI_TOKEN secret is not configured, skipping notification"
+            exit 0
+          fi
+        env:
+          WEBHOOK_URL: ${{ secrets.N8N_CI_WEBHOOK_URL }}
+          N8N_CI_TOKEN: ${{ secrets.N8N_CI_TOKEN }}
+
+      - name: Send CI status webhook
+        env:
+          WEBHOOK_URL: ${{ secrets.N8N_CI_WEBHOOK_URL }}
+          N8N_CI_TOKEN: ${{ secrets.N8N_CI_TOKEN }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+        run: |
+          PAYLOAD=$(jq -n \
+            --arg repo "${{ github.repository }}" \
+            --argjson pr_number "${{ github.event.pull_request.number || 0 }}" \
+            --arg branch "$BRANCH" \
+            --arg sha "${{ github.sha }}" \
+            --arg status "${{ needs.ci-ok.result }}" \
+            '{repo:$repo, pr_number:$pr_number, branch:$branch, sha:$sha, status:$status}')
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            --retry 3 --retry-delay 5 --retry-all-errors \
+            -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -H "X-CI-Token: ${N8N_CI_TOKEN}" \
+            -d "$PAYLOAD") || HTTP_CODE="000"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::warning::Webhook delivery failed (HTTP $HTTP_CODE)"
+            # Only send PostHog event if API key is configured
+            if [ -n "$POSTHOG_API_KEY" ]; then
+              PR_NUM="${{ github.event.pull_request.number || 0 }}"
+              TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              curl -s -X POST "https://us.posthog.com/batch/" \
+                -H "Content-Type: application/json" \
+                -d "{\"api_key\":\"${POSTHOG_API_KEY}\",\"batch\":[{\"event\":\"ci_webhook_send_failed\",\"properties\":{\"error_type\":\"webhook_delivery_failed\",\"pr_number\":\"$PR_NUM\",\"stage\":\"github_actions\",\"workflow\":\"ci\",\"detail\":\"HTTP $HTTP_CODE\",\"distinct_id\":\"ci-webhook\"},\"timestamp\":\"$TIMESTAMP\"}]}" || true
+            else
+              echo "::notice::POSTHOG_API_KEY not configured, skipping event reporting"
+            fi
+          fi
+          exit 0
