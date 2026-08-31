@@ -129,7 +129,8 @@ class TestUsesShaPinning:
                     line = lines[line_num - 1]
 
                     # Check for # comment after uses value
-                    if "#" not in line or "v" not in line.split("#")[-1]:
+                    # Use split("#", 1) to handle comments containing # (e.g., PR #138)
+                    if "#" not in line or "v" not in line.split("#", 1)[-1]:
                         missing_comments.append(f"{file_path}:{line_num} uses: {uses_value}")
             except OSError as e:
                 # 文件读取失败不静默：输出 stderr 警告保留可观测性，
