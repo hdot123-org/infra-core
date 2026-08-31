@@ -437,7 +437,11 @@ class TestAutoMergeCompositeActionContract:
             if "gh pr merge" in line and "then" in line:
                 # 进入 if gh pr merge ... then 结构
                 continue
-            if not in_merge_else and "else" in line and any("gh pr merge" in prev for prev in lines[:lines.index(line)]):
+            if (
+                not in_merge_else
+                and "else" in line
+                and any("gh pr merge" in prev for prev in lines[: lines.index(line)])
+            ):
                 # 找到 gh pr merge 的 else 分支
                 in_merge_else = True
                 indent_level = len(line) - len(line.lstrip())
