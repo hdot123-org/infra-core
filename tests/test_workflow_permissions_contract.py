@@ -1,9 +1,13 @@
-"""Workflow permissions contract tests (F4 — VAL-M2-104/105/107).
+"""Workflow permissions contract tests (F4 — VAL-M2-104/105/107, INFRA-688).
 
-Two guard assertions:
-1. Every workflow must have explicit permissions (top-level or full job-level
-   coverage), never relying on GitHub's implicit defaults.
-2. ci.yml and qa.yml triggers must never have paths/paths-ignore filters —
+Three guard assertions:
+1. Every workflow must have a top-level permissions baseline (INFRA-688) —
+   new jobs added without declarations must fall back to read-only, never
+   to GitHub's implicit repo defaults.
+2. Every job must have explicit permissions (top-level baseline satisfies
+   runtime behavior; job-level declarations are overrides) — never relying
+   on GitHub's implicit defaults.
+3. ci.yml and qa.yml triggers must never have paths/paths-ignore filters —
    ci-ok/qa-ok are required checks; paths filters would make them permanently
    pending, blocking the entire repo.
 """
@@ -44,6 +48,28 @@ def _workflow_has_full_job_coverage(wf: dict) -> bool:
     if not jobs:
         return True
     return all("permissions" in job for job in jobs.values())
+
+
+class TestWorkflowTopLevelBaseline:
+    """INFRA-688: Every workflow must have a top-level permissions baseline.
+
+    Job-level declarations satisfy GitHub's runtime behavior, but a missing
+    top-level baseline means any newly added job that forgets its own
+    declaration silently falls back to the repository/org default token
+    permissions (potentially broad). A top-level read-only baseline closes
+    that gap: new jobs start least-privileged and must opt in to more.
+    """
+
+    @pytest.mark.parametrize("wf_name", _all_workflow_names())
+    def test_workflow_has_top_level_permissions_baseline(self, wf_name: str) -> None:
+        """Each workflow must declare a top-level permissions block."""
+        wf = _load_workflow(wf_name)
+        assert _workflow_has_top_level_permissions(wf), (
+            f"{wf_name}: no top-level 'permissions' baseline — jobs added "
+            f"without their own declaration would fall back to repo default "
+            f"token permissions. Add top-level 'permissions: {{contents: read}}' "
+            f"as the baseline; jobs needing more declare job-level overrides."
+        )
 
 
 def _workflow_has_explicit_permissions(wf: dict) -> bool:

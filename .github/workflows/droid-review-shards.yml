@@ -145,6 +145,11 @@ on:
         description: 'Kong proxy key（BYOM provider 格式占位；内网 Kong 无认证，保留注入面）'
         required: false
 
+# F4/INFRA-688: 显式最小权限基线——三个 job 均已带 job 级声明；顶层基线兜底
+# 未来新增 job 忘记声明时回落到只读（而非仓库默认权限）。
+permissions:
+  contents: read
+
 jobs:
   # ── Job 0: Setup - resolve PR context for both caller trigger types ──
   # github context 关联 caller 事件：pull_request_target / workflow_dispatch 原样可用

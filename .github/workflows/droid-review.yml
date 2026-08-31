@@ -36,6 +36,11 @@ on:
         required: false
         type: string
 
+# F4/INFRA-688: 显式最小权限基线——所有 job 已带 job 级声明；顶层基线兜底
+# 未来新增 job 忘记声明时回落到只读（而非仓库默认权限）。
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
   cancel-in-progress: true
