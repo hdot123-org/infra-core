@@ -9,6 +9,96 @@
       "rule_id": "OWNERSHIP_MISSING",
       "location": "memory/system/ownership.toml",
       "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "actions/droid-review-aggregate/publish_findings.py::L26 <-> src/infra_core/engine/droid_rev.c334ed19",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "src/infra_core/engine/droid_review/publish_findings.py::L26 <-> actions/droid-review-aggreg.286a7b8e",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "actions/droid-review-aggregate/publish_findings.py::L74 <-> src/infra_core/engine/droid_rev.45339d82",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "src/infra_core/engine/droid_review/publish_findings.py::L74 <-> actions/droid-review-aggreg.5266013d",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "actions/droid-review-aggregate/publish_findings.py::L88 <-> src/infra_core/engine/droid_rev.f44ed6ac",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "src/infra_core/engine/droid_review/publish_findings.py::L88 <-> actions/droid-review-aggreg.3fd811a0",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "actions/droid-review-aggregate/publish_findings.py::L97 <-> src/infra_core/engine/droid_rev.58cb6392",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "src/infra_core/engine/droid_review/publish_findings.py::L97 <-> actions/droid-review-aggreg.c83bbd9a",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "actions/droid-review-aggregate/publish_findings.py::L107 <-> src/infra_core/engine/droid_re.03afc965",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "src/infra_core/engine/droid_review/publish_findings.py::L107 <-> actions/droid-review-aggre.9300ca94",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "actions/droid-review-aggregate/publish_findings.py::L129 <-> src/infra_core/engine/droid_re.407ce098",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "src/infra_core/engine/droid_review/publish_findings.py::L129 <-> actions/droid-review-aggre.5a892367",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "actions/droid-review-aggregate/publish_findings.py::L176 <-> src/infra_core/engine/droid_re.70cbb575",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "src/infra_core/engine/droid_review/publish_findings.py::L176 <-> actions/droid-review-aggre.ba9a0b23",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "actions/droid-review-aggregate/publish_findings.py::L259 <-> src/infra_core/engine/droid_re.88136774",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "src/infra_core/engine/droid_review/publish_findings.py::L259 <-> actions/droid-review-aggre.471b6ca6",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "actions/governance-check/governance_check.py::L35 <-> src/infra_core/governance.py::L42",
+      "expires": "2099-12-31"
+    },
+    {
+      "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
+      "location": "src/infra_core/governance.py::L42 <-> actions/governance-check/governance_check.py::L35",
+      "expires": "2099-12-31"
     }
   ]
 }
