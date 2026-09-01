@@ -22,3 +22,4 @@ crons = ["*/10 * * * *"]
 # - WIKI_TOKEN: X-Wiki-Token 出站头值 (同上)
 # - DISPATCH_TOKEN: repository_dispatch Authorization (排查序: 1P → repo secrets → 本机)
 # - POSTHOG_TOKEN: X-Posthog-Token 透传值 (来源: 1P 或 Mac hooks.json)
+# - POSTHOG_CAPTURE_KEY: PostHog 项目 406776 client ingest key (VAL-CF-011 元数据上报用，与 POSTHOG_TOKEN 不同凭证)
