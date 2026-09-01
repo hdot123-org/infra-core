@@ -26,10 +26,18 @@
 
 | workflow 文件 | workflow 名 | cron（UTC） | 用途 |
 |---|---|---|---|
+| `evolution-scan.yml` | Evolution Scan Reusable | `17,47 * * * *` | 引擎仓自扫 tick（INFRA-717 起，reusable 自带 schedule——本仓无法建 thin caller，见下） |
+| `evolution-heartbeat.yml` | Evolution Heartbeat Reusable | `53 */2 * * *` | 引擎仓自扫心跳（INFRA-717 起，同上） |
 | `auto-merge.yml` | Auto Merge | `*/30 * * * *` | 本仓合并兜底（workflow_run 快路径为主） |
 | `branch-cleanup.yml` | Branch Cleanup | `0 * * * *` | 本仓分支卫生 |
 | `qa.yml` | QA | `0 2 * * *` | 夜间全量回归 |
 | `release-please.yml` | Release Please | `0 4 * * *`、`0 12 * * *` | 发版 PR 维护 |
+
+> INFRA-717 备注：引擎仓 evolution 系与其它本仓自用 workflow 形态不同——
+> scan/heartbeat 是被消费仓 `uses:` 引用的 reusable，无法另建同名 thin caller
+>（消费仓按文件路径引用 + heartbeat 按文件名探活，双契约钉死文件名），故其
+> 本仓定时面直接挂在 reusable 文件上（GitHub 语义：schedule 仅宿主仓生效，
+> 消费仓 caller 不受影响）。中央化迁移时这两个 schedule 是普通迁移对象。
 
 ### 现状痛点（中央化动机）
 

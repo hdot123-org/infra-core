@@ -1,11 +1,16 @@
 # Evolution Heartbeat reusable workflow（M4 抽离，architecture.md §6）
-# heartbeat 主体在本 reusable；schedule/workflow_dispatch 触发面与命名契约
+# heartbeat 主体在本 reusable；消费仓定时触发面与命名契约
 # （名 'Evolution Heartbeat'）留在消费仓 thin caller。引擎内
 # SCANNER_WORKFLOW = "evolution-scan.yml" 指消费仓本仓文件名不变，
 # gh run list 按该文件名解析扫描器是否存活。
 #
 # INFRA-578/588 自愈闭环：heartbeat stale → trigger_scanner_dispatch 拉起
 # 扫描器；扫描器 watch_heartbeat_channel 反向拉起 heartbeat。
+#
+# INFRA-717 引擎仓自扫 schedule：同 evolution-scan.yml——本仓无法建独立
+# thin caller（heartbeat 探活按本文件名解析 run 历史），故本文件自带
+# schedule 恢复引擎仓自扫心跳定时面（M2 HOTFIX 禁 cron 后漏建，13h 空窗
+# 告警根因，见 evolution-scan.yml 文件头注释）。消费仓不受影响。
 
 name: Evolution Heartbeat Reusable
 
@@ -24,6 +29,11 @@ on:
         required: false
         description: 'hyphen 过渡变体（与 dispatch_token 等价；env 层熔合 snake || hyphen）'
   workflow_dispatch: {}
+  # INFRA-717 引擎仓自扫心跳定时面（见文件头注释）。与消费仓 caller 同窗
+  # （每 2h 一次），分钟位避开整点高峰（INFRA-578），与 scan 的 17,47 错开
+  # 并沿用消费仓 47 分位惯例。重复 tick 无害（自愈性质，幂等去重）。
+  schedule:
+    - cron: '53 */2 * * *'
 
 
 # F4/INFRA-688: 显式最小权限基线——heartbeat job 已带 job 级声明；顶层基线
