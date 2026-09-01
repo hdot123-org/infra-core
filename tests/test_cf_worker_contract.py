@@ -12,12 +12,9 @@ the worker's native test suite. It covers:
 node --test absence = FAIL (not skip) — this mission's contract must be reachable.
 """
 
-import os
-import subprocess
 import shutil
+import subprocess
 from pathlib import Path
-
-import pytest
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -197,16 +194,16 @@ class TestCFSecretGovernance:
 
     # Generic secret prefixes that should never appear as literals
     SECRET_PREFIX_PATTERNS = [
-        re.compile(r'ghp_[A-Za-z0-9]{36,}'),     # GitHub PAT
-        re.compile(r'gho_[A-Za-z0-9]{36,}'),     # GitHub OAuth
-        re.compile(r'sk-[A-Za-z0-9]{20,}'),       # Generic secret prefix
+        re.compile(r"ghp_[A-Za-z0-9]{36,}"),  # GitHub PAT
+        re.compile(r"gho_[A-Za-z0-9]{36,}"),  # GitHub OAuth
+        re.compile(r"sk-[A-Za-z0-9]{20,}"),  # Generic secret prefix
     ]
 
     # Long hex literal: >=32 consecutive hex chars (case-insensitive)
-    LONG_HEX_PATTERN = re.compile(r'[0-9a-fA-F]{32,}')
+    LONG_HEX_PATTERN = re.compile(r"[0-9a-fA-F]{32,}")
 
     # Token header names that must only be set from env bindings
-    TOKEN_HEADERS = ['X-CI-Token', 'X-Wiki-Token', 'X-Posthog-Token']
+    TOKEN_HEADERS = ["X-CI-Token", "X-Wiki-Token", "X-Posthog-Token"]
 
     def _scan_files_for_prefixes(self, directory, patterns):
         """Scan all JS files in a directory for secret prefix patterns."""
@@ -249,8 +246,8 @@ class TestCFSecretGovernance:
         )
         hex_violations = self._scan_files_for_long_hex(CF_DIR / "src")
         all_violations = prefix_violations + hex_violations
-        assert not all_violations, (
-            "Suspicious literals found in src/:\n" + "\n".join(all_violations)
+        assert not all_violations, "Suspicious literals found in src/:\n" + "\n".join(
+            all_violations
         )
 
     def test_no_hardcoded_secrets_in_tests(self):
@@ -260,8 +257,8 @@ class TestCFSecretGovernance:
         )
         hex_violations = self._scan_files_for_long_hex(CF_DIR / "test")
         all_violations = prefix_violations + hex_violations
-        assert not all_violations, (
-            "Suspicious literals found in test/:\n" + "\n".join(all_violations)
+        assert not all_violations, "Suspicious literals found in test/:\n" + "\n".join(
+            all_violations
         )
 
     def test_src_token_headers_from_env_bindings(self):
@@ -280,9 +277,7 @@ class TestCFSecretGovernance:
             # Check X-CI-Token is sourced from env.CI_TOKEN
             if "X-CI-Token" in content:
                 if "env.CI_TOKEN" not in content:
-                    violations.append(
-                        f"{js_file.name}: X-CI-Token not sourced from env.CI_TOKEN"
-                    )
+                    violations.append(f"{js_file.name}: X-CI-Token not sourced from env.CI_TOKEN")
 
             # Check X-Wiki-Token is sourced from env.WIKI_TOKEN
             if "X-Wiki-Token" in content:
@@ -294,13 +289,16 @@ class TestCFSecretGovernance:
             # Check X-Posthog-Token is passthrough from request headers
             if "X-Posthog-Token" in content:
                 # Must read from request headers, not from a hardcoded string
-                if "request.headers.get" not in content and "x-posthog-token" not in content.lower():
+                if (
+                    "request.headers.get" not in content
+                    and "x-posthog-token" not in content.lower()
+                ):
                     violations.append(
                         f"{js_file.name}: X-Posthog-Token not from request header passthrough"
                     )
 
-        assert not violations, (
-            "Token headers not sourced from env/secrets:\n" + "\n".join(violations)
+        assert not violations, "Token headers not sourced from env/secrets:\n" + "\n".join(
+            violations
         )
 
 
