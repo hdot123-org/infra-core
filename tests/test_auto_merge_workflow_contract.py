@@ -328,7 +328,7 @@ class TestReusablePipelineTemplateContract:
 
     def test_permissions_block(self) -> None:
         perms = _load_doc(AUTO_MERGE_PIPELINE_YML).get("permissions", {})
-        assert perms == {"contents": "write", "pull-requests": "write", "checks": "read"}
+        assert perms == {"contents": "write", "pull-requests": "write", "checks": "read", "actions": "read"}
 
     def test_all_jobs_self_hosted(self) -> None:
         for job_name, job in _load_doc(AUTO_MERGE_PIPELINE_YML)["jobs"].items():
