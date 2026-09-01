@@ -45,8 +45,13 @@ jobs:
       # 本步随后 relock push；下一轮 sweep 时 Release PR 已含 uv.lock，
       # action 不会回退该文件（只重写自己管理的清单文件）。
       # uv 用 runner 宿主预装二进制（PATH 优先，runner-tools.toml 单一
-      # 事实源），无 checkout/uv 可用时跳过并警告——发版不因 relock 失败
-      # 中断，漂移由 repo_health_check.sh Check 1b 门禁兜底拦截。
+      # 事实源），无 uv 可用时跳过并警告——发版不因 relock 失败中断，
+      # 漂移由 repo_health_check.sh Check 1b 门禁兜底拦截。
+      # 分支探测：v4 action 无 release_branch output（INFRA-712 原实现
+      # 引用了不存在的输出，两轮 schedule 实测永久空跳过，PR #171 漂移
+      # 实证）。改用 gh 按 autorelease: pending 标签查询 Release PR 分支，
+      # 不依赖 action 输出。本 job 无 actions/checkout，relock 在独立
+      # 临时克隆中进行，不依赖/污染共享工作区。
       - name: Relock uv.lock on Release PR (INFRA-712)
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
@@ -58,21 +63,28 @@ jobs:
             exit 0
           fi
 
-          # release-please-action 输出 release 分支名；无 Release PR 开着
-          # （如纯 tag 发版轮）时 outputs 为空，本步无事可做
-          BRANCH="${{ steps.release.outputs.release_branch }}"
+          # 按 autorelease: pending 标签定位当前 Release PR 分支；无
+          # Release PR 开着（如纯 tag 发版轮）时本步无事可做
+          BRANCH="$(gh pr list -R "${GITHUB_REPOSITORY}" --state open \
+            --label "autorelease: pending" --limit 1 \
+            --json headRefName --jq '.[0].headRefName // empty' 2>/dev/null || true)"
           if [ -z "$BRANCH" ]; then
             echo "No open Release PR this run; nothing to relock"
             exit 0
           fi
           echo "Release PR branch: $BRANCH"
 
+          # 独立临时浅克隆 Release PR 分支（本 job 无 checkout，不能
+          # 假设共享工作区有可用 git 仓库；浅克隆足够 relock 单文件）
+          WORKDIR="$(mktemp -d)"
+          trap 'rm -rf "$WORKDIR"' EXIT
+          git clone --quiet --depth 1 --branch "$BRANCH" \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "$WORKDIR/repo"
+          cd "$WORKDIR/repo"
+
           git config user.name "release-please[bot]"
           git config user.email "release-please[bot]@users.noreply.github.com"
-
-          # checkout Release PR 分支（浅克隆足够 relock；不污染共享工作区）
-          git fetch origin "$BRANCH"
-          git checkout -B "$BRANCH" "origin/$BRANCH"
 
           # relock：更新 uv.lock 根包版本至 pyproject 当前版本（幂等——
           # 已对齐时 uv lock 不产生 diff）
