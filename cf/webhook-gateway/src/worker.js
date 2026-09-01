@@ -17,9 +17,11 @@ import { route } from './router.js';
 // ---------------------------------------------------------------------------
 const CI_WEBHOOK_BASE = 'https://ci-webhook.exa.edu.kg';
 const GITHUB_API_BASE = 'https://api.github.com';
+const POSTHOG_CAPTURE_URL = 'https://us.posthog.com/capture/';
 const MAX_RETRIES = 2;
 const RETRY_BASE_MS = 500;
 const IDEMPOTENCY_WINDOW_SEC = 600; // 10 minutes
+const POSTHOG_CAPTURE_TIMEOUT_MS = 2000; // 2s timeout for PostHog capture
 
 // ---------------------------------------------------------------------------
 // HMAC Verification (fail-closed)
@@ -87,6 +89,69 @@ function sleep(ms) {
 }
 
 // ---------------------------------------------------------------------------
+// PostHog metadata capture (metadata-only, no payload fields)
+// ---------------------------------------------------------------------------
+const POSTHOG_ALLOWED_FIELDS = new Set([
+  'route',
+  'event',
+  'repo',
+  'outcome',
+  'http_status',
+  'duration_ms',
+  'request_id',
+]);
+
+/**
+ * Capture metadata-only event to PostHog.
+ * Silently catches errors + 2s abort — never affects the main forwarding path.
+ */
+export function capturePostHog(env, metadata) {
+  const key = env.POSTHOG_CAPTURE_KEY;
+  if (!key) {
+    console.warn('[posthog] POSTHOG_CAPTURE_KEY not configured, capture skipped');
+    return;
+  }
+
+  // Build properties — whitelist enforcement: only metadata fields allowed
+  const properties = {};
+  for (const [k, v] of Object.entries(metadata)) {
+    if (POSTHOG_ALLOWED_FIELDS.has(k)) {
+      properties[k] = v;
+    }
+  }
+
+  const payload = {
+    api_key: key,
+    event: 'cf_worker_request',
+    properties: {
+      distinct_id: 'webhook-gateway',
+      ...properties,
+    },
+  };
+
+  // Fire-and-forget with 2s abort — never blocks main path
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), POSTHOG_CAPTURE_TIMEOUT_MS);
+
+  fetch(POSTHOG_CAPTURE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: controller.signal,
+  })
+    .then((resp) => {
+      clearTimeout(timeout);
+      if (!resp.ok) {
+        console.warn(`[posthog] capture response ${resp.status}`);
+      }
+    })
+    .catch((err) => {
+      clearTimeout(timeout);
+      console.warn(`[posthog] capture failed: ${err.message}`);
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Fetch Handler
 // ---------------------------------------------------------------------------
 async function handleFetch(request, env, ctx) {
@@ -124,14 +189,25 @@ async function handleFetch(request, env, ctx) {
 }
 
 async function handleGitHubWebhook(request, env) {
+  const startTime = Date.now();
   const body = await request.text();
   const signature = request.headers.get('x-hub-signature-256');
   const githubEvent = request.headers.get('x-github-event') || '';
+  const requestId = request.headers.get('x-github-delivery') || '';
 
   // HMAC verification (fail-closed)
   const secret = env.GITHUB_WEBHOOK_SECRET || null;
   const valid = await verifySignature(body, signature, secret);
   if (!valid) {
+    const duration = Date.now() - startTime;
+    capturePostHog(env, {
+      route: 'github-webhook',
+      event: githubEvent,
+      outcome: 'rejected',
+      http_status: 401,
+      duration_ms: duration,
+      request_id: requestId,
+    });
     return jsonResponse(
       { status: 'error', error: 'Signature verification failed' },
       401
@@ -143,13 +219,33 @@ async function handleGitHubWebhook(request, env) {
   try {
     payload = JSON.parse(body);
   } catch {
+    const duration = Date.now() - startTime;
+    capturePostHog(env, {
+      route: 'github-webhook',
+      event: githubEvent,
+      outcome: 'rejected',
+      http_status: 400,
+      duration_ms: duration,
+      request_id: requestId,
+    });
     return jsonResponse({ status: 'error', error: 'Invalid JSON' }, 400);
   }
 
   // Route decision
   const decision = route(githubEvent, payload);
+  const repo = payload.repository?.full_name || '';
 
   if (decision.action === 'none') {
+    const duration = Date.now() - startTime;
+    capturePostHog(env, {
+      route: decision.route,
+      event: decision.event,
+      repo,
+      outcome: 'ok',
+      http_status: 200,
+      duration_ms: duration,
+      request_id: requestId,
+    });
     return jsonResponse({
       status: 'ok',
       route: decision.route,
@@ -180,7 +276,27 @@ async function handleGitHubWebhook(request, env) {
       headers,
       body,
     });
+    const duration = Date.now() - startTime;
+    capturePostHog(env, {
+      route: decision.route,
+      event: decision.event,
+      repo,
+      outcome: 'forwarded',
+      http_status: 200,
+      duration_ms: duration,
+      request_id: requestId,
+    });
   } catch (err) {
+    const duration = Date.now() - startTime;
+    capturePostHog(env, {
+      route: decision.route,
+      event: decision.event,
+      repo,
+      outcome: 'error',
+      http_status: 502,
+      duration_ms: duration,
+      request_id: requestId,
+    });
     return jsonResponse(
       {
         status: 'error',
@@ -202,6 +318,7 @@ async function handleGitHubWebhook(request, env) {
 }
 
 async function handlePosthogError(request, env) {
+  const startTime = Date.now();
   const body = await request.text();
   const posthogToken = request.headers.get('x-posthog-token') || '';
 
@@ -219,7 +336,23 @@ async function handlePosthogError(request, env) {
       headers,
       body,
     });
+    const duration = Date.now() - startTime;
+    capturePostHog(env, {
+      route: 'posthog-error',
+      event: 'posthog-error',
+      outcome: 'forwarded',
+      http_status: 200,
+      duration_ms: duration,
+    });
   } catch (err) {
+    const duration = Date.now() - startTime;
+    capturePostHog(env, {
+      route: 'posthog-error',
+      event: 'posthog-error',
+      outcome: 'error',
+      http_status: 502,
+      duration_ms: duration,
+    });
     return jsonResponse(
       { status: 'error', error: 'Forwarding failed', detail: err.message },
       502
@@ -233,6 +366,7 @@ async function handlePosthogError(request, env) {
 // Scheduled Handler (cron → repository_dispatch)
 // ---------------------------------------------------------------------------
 async function handleScheduled(event, env, ctx) {
+  const startTime = Date.now();
   const dispatchToken = env.DISPATCH_TOKEN || null;
   const kv = env.IDEMPOTENCY_KV || null;
 
@@ -242,6 +376,14 @@ async function handleScheduled(event, env, ctx) {
     const existing = await kv.get(idempotencyKey);
     if (existing) {
       console.log(`[scheduled] Idempotency hit: ${idempotencyKey}, skipping`);
+      const duration = Date.now() - startTime;
+      capturePostHog(env, {
+        route: 'scheduled',
+        event: 'cron',
+        outcome: 'ok',
+        duration_ms: duration,
+        request_id: `scheduled-${idempotencyKey}`,
+      });
       return;
     }
     // Set lock with 2x window TTL
@@ -257,6 +399,14 @@ async function handleScheduled(event, env, ctx) {
 
   if (!dispatchToken) {
     console.warn('[scheduled] DISPATCH_TOKEN not configured, dispatch skipped');
+    const duration = Date.now() - startTime;
+    capturePostHog(env, {
+      route: 'scheduled',
+      event: 'cron',
+      outcome: 'rejected',
+      duration_ms: duration,
+      request_id: `scheduled-${idempotencyKey}`,
+    });
     return;
   }
 
@@ -283,8 +433,25 @@ async function handleScheduled(event, env, ctx) {
       body,
     });
     console.log(`[scheduled] dispatch status=${resp.status}`);
+    const duration = Date.now() - startTime;
+    capturePostHog(env, {
+      route: 'scheduled',
+      event: 'cron',
+      outcome: resp.ok ? 'forwarded' : 'error',
+      http_status: resp.status,
+      duration_ms: duration,
+      request_id: `scheduled-${idempotencyKey}`,
+    });
   } catch (err) {
     console.error(`[scheduled] dispatch failed: ${err.message}`);
+    const duration = Date.now() - startTime;
+    capturePostHog(env, {
+      route: 'scheduled',
+      event: 'cron',
+      outcome: 'error',
+      duration_ms: duration,
+      request_id: `scheduled-${idempotencyKey}`,
+    });
   }
 }
 
