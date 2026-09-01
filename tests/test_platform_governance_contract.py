@@ -19,6 +19,7 @@ F8 断言面（Rulesets 迁移 + 合并设置）：
 - classic protection 404
 - /rules/branches/main 聚合生效
 - 合并设置六字段（squash-only + delete/auto/update）
+- 静态锚点（INFRA-715）：F8 期望值防篡改双保险，无凭证环境（含 CI）生效
 
 凭证现实：CI pytest job 无 GH_TOKEN 注入且 GITHUB_TOKEN 无 administration
 读权限 → CI 内 skip 是设计内降级，非 skip 证据 = 本地带凭证运行。
@@ -30,6 +31,10 @@ F8 断言面（Rulesets 迁移 + 合并设置）：
 VAL-M3-012 补充（2026-09-01，INFRA-713）：allowlist 放行面 ⊇ 仓库远程
 uses owner 集（无隐性断路）。静态锚点断言无凭证也生效（CI 内可跑），
 线上断言捕获 allowlist pattern 被删/改窄的漂移。
+
+INFRA-715 补充（2026-09-01）：F8 期望值静态锚点（TestF8StaticAnchors）。
+F8 live 断言在 CI 内全 SKIPPED（无凭证），期望值锚点此前在无凭证环境
+零防护；静态锚点对齐 #168 F7 先例，防期望值被篡改后 live 断言静默放行。
 """
 
 import json
@@ -315,6 +320,33 @@ class TestAllowlistCoverageLive:
 # enforcement 归一化集合：API 响应可能返回 "enabled" 或 "active"，语义等价
 _ENFORCEMENT_ACTIVE = {"active", "enabled"}
 
+# F8 期望值锚点（INFRA-715）— live 断言的唯一期望来源，静态锚点测试钉死。
+# 结构：live 断言消费锚点常量（改线上期望必改锚点）；TestF8StaticAnchors
+# 用独立字面量钉死锚点（改锚点必过静态断言这关）。单点篡改必然留红：
+# 只改锚点 → 静态断言红；只改静态字面量 → 与锚点不一致即红。两处同改
+# 则等同显式重写治理基线，须过评审。
+_F8_RULESET_NAME = "main-branch-protection"
+_F8_REF_NAME_INCLUDE = ("~DEFAULT_BRANCH",)
+_F8_RSC_CHECKS_ANCHOR = frozenset({("ci-ok", 15368), ("qa-ok", 15368)})
+_F8_ALLOWED_MERGE_METHODS_ANCHOR = ("squash",)
+_F8_RULE_TYPES_ANCHOR = frozenset(
+    {
+        "required_status_checks",
+        "required_linear_history",
+        "deletion",
+        "non_fast_forward",
+        "pull_request",
+    }
+)
+_F8_MERGE_SETTINGS_ANCHOR = {
+    "allow_squash_merge": True,
+    "allow_merge_commit": False,
+    "allow_rebase_merge": False,
+    "delete_branch_on_merge": True,
+    "allow_auto_merge": True,
+    "allow_update_branch": True,
+}
+
 
 def _have_write_credentials() -> bool:
     """检测是否有 write+ 凭证（可读取 bypass_actors 字段）。
@@ -383,9 +415,9 @@ class TestRulesetsExistence:
     def test_main_branch_protection_ruleset_exists(self):
         """ruleset main-branch-protection 存在且 enforcement 归一化为 active。"""
         rulesets = _get_rulesets_list()
-        matching = [rs for rs in rulesets if rs.get("name") == "main-branch-protection"]
+        matching = [rs for rs in rulesets if rs.get("name") == _F8_RULESET_NAME]
         assert len(matching) == 1, (
-            f"应恰好有一个 main-branch-protection ruleset, 找到 {len(matching)} 个"
+            f"应恰好有一个 {_F8_RULESET_NAME} ruleset, 找到 {len(matching)} 个"
         )
         rs = matching[0]
         # enforcement 归一化: active/enabled 等价
@@ -399,8 +431,8 @@ class TestRulesetsExistence:
         detail = _get_ruleset_detail(_find_ruleset_id())
         conditions = detail.get("conditions", {})
         ref_name = conditions.get("ref_name", {})
-        assert ref_name.get("include") == ["~DEFAULT_BRANCH"], (
-            f"ref_name.include 应为 ['~DEFAULT_BRANCH'], 实际 {ref_name.get('include')}"
+        assert ref_name.get("include") == list(_F8_REF_NAME_INCLUDE), (
+            f"ref_name.include 应为 {list(_F8_REF_NAME_INCLUDE)}, 实际 {ref_name.get('include')}"
         )
         assert ref_name.get("exclude") == [], (
             f"ref_name.exclude 应为 [], 实际 {ref_name.get('exclude')}"
@@ -423,7 +455,7 @@ class TestRulesetsFiveRuleTypes:
 
         checks = params["required_status_checks"]
         check_set = {(c["context"], c["integration_id"]) for c in checks}
-        expected = {("ci-ok", 15368), ("qa-ok", 15368)}
+        expected = set(_F8_RSC_CHECKS_ANCHOR)
         assert check_set == expected, (
             f"required_status_checks 集合不匹配: 期望 {expected}, 实际 {check_set}"
         )
@@ -463,8 +495,9 @@ class TestRulesetsFiveRuleTypes:
         assert params["required_approving_review_count"] == 0, (
             f"required_approving_review_count 应为 0, 实际 {params['required_approving_review_count']}"
         )
-        assert params["allowed_merge_methods"] == ["squash"], (
-            f"allowed_merge_methods 应为 ['squash'], 实际 {params['allowed_merge_methods']}"
+        expected_methods = list(_F8_ALLOWED_MERGE_METHODS_ANCHOR)
+        assert params["allowed_merge_methods"] == expected_methods, (
+            f"allowed_merge_methods 应为 {expected_methods}, 实际 {params['allowed_merge_methods']}"
         )
 
 
@@ -533,13 +566,7 @@ class TestAggregatedRules:
             raise RuntimeError(f"GET rules/branches/main failed: {result.stderr[:200]}")
         rules = json.loads(result.stdout)
         rule_types = {r["type"] for r in rules}
-        expected_types = {
-            "required_status_checks",
-            "required_linear_history",
-            "deletion",
-            "non_fast_forward",
-            "pull_request",
-        }
+        expected_types = set(_F8_RULE_TYPES_ANCHOR)
         assert expected_types.issubset(rule_types), (
             f"聚合规则缺类型: 期望 {expected_types}, 实际 {rule_types}"
         )
@@ -575,13 +602,78 @@ class TestMergeSettingsSquashOnly:
             raise RuntimeError(f"GET repo failed: {result.stderr[:200]}")
         data = json.loads(result.stdout)
 
-        expected = {
+        expected = dict(_F8_MERGE_SETTINGS_ANCHOR)
+        for field, exp_val in expected.items():
+            assert data[field] == exp_val, f"{field} 应为 {exp_val}, 实际 {data[field]}"
+
+
+# ---------------------------------------------------------------------------
+# F8 静态锚点（INFRA-715）— 期望值防篡改，无凭证环境（含 CI）也生效
+# ---------------------------------------------------------------------------
+# 现实：上方 F8 live 断言（VAL-M3-013~018）全部依赖 gh 凭证，CI pytest
+# job 无 GH_TOKEN → CI 内 11 个 F8 测试全 SKIPPED，期望值在无凭证环境
+# 零防护。若 live 断言内联期望值，篡改期望（如 allow_merge_commit
+# False→True）后断言与线上漂移一致，漂移被静默放行。
+# 本节的防篡改结构（对齐 #168 为 F7 补 TestAllowlistCoverageStatic 的
+# 先例，并升级为锚点单源）：
+# 1. live 断言不写内联期望，只消费锚点常量 → 改线上期望必改锚点；
+# 2. TestF8StaticAnchors 用独立字面量钉死锚点常量 → 改锚点在 CI 内即红
+#    （无凭证也跑），先于 live 断言静默失效暴露。
+# 单点篡改必然留红：只改锚点 → 静态断言红；两处同改 = 显式重写治理
+# 基线，须过评审。
+
+
+class TestF8StaticAnchors:
+    """F8 期望值静态锚点断言 — 防篡改双保险，无凭证环境（含 CI）生效。"""
+
+    def test_merge_settings_anchor_unchanged(self) -> None:
+        """合并设置六字段锚点未被篡改（squash-only + delete/auto/update）。"""
+        assert _F8_MERGE_SETTINGS_ANCHOR == {
             "allow_squash_merge": True,
             "allow_merge_commit": False,
             "allow_rebase_merge": False,
             "delete_branch_on_merge": True,
             "allow_auto_merge": True,
             "allow_update_branch": True,
-        }
-        for field, exp_val in expected.items():
-            assert data[field] == exp_val, f"{field} 应为 {exp_val}, 实际 {data[field]}"
+        }, (
+            f"F8 合并设置锚点被修改: {_F8_MERGE_SETTINGS_ANCHOR} — 平台层 squash-only "
+            "收敛（VAL-M3-018）是治理基线，改锚点须过评审"
+        )
+
+    def test_ruleset_identity_anchors(self) -> None:
+        """ruleset 名称、enforcement 归一化、ref_name 条件锚点未被篡改。"""
+        assert _F8_RULESET_NAME == "main-branch-protection", (
+            f"ruleset 名称锚点被修改: {_F8_RULESET_NAME}"
+        )
+        assert _ENFORCEMENT_ACTIVE == {"active", "enabled"}, (
+            f"enforcement 归一化锚点被修改: {sorted(_ENFORCEMENT_ACTIVE)} — "
+            "收窄该集合会让 disabled/evaluate 形态漏判"
+        )
+        assert _F8_REF_NAME_INCLUDE == ("~DEFAULT_BRANCH",), (
+            f"ref_name.include 锚点被修改: {_F8_REF_NAME_INCLUDE} — "
+            "改条件会让 ruleset 脱离默认分支保护面"
+        )
+
+    def test_required_status_checks_anchor(self) -> None:
+        """required_status_checks 锚点 = {(ci-ok, 15368), (qa-ok, 15368)}。"""
+        assert _F8_RSC_CHECKS_ANCHOR == {("ci-ok", 15368), ("qa-ok", 15368)}, (
+            f"required_status_checks 锚点被修改: {sorted(_F8_RSC_CHECKS_ANCHOR)} — "
+            "删 check（如 qa-ok）会静默拆掉 merge 门禁"
+        )
+
+    def test_merge_methods_and_rule_types_anchor(self) -> None:
+        """allowed_merge_methods 仅 squash；五类规则类型齐全。"""
+        assert _F8_ALLOWED_MERGE_METHODS_ANCHOR == ("squash",), (
+            f"allowed_merge_methods 锚点被修改: {_F8_ALLOWED_MERGE_METHODS_ANCHOR} — "
+            "扩为 merge/rebase 即拆掉 squash-only 基线"
+        )
+        assert _F8_RULE_TYPES_ANCHOR == {
+            "required_status_checks",
+            "required_linear_history",
+            "deletion",
+            "non_fast_forward",
+            "pull_request",
+        }, (
+            f"五类规则类型锚点被修改: {sorted(_F8_RULE_TYPES_ANCHOR)} — 删任一规则类型"
+            "（如 deletion）会静默放开对应保护面"
+        )
