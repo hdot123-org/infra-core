@@ -12,7 +12,14 @@
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
 import worker from '../src/worker.js';
+
+// Node 18 无全局 WebCrypto（crypto.subtle 为 CF Workers 运行时原生能力，Node 19+ 才默认全局）。
+// 测试环境注入同构 polyfill；幂等守卫避免覆盖 Node 19+ 已有全局。
+if (!globalThis.crypto) {
+  globalThis.crypto = webcrypto;
+}
 
 describe('PostHog metadata capture (VAL-CF-011)', () => {
   const POSTHOG_KEY = 'phc_test_key_12345';
