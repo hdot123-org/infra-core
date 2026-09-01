@@ -1,0 +1,24 @@
+# CF Worker — webhook-gateway
+# M4 基础层：承接 n8n CI webhook 能力（绿地新建，不占生产域名）
+# 本里程碑仅部署到 workers.dev 子域，不绑定 webhook.exa.edu.kg
+
+name = "webhook-gateway"
+main = "src/worker.js"
+compatibility_date = "2024-12-01"
+account_id = "97d8129421b7b8e445718ff9891be1d9"
+
+# Cron: every 10 minutes — repository_dispatch 兜底 + 心跳
+[triggers]
+crons = ["*/10 * * * *"]
+
+# KV namespace for idempotency locks (F2 部署时绑定)
+# [[kv_namespaces]]
+# binding = "IDEMPOTENCY_KV"
+# id = "<F2 部署时填入>"
+
+# Workers secrets (经 wrangler secret put 设置，永不入库):
+# - GITHUB_WEBHOOK_SECRET: HMAC 验签密钥 (新生成)
+# - CI_TOKEN: X-CI-Token 出站头值 (来源: library/cf-webhook-gateway.md 映射表)
+# - WIKI_TOKEN: X-Wiki-Token 出站头值 (同上)
+# - DISPATCH_TOKEN: repository_dispatch Authorization (排查序: 1P → repo secrets → 本机)
+# - POSTHOG_TOKEN: X-Posthog-Token 透传值 (来源: 1P 或 Mac hooks.json)
