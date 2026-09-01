@@ -52,6 +52,7 @@ permissions:
   contents: write
   pull-requests: write
   checks: read
+  actions: read
 
 # INFRA-428：收敛并发扫。schedule 每 30 分钟 + workflow_run 事件可能让
 # 同一 PR 被两条腿同时处理（update-branch 双发、冲突评论 TOCTOU 双发）。
