@@ -6456,11 +6456,13 @@ def test_heartbeat_workflow_yaml_exists():
 
 
 def test_heartbeat_workflow_has_independent_cron():
-    """M4: heartbeat 载体为 reusable（workflow_call + workflow_dispatch 桩保留）。
+    """M4→INFRA-717: heartbeat 载体为 reusable（workflow_call + workflow_dispatch）。
 
-    原 cron 调度随 M4 切换迁回消费仓 thin caller（per-repo 定时，本期不
-    中央化）——reusable 本体禁止携带 schedule；触发面契约由消费仓命名
-    契约测试锁定。
+    消费仓定时面在其 thin caller；引擎仓自身作为自扫消费仓无法建 thin caller
+    （heartbeat 探活按本文件名解析 run 历史 + 消费仓按文件路径引用，双契约
+    钉死文件名），故本文件自带 schedule 承担引擎仓自扫心跳定时面（M2 HOTFIX
+    禁 cron 后漏建，2026-09-01 INFRA-717 13h 空窗告警根因）。schedule 仅在
+    宿主仓生效，消费仓 caller 不受影响。
     """
     import yaml
 
@@ -6476,9 +6478,13 @@ def test_heartbeat_workflow_has_independent_cron():
     on_triggers = data.get("on") or data.get(True)
     assert on_triggers is not None, "Workflow must have 'on' triggers"
     assert "workflow_dispatch" in on_triggers, "Workflow must have workflow_dispatch trigger"
-    # M4: reusable 必须暴露 workflow_call；schedule 归消费仓 caller
+    # M4: reusable 必须暴露 workflow_call
     assert "workflow_call" in on_triggers, "Reusable must expose workflow_call trigger"
-    assert "schedule" not in on_triggers, "Reusable must NOT carry schedule (per-repo scheduling)"
+    # INFRA-717: 引擎仓自扫心跳定时面（无 thin caller 可归属）
+    schedule = on_triggers.get("schedule")
+    assert schedule, "Reusable must carry INFRA-717 self-scan schedule (no thin caller)"
+    crons = [entry["cron"] for entry in schedule]
+    assert crons == ["53 */2 * * *"], f"Self-scan heartbeat cron anchor drifted: {crons}"
 
 
 def test_heartbeat_freshness_check_stale():
