@@ -4,8 +4,9 @@ thin caller（消费仓）保留：文件名 evolution-scan.yml、schedule cron�
 secrets 显式转发、事件触发面——由消费仓命名契约测试锁定；
 本文件锁定 shipped reusable 模板：执行体步骤、环境契约（DISPATCH_TOKEN /
 LINEAR_API_KEY / PYTHONSAFEPATH / pip install -e . / label-ensure / evolution-history
-cache）、engine 经 ``python -m infra_core.engine.*`` 运行、以及 reusable 本身
-**不得**携带 schedule（per-repo 定时，本期不中央化）。
+cache）、engine 经 ``python -m infra_core.engine.*`` 运行、以及 INFRA-717 起的
+引擎仓自扫 schedule 触发面（本仓自身作为自扫消费仓的定时面，见
+test_*_self_scan_schedule）。
 """
 
 from pathlib import Path
@@ -38,12 +39,24 @@ def test_scan_reusable_name_byte_exact():
     assert _load(_SCAN)["name"] == "Evolution Scan Reusable"
 
 
-def test_scan_reusable_triggers_call_only_no_schedule():
-    """workflow_call + workflow_dispatch；schedule 禁止出现（per-repo 定时归 caller）。"""
+def test_scan_reusable_triggers_and_self_scan_schedule():
+    """workflow_call + workflow_dispatch + 引擎仓自扫 schedule（INFRA-717）。
+
+    schedule 面历史：M4 时点本测试曾断言 no-schedule（定时归消费仓 thin caller），
+    但引擎仓自身作为消费仓无法建 thin caller（文件名被消费仓 uses 路径引用 +
+    heartbeat SCANNER_WORKFLOW 按文件名探活双契约钉死），其自扫定时面一直漏建，
+    全靠外部不规则 dispatch + heartbeat 自愈兜底——2026-09-01 INFRA-717 13h
+    空窗严重告警的根因。schedule 仅在宿主仓生效，消费仓 caller 不受影响。
+    """
     triggers = _triggers(_load(_SCAN))
     assert "workflow_call" in triggers, "reusable must expose workflow_call"
     assert "workflow_dispatch" in triggers
-    assert "schedule" not in triggers, "reusable 不得带 schedule——定时触发面属消费仓 thin caller"
+    schedule = triggers.get("schedule")
+    assert schedule, "INFRA-717：引擎仓自扫必须自带 schedule（无 thin caller 可归属）"
+    crons = [entry["cron"] for entry in schedule]
+    assert crons == ["17,47 * * * *"], (
+        f"自扫 cron 锚点漂移：{crons}（分钟位须避开 :00/:30 load-shed 窗，INFRA-578）"
+    )
 
 
 def test_scan_reusable_secrets_contract():
@@ -120,11 +133,19 @@ def test_heartbeat_reusable_name_byte_exact():
     assert _load(_HEARTBEAT)["name"] == "Evolution Heartbeat Reusable"
 
 
-def test_heartbeat_reusable_triggers_call_only_no_schedule():
+def test_heartbeat_reusable_triggers_and_self_scan_schedule():
+    """workflow_call + workflow_dispatch + 引擎仓自扫心跳 schedule（INFRA-717）。
+
+    同 scan 侧：本仓自扫心跳无 thin caller 可归属（探活按本文件名解析 run
+    历史），自带 schedule 恢复定时面。重复 tick 无害（自愈幂等）。
+    """
     triggers = _triggers(_load(_HEARTBEAT))
     assert "workflow_call" in triggers
     assert "workflow_dispatch" in triggers
-    assert "schedule" not in triggers
+    schedule = triggers.get("schedule")
+    assert schedule, "INFRA-717：引擎仓自扫心跳必须自带 schedule"
+    crons = [entry["cron"] for entry in schedule]
+    assert crons == ["53 */2 * * *"], f"自扫心跳 cron 锚点漂移：{crons}"
 
 
 def test_heartbeat_reusable_secrets_and_engine():
