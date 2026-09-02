@@ -163,7 +163,7 @@ def test_main_scanner_stale_returns_1():
         patch("evolution_heartbeat.alert_issue_exists", return_value=False),
         patch("evolution_heartbeat.create_alert_issue") as mock_create,
         patch("evolution_heartbeat.write_monitor_heartbeat"),
-        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=False),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=(False, None)),
     ):
         mock_run.return_value = _gh_result(json.dumps(runs))
         mock_hb.return_value = {"stale": True, "message": "advisory"}
@@ -704,12 +704,12 @@ def test_resolve_cleared_alerts_skips_duplicate_comment_close_fails():
 
 
 def test_infra578_trigger_scanner_dispatch_success():
-    """INFRA-578: dispatch succeeds → True, correct gh workflow run command."""
+    """INFRA-578: dispatch succeeds → (True, None), correct gh workflow run command."""
     with patch("evolution_heartbeat.subprocess.run") as mock_run:
         mock_run.return_value = _gh_result(returncode=0)
         result = evolution_heartbeat.trigger_scanner_dispatch()
 
-    assert result is True
+    assert result == (True, None)
     mock_run.assert_called_once()
     args = mock_run.call_args[0][0]
     expected = [
@@ -723,22 +723,42 @@ def test_infra578_trigger_scanner_dispatch_success():
 
 
 def test_infra578_trigger_scanner_dispatch_failure():
-    """INFRA-578: gh workflow run fails → False (alert still raised by main)."""
+    """INFRA-578: gh workflow run fails → (False, detail) (alert still raised by main).
+
+    INFRA-722: the stderr detail is returned so the alert issue body can carry
+    it (token/permission drift diagnosable from the alert alone).
+    """
     with patch("evolution_heartbeat.subprocess.run") as mock_run:
         mock_run.return_value = _gh_result(returncode=1, stderr="workflow not found")
         result = evolution_heartbeat.trigger_scanner_dispatch()
 
-    assert result is False
+    assert result[0] is False
+    assert "workflow not found" in result[1]
+
+
+def test_infra722_trigger_scanner_dispatch_403_detail():
+    """INFRA-722: HTTP 403 rejection detail is returned verbatim for the alert body."""
+    stderr = (
+        "could not create workflow dispatch event: HTTP 403: "
+        "Resource not accessible by personal access token"
+    )
+    with patch("evolution_heartbeat.subprocess.run") as mock_run:
+        mock_run.return_value = _gh_result(returncode=1, stderr=stderr)
+        accepted, detail = evolution_heartbeat.trigger_scanner_dispatch()
+
+    assert accepted is False
+    assert detail == stderr
 
 
 def test_infra578_trigger_scanner_dispatch_timeout():
-    """INFRA-578: subprocess timeout → False, no exception escapes."""
+    """INFRA-578: subprocess timeout → (False, detail), no exception escapes."""
     with patch(
         "evolution_heartbeat.subprocess.run", side_effect=subprocess.TimeoutExpired("gh", 30)
     ):
         result = evolution_heartbeat.trigger_scanner_dispatch()
 
-    assert result is False
+    assert result[0] is False
+    assert result[1] is not None
 
 
 def test_infra578_main_stale_scanner_triggers_dispatch():
@@ -756,7 +776,7 @@ def test_infra578_main_stale_scanner_triggers_dispatch():
         patch("evolution_heartbeat.alert_issue_exists", return_value=False),
         patch("evolution_heartbeat.create_alert_issue") as mock_create,
         patch("evolution_heartbeat.write_monitor_heartbeat"),
-        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=False) as mock_dispatch,
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=(False, None)) as mock_dispatch,
     ):
         mock_run.return_value = _gh_result(json.dumps(runs))
         mock_hb.return_value = {"stale": True, "message": "advisory"}
@@ -813,7 +833,7 @@ def test_infra578_main_dispatch_failure_still_alerts():
         patch("evolution_heartbeat.alert_issue_exists", return_value=False),
         patch("evolution_heartbeat.create_alert_issue") as mock_create,
         patch("evolution_heartbeat.write_monitor_heartbeat"),
-        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=False),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=(False, None)),
     ):
         mock_run.return_value = _gh_result(json.dumps(runs))
         mock_hb.return_value = {"stale": True, "message": "advisory"}
@@ -855,7 +875,7 @@ def test_infra597_successful_dispatch_suppresses_alert():
         patch("evolution_heartbeat.alert_issue_exists") as mock_exists,
         patch("evolution_heartbeat.create_alert_issue") as mock_create,
         patch("evolution_heartbeat.write_monitor_heartbeat"),
-        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=True),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=(True, None)),
     ):
         mock_run.return_value = _gh_result(json.dumps(runs))
         mock_hb.return_value = {"stale": True, "message": "advisory"}
@@ -894,7 +914,7 @@ def test_infra597_suppression_heals_prior_alert():
         patch("evolution_heartbeat.alert_issue_exists", return_value=False),
         patch("evolution_heartbeat.create_alert_issue"),
         patch("evolution_heartbeat.write_monitor_heartbeat"),
-        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=True),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=(True, None)),
     ):
         mock_liveness.return_value = {
             "alive": False,
@@ -941,7 +961,7 @@ def test_infra597_severe_outage_alerts_despite_dispatch():
         patch("evolution_heartbeat.alert_issue_exists", return_value=False),
         patch("evolution_heartbeat.create_alert_issue") as mock_create,
         patch("evolution_heartbeat.write_monitor_heartbeat"),
-        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=True),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=(True, None)),
     ):
         mock_run.return_value = _gh_result(json.dumps(runs))
         mock_hb.return_value = {"stale": True, "message": "advisory"}
@@ -972,7 +992,7 @@ def test_infra597_suppression_does_not_affect_coverage_anomaly():
         patch("evolution_heartbeat.alert_issue_exists", return_value=False),
         patch("evolution_heartbeat.create_alert_issue") as mock_create,
         patch("evolution_heartbeat.write_monitor_heartbeat"),
-        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=True),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=(True, None)),
     ):
         mock_run.return_value = _gh_result(json.dumps(runs))
         mock_hb.return_value = {"stale": True, "message": "advisory"}
@@ -1006,7 +1026,7 @@ def test_infra597_suppression_boundary_exact_severe_threshold():
         patch("evolution_heartbeat.alert_issue_exists") as mock_exists,
         patch("evolution_heartbeat.create_alert_issue") as mock_create,
         patch("evolution_heartbeat.write_monitor_heartbeat"),
-        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=True),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=(True, None)),
     ):
         mock_run.return_value = _gh_result(json.dumps(runs))
         mock_hb.return_value = {"stale": True, "message": "advisory"}
@@ -1035,6 +1055,60 @@ def test_infra597_alert_body_includes_stale_hours():
     parsed = evolution_heartbeat.extract_recorded_anomalies(body)
     assert parsed == {"scanner_stale"}, "Roundtrip must survive the new suffix"
     assert "5.8h" in body
+
+
+def test_infra722_alert_body_includes_dispatch_error():
+    """INFRA-722: alert body carries the self-heal dispatch rejection detail.
+
+    2026-09-02 incident: a 3h-queued heartbeat executed with the pre-rotation
+    DISPATCH_TOKEN snapshot and got HTTP 403; the alert body only said
+    'self-heal dispatch failed or outage is severe' — the 403 lived solely in
+    run logs. The detail line must appear in the body AND the roundtrip must
+    still parse so the self-heal close keeps working.
+    """
+    stderr = (
+        "could not create workflow dispatch event: HTTP 403: "
+        "Resource not accessible by personal access token"
+    )
+    body = evolution_heartbeat._build_alert_body(
+        scanner_stale=True, issues_without_pr=0, scanner_stale_hours=3.1, dispatch_error=stderr
+    )
+    parsed = evolution_heartbeat.extract_recorded_anomalies(body)
+    assert parsed == {"scanner_stale"}, "Detail line must not register phantom anomalies"
+    assert "self-heal dispatch error" in body
+    assert "HTTP 403" in body
+
+
+def test_infra722_main_passes_dispatch_error_to_alert():
+    """INFRA-722: main() forwards the dispatch rejection detail to create_alert_issue."""
+    runs = [_recent_run(5.0, "success")]
+    with (
+        patch("evolution_heartbeat.subprocess.run") as mock_run,
+        patch("evolution_heartbeat.check_heartbeat_marker") as mock_hb,
+        patch("evolution_heartbeat.check_history_freshness") as mock_hist,
+        patch("evolution_heartbeat.check_pr_coverage") as mock_cov,
+        patch("evolution_heartbeat.alert_issue_exists", return_value=False),
+        patch("evolution_heartbeat.create_alert_issue") as mock_create,
+        patch("evolution_heartbeat.write_monitor_heartbeat"),
+        patch(
+            "evolution_heartbeat.trigger_scanner_dispatch",
+            return_value=(False, "HTTP 403: Resource not accessible by personal access token"),
+        ),
+    ):
+        mock_run.return_value = _gh_result(json.dumps(runs))
+        mock_hb.return_value = {"stale": True, "message": "advisory"}
+        mock_hist.return_value = {"stale": True, "message": "advisory"}
+        mock_cov.return_value = {
+            "issues_without_pr": 0,
+            "total_issues": 0,
+            "missing": [],
+        }
+        rc = evolution_heartbeat.main()
+
+    assert rc == 1
+    mock_create.assert_called_once()
+    kwargs = mock_create.call_args.kwargs
+    assert kwargs["dispatch_error"] == "HTTP 403: Resource not accessible by personal access token"
 
 
 def test_infra597_severity_threshold_locked():
@@ -1224,7 +1298,7 @@ def test_infra639_unknown_age_accepted_dispatch_suppresses_alert():
         patch("evolution_heartbeat.alert_issue_exists") as mock_exists,
         patch("evolution_heartbeat.create_alert_issue") as mock_create,
         patch("evolution_heartbeat.write_monitor_heartbeat"),
-        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=True),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=(True, None)),
     ):
         # gh run list fails → liveness probe error path (age None)
         mock_run.return_value = _gh_result(returncode=1, stderr="TLS handshake timeout")
@@ -1253,7 +1327,7 @@ def test_infra639_unknown_age_dispatch_rejected_still_alerts_without_inf():
         patch("evolution_heartbeat.alert_issue_exists", return_value=False),
         patch("evolution_heartbeat.create_alert_issue") as mock_create,
         patch("evolution_heartbeat.write_monitor_heartbeat"),
-        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=False),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=(False, None)),
     ):
         mock_run.return_value = _gh_result(returncode=1, stderr="TLS handshake timeout")
         mock_hb.return_value = {"stale": True, "message": "advisory"}
@@ -1295,7 +1369,7 @@ def test_infra639_severe_classification_requires_measured_age():
         patch("evolution_heartbeat.alert_issue_exists", return_value=False),
         patch("evolution_heartbeat.create_alert_issue") as mock_create,
         patch("evolution_heartbeat.write_monitor_heartbeat"),
-        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=True),
+        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=(True, None)),
     ):
         # Real measured 12h stale → severe → alert despite accepted dispatch
         runs = [_recent_run(12.0, "success")]

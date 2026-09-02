@@ -357,7 +357,7 @@ def _check_workflow_liveness(workflow: str, threshold_hours: int) -> dict[str, A
     return result
 
 
-def trigger_scanner_dispatch() -> bool:
+def trigger_scanner_dispatch() -> tuple[bool, str | None]:
     """Self-heal: trigger evolution-scan via workflow_dispatch (INFRA-578).
 
     GitHub-hosted scheduled runs are load-shed at peak minutes (cron slots on
@@ -365,7 +365,10 @@ def trigger_scanner_dispatch() -> bool:
     stale scanner, it re-triggers the scan immediately instead of waiting for
     the next cron slot that may be dropped again.
 
-    Returns True if the dispatch was accepted by the GitHub API.
+    Returns (accepted, error_detail). INFRA-722: the error detail is surfaced
+    in the alert issue body so token/permission failures (e.g. HTTP 403
+    "Resource not accessible by personal access token") are diagnosable from
+    the alert alone instead of only from run logs.
     """
     try:
         proc = subprocess.run(
@@ -376,14 +379,15 @@ def trigger_scanner_dispatch() -> bool:
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"[heartbeat] Scanner dispatch failed: {exc}")
-        return False
+        return False, f"dispatch subprocess failed: {exc}"
 
     if proc.returncode != 0:
-        print(f"[heartbeat] Scanner dispatch failed: {proc.stderr.strip()}")
-        return False
+        detail = proc.stderr.strip() or f"gh workflow run exited {proc.returncode}"
+        print(f"[heartbeat] Scanner dispatch failed: {detail}")
+        return False, detail
 
     print(f"[heartbeat] Self-heal: dispatched {SCANNER_WORKFLOW} via workflow_dispatch")
-    return True
+    return True, None
 
 
 def trigger_heartbeat_dispatch() -> bool:
@@ -698,12 +702,18 @@ def _build_alert_body(
     scanner_stale: bool,
     issues_without_pr: int,
     scanner_stale_hours: float | None = None,
+    dispatch_error: str | None = None,
 ) -> str:
     """Build alert issue body using shared constants.
 
     This function is the single source of truth for anomaly text format.
     The text MUST be parseable by extract_recorded_anomalies() using the same
     shared constants to prevent wording drift that would cause silent never-heal.
+
+    INFRA-722: dispatch_error (when the self-heal dispatch was rejected) is
+    appended as a plain detail line. It MUST NOT contain either anomaly marker
+    verbatim — extract_recorded_anomalies greps markers anywhere in the body,
+    so a marker inside the detail would register a phantom anomaly.
     """
     anomalies = []
     if scanner_stale:
@@ -734,6 +744,9 @@ def _build_alert_body(
     for anomaly in anomalies:
         body_lines.append(f"- {anomaly}")
 
+    if scanner_stale and dispatch_error:
+        body_lines.append(f"- self-heal dispatch error: {dispatch_error}")
+
     return "\n".join(body_lines)
 
 
@@ -742,6 +755,7 @@ def create_alert_issue(
     issues_without_pr: int,
     dedup_label: str = EVOLUTION_FOUND_LABEL,
     scanner_stale_hours: float | None = None,
+    dispatch_error: str | None = None,
 ) -> bool:
     """Create a GitHub Issue for detected pipeline anomalies.
 
@@ -751,7 +765,10 @@ def create_alert_issue(
         return False
 
     body = _build_alert_body(
-        scanner_stale, issues_without_pr, scanner_stale_hours=scanner_stale_hours
+        scanner_stale,
+        issues_without_pr,
+        scanner_stale_hours=scanner_stale_hours,
+        dispatch_error=dispatch_error,
     )
     title = "[heartbeat] Pipeline anomaly detected"
 
@@ -791,13 +808,14 @@ def main(history_path: Path = HISTORY_PATH) -> int:
     # not a stopped scanner. Only a failed dispatch (or a severe outage, see
     # below) still warrants an alert issue.
     dispatch_accepted = False
+    dispatch_error: str | None = None
     if liveness["alive"]:
         print(f"[heartbeat] {liveness['message']}")
     else:
         print(f"[heartbeat] ALERT: {liveness['message']}")
         # INFRA-578: self-heal first — re-trigger the scanner instead of
         # waiting for the next cron slot (peak-minute slots get load-shed).
-        dispatch_accepted = trigger_scanner_dispatch()
+        dispatch_accepted, dispatch_error = trigger_scanner_dispatch()
         if dispatch_accepted:
             stale_hours = liveness.get("hours_since_last_run")
             if stale_hours is not None and stale_hours > SCANNER_SEVERE_STALENESS_HOURS:
@@ -874,6 +892,9 @@ def main(history_path: Path = HISTORY_PATH) -> int:
                 scanner_stale_hours=(
                     measured_hours if stale_alertable and not liveness["alive"] else None
                 ),
+                # INFRA-722: attach the dispatch rejection detail (403 etc.) so
+                # the alert distinguishes token/permission drift from outage.
+                dispatch_error=dispatch_error,
             )
         write_monitor_heartbeat(anomaly_count)
         return 1  # Non-zero exit signals anomaly to CI
