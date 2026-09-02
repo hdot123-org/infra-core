@@ -83,12 +83,14 @@ memory 仓 GitHub hook (id=632882064) URL 改回：
 | `WIKI_TOKEN` | X-Wiki-Token 出站头 | Mac hooks.json 明文 | 现有值 |
 | `DISPATCH_TOKEN` | repository_dispatch Authorization | 排查序：1P → infra-core repo secrets → 本机配置 | 可能待补 |
 | `POSTHOG_TOKEN` | X-Posthog-Token 透传 | PostHog webhook 配置 / 1P | 低频路径 |
+| `POSTHOG_CAPTURE_KEY` | PostHog 元数据 capture（POST https://us.posthog.com/capture/） | PostHog 项目 406776 client ingest key（与 POSTHOG_TOKEN 不是同一凭证，勿混用） | VAL-CF-011 元数据上报用，半公开 client-side key |
 | `LINEAR_WEBHOOK_TOKEN` | X-Webhook-Token 出站头（Linear Issue/Comment 转发） | node-22 `/opt/n8n-webhook/workflows/linear-factory-gateway.json` 中的 token 值（43 位，经 stdin 管道上传） | Linear 类统一路径用 |
 
 **凭据纪律**：
 - 所有 secret 经 `wrangler secret put` stdin 管道设置，值不出现在命令行参数、git 历史、PR body
 - `cf/webhook-gateway/.dev.vars`（本地开发用）含 secret 值，已加入 .gitignore，**永不提交**
 - 代码中零硬编码 token 值——全部通过 `env.*` 引用
+- POSTHOG_CAPTURE_KEY 为 PostHog client ingest key（项目 406776），半公开，但与 POSTHOG_TOKEN（X-Posthog-Token 透传值）是不同凭证，勿混用
 
 ---
 
@@ -181,6 +183,7 @@ gh api repos/hdot123-org/memory-core/hooks/632882064 -X PATCH \
 - `CI_TOKEN` ✓
 - `WIKI_TOKEN` ✓
 - `POSTHOG_TOKEN` ✓
+- `POSTHOG_CAPTURE_KEY` ✓（PostHog 项目 406776 client ingest key，与 POSTHOG_TOKEN 不是同一凭证）
 - `GITHUB_WEBHOOK_SECRET` ✓（已重生成，round 1 泄漏值已作废）
 - `DISPATCH_TOKEN`: **缺口**（三路排查不可得，cron dispatch 留待切换前补）
 
@@ -188,13 +191,13 @@ gh api repos/hdot123-org/memory-core/hooks/632882064 -X PATCH \
 
 ### 6.3 影子回环验证
 
-**全链路已打通**（2026-09-01 17:00Z 实测）：
+**全链路已打通**（2026-09-02 14:51:38 UTC+8 实测，详见 §8.5）：
 
-1. 构造 Actions-notify payload（`repo="shadow-test"`, `pr_number=-1`）+ 本地 HMAC 签名
+1. 构造 push payload（`repository.full_name="shadow-parity-r3-test"`, `ref="refs/heads/shadow-parity-r3"`）+ 本地 HMAC 签名
 2. POST https://webhook-gateway.xun201811.workers.dev/webhook/events → 200 ✓
 3. Worker → ci-webhook.exa.edu.kg → Mac:5555 全链路到达 ✓
-4. Mac 侧日志样本出现：`~/.factory/webhook/logs/ci-complete-prunknown-20260901-192157.log` ✓
-5. 样本已清理 ✓
+4. Mac 侧日志样本出现：`~/.factory/webhook/logs/wiki-refresh-20260902-145138.log` ✓（含可辨识标记 BRANCH=shadow-parity-r3, REPO=shadow-parity-r3-test）
+5. 样本保留作为证据（详见 §8.5）；早期（2026-09-01）pre-Worker 直发样本 `ci-complete-prunknown-20260901-192157.log` 为旧轮次产物，已被 §8.5 的真实样本取代
 
 ### 6.4 Cron 配置 + 实测证据
 
@@ -204,7 +207,7 @@ gh api repos/hdot123-org/memory-core/hooks/632882064 -X PATCH \
 
 **运行时证据缺口**：
 - wrangler tail（Mac 本地）：15 分钟空输出（Mac→CF 通道墙内抖动）
-- wrangler tail（node-22）：已后台运行 16h+，捕获 0 行（同网络通道问题）
+- wrangler tail（node-22）：启动后捕获 0 行（同网络通道问题；早期文档曾记"16h+"为估算值，实际运行时间未严格计量，如实记录为空输出）
 - GraphQL 无法区分 triggerType（scheduled vs HTTP），5 次调用可能含影子测试的 HTTP 请求
 
 **结论**：配置级证明已拿到（schedule active + invocation telemetry 存在），但实际 ≥2 次 scheduled 触发的运行时间隔证据因 wrangler tail 网络通道问题暂未取得。此为本里程碑已知缺口，不阻塞部署完成。
@@ -252,6 +255,42 @@ gh api repos/hdot123-org/memory-core/hooks/632882064 -X PATCH \
 
 > **本 runbook 仅供未来切换参考。当前阶段不执行域名切换，worker 仍部署在 workers.dev 子域。**
 
+### 切换前必须裁定事项（待用户决策）
+
+切换域名前，以下设计缺口必须由用户裁定，worker 不得自行决策：
+
+**1. 真实 Linear/PostHog 生产方的认证缺口**
+
+Worker 的双通道认证（X-Hub-Signature-256 HMAC 或 X-CI-Token）仅接受 GitHub webhook 或 ci-notify 类调用方。但真实生产流量中：
+- Linear webhook 不携带 HMAC 签名（Linear 平台不支持 GitHub-style HMAC）
+- PostHog internal destination 不携带任何认证头
+
+这意味着切换域名后，真实 Linear webhook 和 PostHog error alert 会被 Worker 401 拒绝。
+
+**裁定选项**（需用户决策）：
+- 方案 A：为 Linear/PostHog 新增专用 token 头认证（如 X-Linear-Token、X-PostHog-Token），配置到生产方 webhook 设置
+- 方案 B：对 Linear/PostHog 类路由豁免认证（仅依赖 IP 白名单或来源校验）
+- 方案 C：保留现有 n8n 路径处理 Linear/PostHog，Worker 仅接管 GitHub webhook 和 ci-notify
+
+**2. 遗留独立路径 /webhook/posthog-error 的处置**
+
+当前 Worker 仍保留 `/webhook/posthog-error` 路由（透传 X-Posthog-Token），与"统一路径裁定"（所有 webhook 走 /webhook/events）存在冲突。
+
+**裁定选项**（需用户决策）：
+- 方案 A：切换时一并下线 /webhook/posthog-error，PostHog 改走 /webhook/events（需更新 PostHog internal destination 配置）
+- 方案 B：保留 /webhook/posthog-error 作为特殊路径（需在文档中注明例外理由）
+
+**3. VAL-CF-008 runtime cron 证据缺口**
+
+配置级证明已拿到（schedule active + invocation telemetry），但 wrangler tail 因网络通道问题（Mac/Node-22 → CF 墙内抖动）未能捕获 ≥2 次 scheduled 触发的运行时证据。
+
+**裁定选项**（需用户决策）：
+- 方案 A：接受配置级证明，切换前不补 runtime 证据
+- 方案 B：使用 CF API observability（如 Workers Analytics Engine）补一次 runtime 证据
+- 方案 C：在 Node-00 或其他网络通畅节点重新运行 wrangler tail
+
+---
+
 ### 前置条件检查
 
 1. **Worker 部署验证**
@@ -271,7 +310,7 @@ gh api repos/hdot123-org/memory-core/hooks/632882064 -X PATCH \
    ```bash
    # 确认所有必要 secrets 已上传
    npx wrangler secret list
-   # 预期包含：GITHUB_WEBHOOK_SECRET, CI_TOKEN, WIKI_TOKEN, LINEAR_WEBHOOK_TOKEN, POSTHOG_TOKEN
+   # 预期包含：GITHUB_WEBHOOK_SECRET, CI_TOKEN, WIKI_TOKEN, LINEAR_WEBHOOK_TOKEN, POSTHOG_TOKEN, POSTHOG_CAPTURE_KEY
    ```
 
 3. **生产零扰动确认**
@@ -470,6 +509,8 @@ Worker router.js 与生产 n8n github-events-router-v3.json 路由决策对比�
 真实载荷提取留作后续里程碑优化项，不阻塞本 PR 合并。
 
 ### 8.5 影子回环验证（VAL-WPARITY-002/003）
+
+> **注意**：本节为摘要记录，非逐字引用。时间戳、请求体、响应体均经整理，实际数据以 Worker 运行时日志和 Mac 侧落盘文件为准。
 
 **时间**：2026-09-02 14:51:38 UTC+8
 
