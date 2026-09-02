@@ -2512,3 +2512,45 @@ def test_retirement_list_tracks_infra_698() -> None:
             f"infra-698 protected branch {branch} must be listed for retirement"
         )
     assert "INFRA-698" in content, "the infra-698 entries must carry their INFRA reference"
+
+
+# ============================================================================
+# VAL-BRANCH-041 (INFRA-737): retirement list ships with infra-737 entry
+# ============================================================================
+def test_retirement_list_tracks_infra_737() -> None:
+    """The checked-in retirement list also lists the owner-abandoned
+    factory/infra-728-dedup-node-available branch so tracking issue
+    INFRA-737 (mirror #197) can drain once the scheduled cleanup deletes
+    the branch.
+
+    Evidence chain:
+    - PR #194 (infra-core) closed unmerged at 2026-09-02T15:47Z by the
+      owner (hdot123) after droid-review flagged a P2
+      (node_contract_helpers.py parsed node --version stdout without
+      checking result.returncode — a broken node shim would surface as
+      a confusing ValueError instead of a clean assertion failure);
+      the dedup work was discretionary hygiene and abandoned by the
+      owner's close.
+    - Linear INFRA-728 terminal-absorbed to 已取消 the same minute
+      (GitHub mirror #188 closed, no open issue) — no re-land PR exists
+      and main's two test_node_available blocks remain duplicated, so
+      this is NOT a cross-implementation-equivalence case; the scanner
+      will re-file the CODE_HYGIENE_DUPLICATE_BLOCK finding if the
+      dedup is wanted again.
+    - Same retirement class as factory/infra-670-hygiene-dup-falsepos
+      (VAL-BRANCH-039) and the P2-flagged close of
+      factory/infra-682-retire-suppress-copy (VAL-BRANCH-040): the
+      INFRA-383 merge-tree containment check cannot see "owner closed
+      without merging", so the branch would be protected forever and
+      the INFRA-737 tracking issue would never drain.
+
+    Mirrors VAL-BRANCH-029/031/032/033/037/038/039/040: the list is the
+    audit artifact, and adding or removing entries requires PR review.
+    """
+    retired = repo_root() / "src" / "infra_core" / "shell" / "branch_cleanup_retired.txt"
+    assert retired.is_file(), "src/infra_core/shell/branch_cleanup_retired.txt must exist"
+    content = retired.read_text()
+    assert "factory/infra-728-dedup-node-available" in content, (
+        "infra-737 owner-abandoned branch must be listed for retirement"
+    )
+    assert "INFRA-737" in content, "the infra-737 entry must carry its INFRA reference"
