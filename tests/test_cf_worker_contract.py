@@ -154,7 +154,9 @@ class TestCFArtifactsExist:
             for ln in content.splitlines()
             if "webhook.exa.edu.kg" in ln and not ln.strip().startswith("#")
         ]
-        assert binding_lines, "webhook.exa.edu.kg route binding missing (cutover active since 2026-09-02)"
+        assert binding_lines, (
+            "webhook.exa.edu.kg route binding missing (cutover active since 2026-09-02)"
+        )
         for stripped in binding_lines:
             assert "webhook.exa.edu.kg/*" in stripped, (
                 f"route pattern must be webhook.exa.edu.kg/* exactly: {stripped}"
