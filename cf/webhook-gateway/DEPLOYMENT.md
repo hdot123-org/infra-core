@@ -326,7 +326,7 @@ gh api repos/hdot123-org/memory-core/hooks/632882064 -X PATCH \
 
 **移交要点**：
 
-1. **部署源已迁 cf 项目独立仓**：webhook Worker 部署源现位于 `/Users/busiji/cf/xun201811/`（本地），权威映射以 cf 项目 `xun201811/INDEX.md` 为准；架构定稿 `/Users/busiji/cf/memory/kb/infra/workers-gateway-architecture.md`。
+1. **部署源已迁 cf 项目独立仓**：webhook Worker 部署源现位于 `~/cf/xun201811/`（本地），权威映射以 cf 项目 `xun201811/INDEX.md` 为准；架构定稿 `~/cf/memory/kb/infra/workers-gateway-architecture.md`。
 2. **三层鉴权模型**（wangguan 网关统一入口）：
    - 网关通用层：非 webhook 目标走 `X-API-Key` Token 白名单（IP 白名单可选）
    - 网关-webhook 层：目标为 webhook Worker 的请求走来源 IP 白名单（GitHub hooks 段 + Linear 官方段自动同步，每月 1/15 号）；其余来源需 `?gw=<Token>` 或 `X-API-Key` 头
