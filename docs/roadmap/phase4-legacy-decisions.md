@@ -9,20 +9,17 @@
 **发现位置**：`docs/architecture.md` §7 演进路线（M6 条目）
 
 **现状**：
-- `~/tool/shared-workflows` 目录存在多个 workflow 文件引用 `linear-dashboard` 仓库
-- 这些引用指向已退役的 linear-dashboard 项目
-- 当前引用状态：代码中存在但实际不可用（404）
+- `linear-dashboard` 仓库引用了 `~/tool/shared-workflows` 的 workflow（依赖方向：linear-dashboard → shared-workflows@main，未钉版本）
+- 这些引用指向未版本控制的本地工具目录
+- 当前引用状态：`linear-dashboard` 依赖 `shared-workflows@main`（浮动引用，未钉 tag/SHA）
 
 **退役建议**：
-1. **清理引用**：搜索并移除所有指向 linear-dashboard 的 workflow 引用
-   ```bash
-   # 查找所有引用
-   grep -r "linear-dashboard" ~/tool/shared-workflows/
-   ```
-2. **替代方案**：
-   - 如果这些 workflow 仍有价值，应迁移到 infra-core 或独立的 shared-workflows 仓库
-   - 如果已废弃，直接从源文件删除
-3. **优先级**：低（当前不影响 CI，仅文档/引用清理）
+1. **澄清依赖方向**：原清理建议 #1（搜索 shared-workflows 中对 linear-dashboard 的引用）是 no-op，因为实际依赖方向是反向的
+2. **正确清理方向**：
+   - 搜索并钉住 `linear-dashboard` 中对 `shared-workflows` 的浮动引用
+   - 如果 `linear-dashboard` 仍有价值，应将 `shared-workflows@main` 钉到具体版本
+   - 如果已废弃，整个 `linear-dashboard` 仓库可归档
+3. **优先级**：低（当前不影响 CI，仅引用治理）
 
 **相关 commit**：
 - M6 条目（`docs/architecture.md`）已记录退役决策

@@ -1,7 +1,17 @@
 # Evolution Scanner reusable workflow（M4 抽离，architecture.md §6）
-# scan 主体在本 reusable；schedule/workflow_dispatch 触发面与命名契约留在
-# 消费仓 thin caller（per-repo 定时，本期不中央化；caller 文件名必须保留
-# evolution-scan.yml——heartbeat 按 gh run list --workflow 文件名解析）。
+# scan 主体在本 reusable；消费仓定时触发面留在 thin caller（per-repo 定时，
+# 本期不中央化；caller 文件名必须保留 evolution-scan.yml——heartbeat 按
+# gh run list --workflow 文件名解析）。
+#
+# INFRA-717 引擎仓自扫 schedule：本仓既是引擎仓也是自扫消费仓，但无法建
+# 独立 thin caller——文件名被双契约钉死（消费仓 uses 按本文件路径引用 +
+# heartbeat SCANNER_WORKFLOW 按本文件名探活），独立 caller 文件的定时 run
+# 不计入探活会恒报 stale。故本文件自带 schedule（GitHub 语义：schedule 仅
+# 在 workflow 宿主仓生效，消费仓 caller 不受影响；本仓直触 run 的 secrets
+# 取本仓 org/repo secrets，2026-09-01 run 33506780661 已验证可用）。
+# 历史根因：M2 HOTFIX 因 red tick 禁用本仓 cron，M4 抽 reusable 后消费仓
+# 定时面落地但引擎仓自扫定时面漏建，全靠外部不规则 dispatch + heartbeat
+# 自愈兜底（INFRA-717 13h 空窗告警根因）。
 #
 # CRITICAL TOKEN STRATEGY:
 # 本 workflow 必须用 DISPATCH_TOKEN（PAT），不能用 GITHUB_TOKEN。
@@ -38,6 +48,11 @@ on:
         required: false
         description: 'hyphen 过渡变体（与 linear_api_key 等价；env 层熔合 snake || hyphen）'
   workflow_dispatch: {}
+  # INFRA-717 引擎仓自扫定时面（本仓作为自扫消费仓的触发面，见文件头注释）。
+  # cron 与消费仓 caller 同窗（13,43 每 30 分钟双窗）；分钟位避开 :00/:30
+  # 高峰 load-shed 窗口（INFRA-578）。tick 幂等由引擎 tick-budget 吸收。
+  schedule:
+    - cron: '17,47 * * * *'
 
 
 # F4/INFRA-688: 显式最小权限基线——scan job 已带 job 级声明；顶层基线兜底

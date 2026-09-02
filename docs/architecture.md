@@ -64,6 +64,7 @@ infra-core 用自己的 governance 门禁保护自身（self-bootstrap）：
 | ci-ok | `CI` | 聚合（branch protection required check），逐项显式阻断全部 9 个前置 job（含 advisory-bundle，按 `.result`；INFRA-595），另有 GitHub API 全 check-runs 零红扫描双保险 |
 | qa-ok | `QA` | QA 聚合门禁：PR 子集（cli-e2e / security / schema / boundary）+ 夜间全量（coverage-audit / full-regression），job 家族映射见 §5.1；非 required check，由 ci-ok 零红扫描（`scripts/check_zero_red.sh`，全 check-runs success/skipped/neutral）与 auto-merge rollup 全绿判定纳入合并门禁 |
 | governance | `Evolution Governance` | 受保护路径 owner 门禁（pull_request_target，执行 shipped governance-check action） |
+| evolution 自扫 | `Evolution Scan Reusable` / `Evolution Heartbeat Reusable` | 非门禁：引擎仓自扫管道。reusable 被消费仓 `uses:` 引用，同时自带本仓 `schedule`（scan `17,47 * * * *`、heartbeat `53 */2 * * *`，INFRA-717）——本仓作为自扫消费仓无法建 thin caller（文件名被消费仓路径引用 + heartbeat 按文件名探活双契约钉死），schedule 仅宿主仓生效不影响消费仓 |
 | release | `Release Please` | 非门禁：发版管道（schedule/push(paths)/dispatch，DISPATCH_TOKEN，详见第 6 节） |
 
 ## 5.1 QA 门禁（`QA` workflow）
