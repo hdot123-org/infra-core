@@ -1,0 +1,18 @@
+name = "gh-proxy"
+main = "src/worker.js"
+compatibility_date = "2026-08-01"
+
+# Account: xun201811 (97d8129421b7b8e445718ff9891be1d9)
+account_id = "97d8129421b7b8e445718ff9891be1d9"
+
+# Custom domain: gh.qqbaidu.de5.net (configured via CF dashboard, not managed here)
+workers_dev = false
+
+# Secrets (managed via wrangler secret put, never in code):
+# - PROXY_KEY: proxy authentication key
+# - GH_PRIVATE_PAT: fine-grained PAT for hdot123-org private repos (Contents: Read-only)
+
+# Smart Placement: aws:ap-east-1 (configured via CF dashboard)
+
+[placement]
+mode = "smart"

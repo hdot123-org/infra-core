@@ -127,6 +127,7 @@ schedule/dispatch → release-please 扫描 conventional commits
 | 症状 | 根因与处置 |
 |------|-----------|
 | `Input required and not supplied: token` | 仓库 DISPATCH_TOKEN secret 缺失或值为空（2026-08-26 run 33008369603），按 1Password 权威值 `gh secret set` 重设 |
+| heartbeat 告警 `self-heal dispatch failed` 且 run 日志 `HTTP 403: Resource not accessible by personal access token` | DISPATCH_TOKEN（fine-grained PAT）缺 **Actions: Read and write** 权限——workflow dispatch（INFRA-578/588 自愈）必需，2026-09-02 INFRA-722：03:02 换新 PAT 时规格遗漏该权限，自愈 dispatch 全部 403，03:45 补权限后恢复（PAT 编辑权限值不变，无需重设 secret）。处置：核对 1Password 条目权限规格（Contents+PullRequests+Issues+**Actions**），编辑 PAT 补权限即可；若值也变则按权威值 `gh secret set` 重设两仓并手动 `gh workflow run` 拉起扫描器；告警 issue 由下个 heartbeat tick 自愈关闭 |
 | `GitHub Actions is not permitted to create or approve pull requests` | token 用了 GITHUB_TOKEN，或仓库 Actions 权限被回退为 read 且禁止建 PR，检查 token 与仓库 Actions 设置 |
 | Release PR 合并后没出 tag | 合并凭证不是真实用户/PAT（GITHUB_TOKEN 合并被递归防护吞掉 push 事件），用 DISPATCH_TOKEN 或本人凭证重新合并/手动 dispatch 补救 |
 

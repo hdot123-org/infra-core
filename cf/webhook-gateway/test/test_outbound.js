@@ -92,7 +92,7 @@ describe('Outbound headers & passthrough', () => {
     assert.equal(sentBody.extra_field, 'preserved');
   });
 
-  it('Push → X-Wiki-Token from env secret, full passthrough', async () => {
+  it('Push → X-Wiki-Token + X-GitHub-Event: push dual header (VAL-WPARITY-003)', async () => {
     const payload = JSON.stringify({
       ref: 'refs/heads/main',
       after: 'abc123',
@@ -121,13 +121,91 @@ describe('Outbound headers & passthrough', () => {
     assert.equal(fetchCalls.length, 1);
     const call = fetchCalls[0];
     assert.equal(call.url, 'https://ci-webhook.exa.edu.kg/hooks/wiki-refresh');
+    // VAL-WPARITY-003: dual-header requirement for Mac trigger-rule
     assert.equal(call.opts.headers['X-Wiki-Token'], 'secret-wiki-token-value');
+    assert.equal(call.opts.headers['X-GitHub-Event'], 'push');
 
     // Full passthrough
     const sentBody = JSON.parse(call.opts.body);
     assert.equal(sentBody.ref, 'refs/heads/main');
     assert.equal(sentBody.after, 'abc123');
     assert.equal(sentBody.run_url, 'https://github.com/test/repo/commit/abc123');
+  });
+
+  it('Linear Issue → X-Webhook-Token + reconstructed {action,type,data} payload', async () => {
+    const payload = JSON.stringify({
+      webhookId: 'wh-123',
+      action: 'create',
+      type: 'Issue',
+      data: { id: 'ISS-1', title: 'Test Issue' },
+      extraField: 'should be stripped',
+    });
+    const signature = await computeHmac(payload, SECRET);
+
+    const request = new Request('https://worker.test/webhook/events', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Hub-Signature-256': signature,
+      },
+      body: payload,
+    });
+
+    const env = {
+      GITHUB_WEBHOOK_SECRET: SECRET,
+      LINEAR_WEBHOOK_TOKEN: 'secret-linear-token',
+    };
+    const resp = await worker.fetch(request, env, {});
+    assert.equal(resp.status, 200);
+
+    assert.equal(fetchCalls.length, 1);
+    const call = fetchCalls[0];
+    assert.equal(call.url, 'https://ci-webhook.exa.edu.kg/hooks/linear-to-droid');
+    assert.equal(call.opts.headers['X-Webhook-Token'], 'secret-linear-token');
+
+    // Linear reconstruction: only {action, type, data} should be forwarded
+    const sentBody = JSON.parse(call.opts.body);
+    assert.equal(sentBody.action, 'create');
+    assert.equal(sentBody.type, 'Issue');
+    assert.deepEqual(sentBody.data, { id: 'ISS-1', title: 'Test Issue' });
+    assert.equal(sentBody.webhookId, undefined); // stripped
+    assert.equal(sentBody.extraField, undefined); // stripped
+  });
+
+  it('Linear Comment → X-Webhook-Token + reconstructed payload', async () => {
+    const payload = JSON.stringify({
+      webhookId: 'wh-456',
+      action: 'create',
+      type: 'Comment',
+      data: { id: 'C-1', body: 'Test comment' },
+    });
+    const signature = await computeHmac(payload, SECRET);
+
+    const request = new Request('https://worker.test/webhook/events', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Hub-Signature-256': signature,
+      },
+      body: payload,
+    });
+
+    const env = {
+      GITHUB_WEBHOOK_SECRET: SECRET,
+      LINEAR_WEBHOOK_TOKEN: 'secret-linear-token',
+    };
+    const resp = await worker.fetch(request, env, {});
+    assert.equal(resp.status, 200);
+
+    assert.equal(fetchCalls.length, 1);
+    const call = fetchCalls[0];
+    assert.equal(call.url, 'https://ci-webhook.exa.edu.kg/hooks/linear-to-droid');
+    assert.equal(call.opts.headers['X-Webhook-Token'], 'secret-linear-token');
+
+    const sentBody = JSON.parse(call.opts.body);
+    assert.equal(sentBody.action, 'create');
+    assert.equal(sentBody.type, 'Comment');
+    assert.deepEqual(sentBody.data, { id: 'C-1', body: 'Test comment' });
   });
 
   it('Ping → no outbound call', async () => {
