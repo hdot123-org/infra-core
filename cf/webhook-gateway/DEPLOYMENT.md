@@ -284,6 +284,9 @@ gh api repos/hdot123-org/memory-core/hooks/632882064 -X PATCH \
 
 **切换后生产状态**：单 webhook c1ac7f07 → webhook.exa.edu.kg/webhook/events；GitHub hook 632882064 → 同路径；PostHog destination → 同路径（X-Posthog-Token 不变）；Worker 版本 9779f5e7；cron `*/10` 保持。
 
+**切换后补齐（2026-09-02 13:0xZ）**：全仓 hook 扫描发现个人账号另有 5 个同域 hook（n8n 时代无鉴权直达，切换后 401）——hdot123/workbot 632883257(push)、hdot123/youzy 650010937(pull_request,push)、hdot123/ci-templates 650010951(pull_request,push)、hdot123/gateway-admin 632883277(push)、hdot123/gitlab-ci-standards 650010981(pull_request,push)，已统一 PATCH 同一 `GITHUB_WEBHOOK_SECRET`（workbot ping 实测投递 200）。共 6 个 repo hook 全部通过通道 1。
+**已知无害噪音**：GitHub App webhook（非 repo hook，疑为 CI runner App，check_run 洪峰与 CI 运行同步）投递至同路径，其签名=App secret ≠ GITHUB_WEBHOOK_SECRET → 401。check_run/pull_request 均为 none 类（n8n 时代也不转发），push 类经 repo hook 独立触发不受影响，且 App 重复 push 被拒反而避免 wiki-refresh 双触发。
+
 ### 切换前必须裁定事项（待用户决策）
 
 切换域名前，以下设计缺口必须由用户裁定，worker 不得自行决策：
