@@ -103,17 +103,19 @@ def test_release_please_workflow_relocks_uvlock_on_release_pr() -> None:
     job = wf["jobs"]["release-please"]
     steps = job["steps"]
 
-    # action 需要 id 才能暴露 release_branch 输出供 relock 步骤消费
+    # action step 保留 id=release（step 标识，便于日志与外部引用定位；
+    # relock 分支探测已改用 gh 标签查询，不再消费 action outputs）
     action_steps = [s for s in steps if "release-please-action" in str(s.get("uses", ""))]
     assert action_steps, "release-please-action step must exist"
-    assert action_steps[0].get("id") == "release", "action step needs id=release for outputs"
+    assert action_steps[0].get("id") == "release", "action step keeps id=release"
 
     relock_steps = [s for s in steps if "relock" in s.get("name", "").lower()]
     assert relock_steps, "relock step (INFRA-712) must exist in release-please.yml"
     run = relock_steps[0].get("run", "")
     for fragment in (
         "uv lock",  # 实际 relock 命令
-        "steps.release.outputs.release_branch",  # 只在 Release PR 存在时执行
+        "gh pr list",  # 分支探测：按标签查询，不依赖 action 输出
+        "autorelease: pending",  # 只在 Release PR 存在时执行（v4 无 release_branch output）
         "git push",  # 回推到 Release PR 分支
     ):
         assert fragment in run, f"relock step must contain {fragment!r}; got:\n{run}"
