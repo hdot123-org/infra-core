@@ -24,10 +24,11 @@ import os
 import shutil
 import subprocess
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
+
+from tests.pending_ci_helpers import create_pending_file as _create_pending_file
 
 REPO_ROOT = Path(__file__).parent.parent
 TRIGGER_SCRIPT = REPO_ROOT / "webhook-scripts" / "trigger-ci-droid.sh"
@@ -106,19 +107,6 @@ def _read_latest_log(temp_env: dict) -> str:
     if not log_files:
         return ""
     return log_files[-1].read_text()
-
-
-def _create_pending_file(locks_dir: Path, pr_number: int, cwd: str | None = None) -> Path:
-    """创建 pending-ci 测试文件（M5 schema）"""
-    data = {
-        "pr_number": str(pr_number),
-        "created_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
-    if cwd is not None:
-        data["cwd"] = cwd
-    file_path = locks_dir / f"pending-ci-{pr_number}.json"
-    file_path.write_text(json.dumps(data))
-    return file_path
 
 
 class TestFallbackRepoRouting:
