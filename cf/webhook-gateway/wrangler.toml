@@ -7,6 +7,13 @@ main = "src/worker.js"
 compatibility_date = "2024-12-01"
 account_id = "97d8129421b7b8e445718ff9891be1d9"
 
+# 2026-09-02 域名切换（用户批准）：统一入口 webhook.exa.edu.kg/* 由本 Worker 承接。
+# 回滚 = 删除本 routes 块并重新 deploy（流量立即回到 cloudflared tunnel → n8n）。
+routes = [
+  { pattern = "webhook.exa.edu.kg/*", zone_name = "exa.edu.kg" }
+]
+workers_dev = true  # 保留 workers.dev 直连端点（A/B 差分与旁路探针用）
+
 # Cron: every 10 minutes — repository_dispatch 兜底 + 心跳
 [triggers]
 crons = ["*/10 * * * *"]
@@ -21,7 +28,8 @@ crons = ["*/10 * * * *"]
 # - CI_TOKEN: X-CI-Token 出站头值 (来源: library/cf-webhook-gateway.md 映射表；入站通道 2 X-CI-Token 相等性校验用)
 # - WIKI_TOKEN: X-Wiki-Token 出站头值 (同上)
 # - LINEAR_WEBHOOK_TOKEN: X-Webhook-Token 出站头值 (Linear Issue/Comment 转发用)；
-#     兼入站通道 3 X-Linear-Signature HMAC 验签密钥 (Linear webhook signing secret, bare hex 无前缀)
+#     兼入站通道 3 Linear-Signature HMAC 验签密钥 (Linear webhook signing secret, bare hex 无前缀；
+#     实测 Linear 发送头名为 linear-signature，无 x- 前缀，2026-09-02 webhook.site 抓包验证)
 # - DISPATCH_TOKEN: repository_dispatch Authorization (排查序: 1P → repo secrets → 本机)
 # - POSTHOG_TOKEN: X-Posthog-Token 透传值 (来源: 1P 或 Mac hooks.json)；
 #     兼入站通道 4 X-Posthog-Token 相等性校验 (/webhook/events 与 /webhook/posthog-error 两路径均强制)

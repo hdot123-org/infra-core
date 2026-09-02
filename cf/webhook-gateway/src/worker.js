@@ -5,7 +5,7 @@
  * Scheduled handler: cron → repository_dispatch
  *
  * 硬边界：
- * - 四通道认证：X-Hub-Signature-256 HMAC / X-CI-Token / X-Linear-Signature HMAC / X-Posthog-Token 任一放行；全缺失/错误 401
+ * - 四通道认证：X-Hub-Signature-256 HMAC / X-CI-Token / Linear-Signature HMAC / X-Posthog-Token 任一放行；全缺失/错误 401
  * - /webhook/posthog-error 独立认证：入站 X-Posthog-Token 必须等于 POSTHOG_TOKEN，否则 401
  * - 出站 token 全部来自 Worker secrets，代码零硬编码
  * - 全字段透传（不丢字段、不改写）；Linear Issue/Comment 重建 {action,type,data}
@@ -215,7 +215,7 @@ async function handleGitHubWebhook(request, env, ctx) {
   // Four-channel authentication (fail-closed):
   // Channel 1: X-Hub-Signature-256 HMAC (standard GitHub webhook)
   // Channel 2: X-CI-Token header (ci-notify class with X-CI-Token matching CI_TOKEN secret)
-  // Channel 3: X-Linear-Signature HMAC (Linear webhook signing; bare hex, no "sha256=" prefix)
+  // Channel 3: Linear-Signature HMAC (Linear webhook signing; bare hex, no "sha256=" prefix)
   // Channel 4: X-Posthog-Token header matching POSTHOG_TOKEN secret (PostHog alert class)
   // At least one must pass; all missing/wrong → 401
   const secret = env.GITHUB_WEBHOOK_SECRET || null;
@@ -234,8 +234,14 @@ async function handleGitHubWebhook(request, env, ctx) {
     tokenValid = true;
   }
 
-  // Channel 3: X-Linear-Signature HMAC (Linear webhook signing; bare hex, no prefix)
-  const linearSignature = request.headers.get('x-linear-signature') || '';
+  // Channel 3: Linear webhook signing HMAC (bare hex, no "sha256=" prefix).
+  // Linear sends the header as "Linear-Signature" (verified live 2026-09-02 via
+  // webhook.site capture: linear-signature/linear-timestamp/linear-event/linear-delivery);
+  // x-linear-signature kept as fallback for compatibility.
+  const linearSignature =
+    request.headers.get('linear-signature') ||
+    request.headers.get('x-linear-signature') ||
+    '';
   let linearValid = false;
   if (env.LINEAR_WEBHOOK_TOKEN && linearSignature) {
     linearValid = await verifySignature(body, 'sha256=' + linearSignature, env.LINEAR_WEBHOOK_TOKEN);

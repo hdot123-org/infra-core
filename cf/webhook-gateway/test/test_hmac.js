@@ -3,7 +3,7 @@
  *
  * Channel 1: X-Hub-Signature-256 HMAC (standard GitHub webhook)
  * Channel 2: X-CI-Token header matching CI_TOKEN secret (ci-notify class)
- * Channel 3: X-Linear-Signature HMAC (Linear webhook signing; bare hex, no prefix)
+ * Channel 3: Linear-Signature HMAC (Linear sends "Linear-Signature" header, bare hex; X-Linear-Signature accepted as fallback)
  * Channel 4: X-Posthog-Token header matching POSTHOG_TOKEN secret (PostHog alert class)
  *
  * At least one must pass; all missing/wrong → 401 fail-closed.
@@ -187,22 +187,23 @@ describe('Four-channel authentication (fail-closed) — VAL-WPARITY-002', () => 
     assert.equal(fetchCalls.length, 0);
   });
 
-  // Channel 3: X-Linear-Signature HMAC (Linear webhook signing; bare hex, no prefix)
-  it('Channel 3 pass: correct bare-hex X-Linear-Signature → forwarded to linear-to-droid', async () => {
+  // Channel 3: Linear-Signature HMAC (Linear sends "Linear-Signature" header, bare hex, no prefix;
+  // verified live 2026-09-02 via webhook.site capture of a real Linear delivery)
+  it('Channel 3 pass: correct bare-hex Linear-Signature → forwarded to linear-to-droid', async () => {
     const linearPayload = JSON.stringify({
       webhookId: 'wh-lin-1',
       action: 'create',
       type: 'Issue',
       data: { id: 'ISS-1', title: 'Test Issue' },
     });
-    // Linear sends bare hex (no "sha256=" prefix)
+    // Linear sends bare hex (no "sha256=" prefix) under the Linear-Signature header
     const bareHexSig = await computeLinearHmac(linearPayload, LINEAR_SECRET);
 
     const request = new Request('https://worker.test/webhook/events', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Linear-Signature': bareHexSig,
+        'Linear-Signature': bareHexSig,
         // intentionally NO x-github-event header — Linear payloads arrive without it
       },
       body: linearPayload,
@@ -223,7 +224,38 @@ describe('Four-channel authentication (fail-closed) — VAL-WPARITY-002', () => 
     assert.equal(fetchCalls[0].url, 'https://ci-webhook.exa.edu.kg/hooks/linear-to-droid');
   });
 
-  it('Channel 3 fail: wrong X-Linear-Signature → 401 rejected', async () => {
+  it('Channel 3 pass (compat): X-Linear-Signature fallback header also accepted', async () => {
+    const linearPayload = JSON.stringify({
+      webhookId: 'wh-lin-1',
+      action: 'create',
+      type: 'Issue',
+      data: { id: 'ISS-1', title: 'Test Issue' },
+    });
+    const bareHexSig = await computeLinearHmac(linearPayload, LINEAR_SECRET);
+
+    const request = new Request('https://worker.test/webhook/events', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Linear-Signature': bareHexSig,
+      },
+      body: linearPayload,
+    });
+
+    const env = {
+      GITHUB_WEBHOOK_SECRET: SECRET,
+      CI_TOKEN,
+      LINEAR_WEBHOOK_TOKEN: LINEAR_SECRET,
+    };
+    const resp = await worker.fetch(request, env, {});
+    const body = await resp.json();
+
+    assert.equal(resp.status, 200);
+    assert.equal(body.route, 'linear-to-droid');
+    assert.equal(body.forwarded, true);
+  });
+
+  it('Channel 3 fail: wrong Linear-Signature → 401 rejected', async () => {
     const linearPayload = JSON.stringify({
       webhookId: 'wh-lin-1',
       action: 'create',
@@ -237,7 +269,7 @@ describe('Four-channel authentication (fail-closed) — VAL-WPARITY-002', () => 
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Linear-Signature': wrongSig,
+        'Linear-Signature': wrongSig,
       },
       body: linearPayload,
     });
@@ -255,7 +287,7 @@ describe('Four-channel authentication (fail-closed) — VAL-WPARITY-002', () => 
     assert.equal(fetchCalls.length, 0);
   });
 
-  it('Channel 3 fail: missing X-Linear-Signature (no other channel) → 401 rejected', async () => {
+  it('Channel 3 fail: missing Linear-Signature (no other channel) → 401 rejected', async () => {
     const linearPayload = JSON.stringify({
       webhookId: 'wh-lin-1',
       action: 'create',

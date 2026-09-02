@@ -142,19 +142,27 @@ class TestCFArtifactsExist:
         assert 'main = "src/worker.js"' in content
         assert "compatibility_date" in content
 
-    def test_no_webhook_exa_edu_kg_in_wrangler(self):
-        """VAL-CF-001: wrangler.toml must NOT bind webhook.exa.edu.kg."""
+    def test_webhook_exa_edu_kg_route_locked(self):
+        """VAL-CF-001 (updated 2026-09-02 cutover): the production route binding is
+        now user-authorized. It must exist in exactly the approved shape and nothing
+        broader: single pattern webhook.exa.edu.kg/* on zone exa.edu.kg."""
         path = CF_DIR / "wrangler.toml"
         content = path.read_text()
-        # Check for route/domain bindings — comments mentioning it are OK
-        # Look for actual route or custom_domain directives
-        for line in content.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
-            assert "webhook.exa.edu.kg" not in stripped, (
-                f"wrangler.toml contains webhook.exa.edu.kg binding: {stripped}"
+        # collect non-comment lines that bind the production domain
+        binding_lines = [
+            ln.strip()
+            for ln in content.splitlines()
+            if "webhook.exa.edu.kg" in ln and not ln.strip().startswith("#")
+        ]
+        assert binding_lines, "webhook.exa.edu.kg route binding missing (cutover active since 2026-09-02)"
+        for stripped in binding_lines:
+            assert "webhook.exa.edu.kg/*" in stripped, (
+                f"route pattern must be webhook.exa.edu.kg/* exactly: {stripped}"
             )
+            assert "exa.edu.kg" in stripped, f"zone must be exa.edu.kg: {stripped}"
+        # no other hostname may be bound
+        for stripped in binding_lines:
+            assert "ci-webhook" not in stripped, f"no bindings beyond the unified entry: {stripped}"
 
     def test_src_worker_js_exists(self):
         """src/worker.js present."""
