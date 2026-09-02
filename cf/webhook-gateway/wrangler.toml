@@ -17,10 +17,12 @@ crons = ["*/10 * * * *"]
 # id = "<F2 部署时填入>"
 
 # Workers secrets (经 wrangler secret put 设置，永不入库):
-# - GITHUB_WEBHOOK_SECRET: HMAC 验签密钥 (新生成)
-# - CI_TOKEN: X-CI-Token 出站头值 (来源: library/cf-webhook-gateway.md 映射表)
+# - GITHUB_WEBHOOK_SECRET: HMAC 验签密钥 (新生成；入站通道 1 X-Hub-Signature-256 验签用)
+# - CI_TOKEN: X-CI-Token 出站头值 (来源: library/cf-webhook-gateway.md 映射表；入站通道 2 X-CI-Token 相等性校验用)
 # - WIKI_TOKEN: X-Wiki-Token 出站头值 (同上)
-# - LINEAR_WEBHOOK_TOKEN: X-Webhook-Token 出站头值 (Linear Issue/Comment 转发用)
+# - LINEAR_WEBHOOK_TOKEN: X-Webhook-Token 出站头值 (Linear Issue/Comment 转发用)；
+#     兼入站通道 3 X-Linear-Signature HMAC 验签密钥 (Linear webhook signing secret, bare hex 无前缀)
 # - DISPATCH_TOKEN: repository_dispatch Authorization (排查序: 1P → repo secrets → 本机)
-# - POSTHOG_TOKEN: X-Posthog-Token 透传值 (来源: 1P 或 Mac hooks.json)
+# - POSTHOG_TOKEN: X-Posthog-Token 透传值 (来源: 1P 或 Mac hooks.json)；
+#     兼入站通道 4 X-Posthog-Token 相等性校验 (/webhook/events 与 /webhook/posthog-error 两路径均强制)
 # - POSTHOG_CAPTURE_KEY: PostHog 项目 406776 client ingest key (VAL-CF-011 元数据上报用，与 POSTHOG_TOKEN 不同凭证)

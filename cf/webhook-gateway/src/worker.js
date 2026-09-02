@@ -5,7 +5,8 @@
  * Scheduled handler: cron → repository_dispatch
  *
  * 硬边界：
- * - 双通道认证：X-Hub-Signature-256 HMAC 或 token 头匹配任一放行；双缺失/错误 401
+ * - 四通道认证：X-Hub-Signature-256 HMAC / X-CI-Token / X-Linear-Signature HMAC / X-Posthog-Token 任一放行；全缺失/错误 401
+ * - /webhook/posthog-error 独立认证：入站 X-Posthog-Token 必须等于 POSTHOG_TOKEN，否则 401
  * - 出站 token 全部来自 Worker secrets，代码零硬编码
  * - 全字段透传（不丢字段、不改写）；Linear Issue/Comment 重建 {action,type,data}
  * - PostHog/Linear 类并入 /webhook/events 分类器（统一路径裁定）
@@ -211,10 +212,12 @@ async function handleGitHubWebhook(request, env, ctx) {
   const githubEvent = request.headers.get('x-github-event') || '';
   const requestId = request.headers.get('x-github-delivery') || '';
 
-  // Dual-channel authentication (fail-closed):
+  // Four-channel authentication (fail-closed):
   // Channel 1: X-Hub-Signature-256 HMAC (standard GitHub webhook)
-  // Channel 2: Token header (ci-notify class with X-CI-Token matching CI_TOKEN secret)
-  // At least one must pass; both missing/wrong → 401
+  // Channel 2: X-CI-Token header (ci-notify class with X-CI-Token matching CI_TOKEN secret)
+  // Channel 3: X-Linear-Signature HMAC (Linear webhook signing; bare hex, no "sha256=" prefix)
+  // Channel 4: X-Posthog-Token header matching POSTHOG_TOKEN secret (PostHog alert class)
+  // At least one must pass; all missing/wrong → 401
   const secret = env.GITHUB_WEBHOOK_SECRET || null;
   const ciToken = env.CI_TOKEN || null;
   const inboundCiToken = request.headers.get('x-ci-token') || '';
@@ -231,7 +234,21 @@ async function handleGitHubWebhook(request, env, ctx) {
     tokenValid = true;
   }
 
-  if (!hmacValid && !tokenValid) {
+  // Channel 3: X-Linear-Signature HMAC (Linear webhook signing; bare hex, no prefix)
+  const linearSignature = request.headers.get('x-linear-signature') || '';
+  let linearValid = false;
+  if (env.LINEAR_WEBHOOK_TOKEN && linearSignature) {
+    linearValid = await verifySignature(body, 'sha256=' + linearSignature, env.LINEAR_WEBHOOK_TOKEN);
+  }
+
+  // Channel 4: X-Posthog-Token header matches POSTHOG_TOKEN secret (PostHog alert class)
+  const inboundPosthogToken = request.headers.get('x-posthog-token') || '';
+  let posthogValid = false;
+  if (env.POSTHOG_TOKEN && inboundPosthogToken && env.POSTHOG_TOKEN === inboundPosthogToken) {
+    posthogValid = true;
+  }
+
+  if (!hmacValid && !tokenValid && !linearValid && !posthogValid) {
     const duration = Date.now() - startTime;
     capturePostHog(env, ctx, {
       route: 'github-webhook',
@@ -379,6 +396,23 @@ async function handlePosthogError(request, env, ctx) {
   const startTime = Date.now();
   const body = await request.text();
   const posthogToken = request.headers.get('x-posthog-token') || '';
+
+  // Fail-closed authentication: inbound x-posthog-token must equal POSTHOG_TOKEN secret.
+  // Missing header, wrong value, or secret not configured → 401.
+  if (!env.POSTHOG_TOKEN || posthogToken !== env.POSTHOG_TOKEN) {
+    const duration = Date.now() - startTime;
+    capturePostHog(env, ctx, {
+      route: 'posthog-error',
+      event: 'posthog-error',
+      outcome: 'rejected',
+      http_status: 401,
+      duration_ms: duration,
+    });
+    return jsonResponse(
+      { status: 'error', error: 'Authentication failed' },
+      401
+    );
+  }
 
   const targetUrl = CI_WEBHOOK_BASE + '/hooks/posthog-error';
   const headers = {

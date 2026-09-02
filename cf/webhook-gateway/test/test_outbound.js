@@ -243,7 +243,8 @@ describe('Outbound headers & passthrough', () => {
       body: payload,
     });
 
-    const env = {};
+    // Fail-closed auth: header must match POSTHOG_TOKEN secret
+    const env = { POSTHOG_TOKEN: 'posthog-secret-value' };
     const resp = await worker.fetch(request, env, {});
     assert.equal(resp.status, 200);
 

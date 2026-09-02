@@ -29,6 +29,7 @@ echo -n "<value>" | npx wrangler secret put CI_TOKEN
 echo -n "<value>" | npx wrangler secret put WIKI_TOKEN
 echo -n "<value>" | npx wrangler secret put DISPATCH_TOKEN
 echo -n "<value>" | npx wrangler secret put POSTHOG_TOKEN
+echo -n "<value>" | npx wrangler secret put LINEAR_WEBHOOK_TOKEN
 
 # 4. （可选）绑定 KV namespace 实现 cron 幂等
 # npx wrangler kv:namespace create "IDEMPOTENCY_KV"
@@ -82,9 +83,9 @@ memory 仓 GitHub hook (id=632882064) URL 改回：
 | `CI_TOKEN` | X-CI-Token 出站头 | 1P vault `sever` → `n8n/node-22/Webhook Provider/Secrets` 或 Mac hooks.json 明文 | 现有值 |
 | `WIKI_TOKEN` | X-Wiki-Token 出站头 | Mac hooks.json 明文 | 现有值 |
 | `DISPATCH_TOKEN` | repository_dispatch Authorization | 排查序：1P → infra-core repo secrets → 本机配置 | 可能待补 |
-| `POSTHOG_TOKEN` | X-Posthog-Token 透传 | PostHog webhook 配置 / 1P | 低频路径 |
+| `POSTHOG_TOKEN` | X-Posthog-Token 透传 + **入站通道 4 认证**（/webhook/events 与 /webhook/posthog-error 相等性校验） | PostHog webhook 配置 / 1P | 低频路径；入站值=出站透传值，同一凭证 |
 | `POSTHOG_CAPTURE_KEY` | PostHog 元数据 capture（POST https://us.posthog.com/capture/） | PostHog 项目 406776 client ingest key（与 POSTHOG_TOKEN 不是同一凭证，勿混用） | VAL-CF-011 元数据上报用，半公开 client-side key |
-| `LINEAR_WEBHOOK_TOKEN` | X-Webhook-Token 出站头（Linear Issue/Comment 转发） | node-22 `/opt/n8n-webhook/workflows/linear-factory-gateway.json` 中的 token 值（43 位，经 stdin 管道上传） | Linear 类统一路径用 |
+| `LINEAR_WEBHOOK_TOKEN` | X-Webhook-Token 出站头（Linear Issue/Comment 转发）+ **入站通道 3 HMAC 验签**（X-Linear-Signature，bare hex） | Linear webhook 3cafb372 signing secret（=node-22 linear-factory-gateway.json 中 token 值，经 stdin 管道上传） | Linear 类统一路径用；入站签名密钥=出站 token，同一凭证 |
 
 **凭据纪律**：
 - 所有 secret 经 `wrangler secret put` stdin 管道设置，值不出现在命令行参数、git 历史、PR body
@@ -122,7 +123,16 @@ memory 仓 GitHub hook (id=632882064) URL 改回：
 | `POST /webhook/linear-events` | linear-events forwarder | **不迁** | 死路径（0 执行） |
 | `POST /webhook/linear-factory` | linear-factory gateway | **不迁** | 断链事故，另案处理 |
 
-**认证**：双通道 fail-closed——X-Hub-Signature-256 HMAC 或 X-CI-Token token 头匹配任一放行；双缺失/错误 401。
+**认证（四通道 fail-closed，2026-09-02 升级）**：任一通道放行，全缺失/错误 401。
+
+| 通道 | 入站凭证 | 校验方式 | 对应 Worker Secret |
+|---|---|---|---|
+| 1 | `X-Hub-Signature-256` 头 | HMAC-SHA256（`sha256=` 前缀格式） | `GITHUB_WEBHOOK_SECRET` |
+| 2 | `X-CI-Token` 头 | 相等性匹配 | `CI_TOKEN` |
+| 3 | `X-Linear-Signature` 头 | HMAC-SHA256（Linear 裸 hex，无前缀，内部补 `sha256=` 后验签） | `LINEAR_WEBHOOK_TOKEN` |
+| 4 | `X-Posthog-Token` 头 | 相等性匹配 | `POSTHOG_TOKEN` |
+
+> 遗留独立路径 `/webhook/posthog-error` 同样 fail-closed：入站 `X-Posthog-Token` 必须等于 `POSTHOG_TOKEN` secret（缺失/错误/secret 未配置 → 401），通过后原样透传转发。
 
 ---
 
@@ -233,7 +243,7 @@ gh api repos/hdot123-org/memory-core/hooks/632882064 -X PATCH \
 
 **已完成的 6 项差距补齐**：
 
-1. **①双通道认证**（VAL-WPARITY-002）：worker.js 实现 HMAC 或 token 头任一放行，双缺失/错误 401 fail-closed。测试覆盖 7 例（HMAC 正确/错误/token 正确/错误/双错/双缺/env 未配置）。
+1. **①四通道认证**（VAL-WPARITY-002，2026-09-02 由双通道扩展）：worker.js 实现 HMAC（GitHub）/X-CI-Token/X-Linear-Signature HMAC（Linear 裸 hex）/X-Posthog-Token 四通道任一放行，全缺失/错误 401 fail-closed；`/webhook/posthog-error` 独立路径同步收紧（X-Posthog-Token 必须等于 POSTHOG_TOKEN）。测试覆盖 16 例（通道 1 正确/错误、通道 2 正确/错误、双错/双缺/env 未配置、通道 3 正确/错误签名/缺签名、通道 4 正确/错误、posthog-error 路径有效/缺失/错误/未配置）。
 
 2. **②push 双头注入**（VAL-WPARITY-003）：push 转发同时携带 `X-GitHub-Event: push` 与 `X-Wiki-Token`，满足 Mac trigger-rule 双条件。测试断言双头齐全。
 
@@ -245,7 +255,7 @@ gh api repos/hdot123-org/memory-core/hooks/632882064 -X PATCH \
 
 6. **⑥DEPLOYMENT.md §6 切换 runbook**：域名切换绝不执行，worker 只产出 runbook（VAL-WPARITY-004）。五块齐备 + 显式用户批准门。
 
-**测试覆盖**：50 例全绿（九类路由矩阵 + 双通道认证 7 例 + 出站头含 Linear 重建 6 例 + detectLinear + cron + posthog）。
+**测试覆盖**：50 例全绿（九类路由矩阵 + 双通道认证 7 例 + 出站头含 Linear 重建 6 例 + detectLinear + cron + posthog）；2026-09-02 四通道升级后 70 例全绿（认证矩阵扩至 16 例：新增通道 3 Linear 签名 3 例 + 通道 4 PostHog token 2 例 + `/webhook/posthog-error` 认证 4 例）。
 
 **待完成**：切换 runbook 五块（VAL-WPARITY-004）+ 回归 + PR 交付。
 
@@ -259,22 +269,18 @@ gh api repos/hdot123-org/memory-core/hooks/632882064 -X PATCH \
 
 切换域名前，以下设计缺口必须由用户裁定，worker 不得自行决策：
 
-**1. 真实 Linear/PostHog 生产方的认证缺口**
+**1. 真实 Linear/PostHog 生产方的认证缺口**（✅ 已解决，2026-09-02）
 
-Worker 的双通道认证（X-Hub-Signature-256 HMAC 或 X-CI-Token）仅接受 GitHub webhook 或 ci-notify 类调用方。但真实生产流量中：
-- Linear webhook 不携带 HMAC 签名（Linear 平台不支持 GitHub-style HMAC）
-- PostHog internal destination 不携带任何认证头
+原缺口：双通道认证仅接受 GitHub webhook 或 ci-notify 类调用方，真实 Linear webhook 与 PostHog alert 会被 401 拒绝。
 
-这意味着切换域名后，真实 Linear webhook 和 PostHog error alert 会被 Worker 401 拒绝。
+**已落地方案（入站通道 3/4）**：
+- Linear webhook 3cafb372 已配置 signing secret（=Worker secret `LINEAR_WEBHOOK_TOKEN`），Linear 发送 `X-Linear-Signature` 头（HMAC-SHA256 裸 hex，无 `sha256=` 前缀）→ 通道 3 验签
+- PostHog alert 已发送 `X-Posthog-Token`（值=Worker secret `POSTHOG_TOKEN`）→ 通道 4 相等性校验
+- 配置对齐：GitHub hook 632882064 secret=`GITHUB_WEBHOOK_SECRET`（通道 1）；Linear signing secret=`LINEAR_WEBHOOK_TOKEN`（通道 3）；PostHog token=`POSTHOG_TOKEN`（通道 4）
 
-**裁定选项**（需用户决策）：
-- 方案 A：为 Linear/PostHog 新增专用 token 头认证（如 X-Linear-Token、X-PostHog-Token），配置到生产方 webhook 设置
-- 方案 B：对 Linear/PostHog 类路由豁免认证（仅依赖 IP 白名单或来源校验）
-- 方案 C：保留现有 n8n 路径处理 Linear/PostHog，Worker 仅接管 GitHub webhook 和 ci-notify
+**2. 遗留独立路径 /webhook/posthog-error 的处置**（认证部分已收紧，路径归属待裁定）
 
-**2. 遗留独立路径 /webhook/posthog-error 的处置**
-
-当前 Worker 仍保留 `/webhook/posthog-error` 路由（透传 X-Posthog-Token），与"统一路径裁定"（所有 webhook 走 /webhook/events）存在冲突。
+当前 Worker 仍保留 `/webhook/posthog-error` 路由（透传 X-Posthog-Token），与"统一路径裁定"（所有 webhook 走 /webhook/events）存在冲突。该路径自 2026-09-02 起强制 fail-closed 认证：入站 X-Posthog-Token 必须等于 `POSTHOG_TOKEN`，缺失/错误/未配置 → 401。
 
 **裁定选项**（需用户决策）：
 - 方案 A：切换时一并下线 /webhook/posthog-error，PostHog 改走 /webhook/events（需更新 PostHog internal destination 配置）
