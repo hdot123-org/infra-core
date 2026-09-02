@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.0](https://github.com/hdot123-org/infra-core/compare/v0.9.0...v0.10.0) (2026-09-02)
+
+
+### Features
+
+* **cf-worker:** gh-proxy 私有仓 PAT 注入 + 三层门禁版本化 ([#180](https://github.com/hdot123-org/infra-core/issues/180)) ([c0ea2c7](https://github.com/hdot123-org/infra-core/commit/c0ea2c7e4c6af0d61a2b874f48ab5805764da5f8))
+* **cf-worker:** unified parity round 3 ([#184](https://github.com/hdot123-org/infra-core/issues/184)) ([712a267](https://github.com/hdot123-org/infra-core/commit/712a267fd5b7af8802cfdebab3e2a774e46034b2))
+
+
+### Bug Fixes
+
+* **release:** relock 步骤分支探测改用 gh 查询修复永久空跳过 ([#177](https://github.com/hdot123-org/infra-core/issues/177)) ([536ec26](https://github.com/hdot123-org/infra-core/commit/536ec26ba0d8ba1fd1c0551350bccdffe44fda86))
+
 ## [0.9.0](https://github.com/hdot123-org/infra-core/compare/v0.8.0...v0.9.0) (2026-09-01)
 
 
