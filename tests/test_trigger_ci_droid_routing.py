@@ -11,7 +11,6 @@
 测试隔离：使用 ECHO_DROID=1 避免真实 droid exec，POSTHOG_DRY_RUN=1 避免真实事件。
 """
 
-import json
 import os
 import subprocess
 import sys
@@ -19,6 +18,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+
+from tests.pending_ci_helpers import create_pending_file as _create_pending_file
 
 REPO_ROOT = Path(__file__).parent.parent
 TRIGGER_SCRIPT = REPO_ROOT / "webhook-scripts" / "trigger-ci-droid.sh"
@@ -82,23 +83,6 @@ def _install_fake_gh_human(tmp_path: Path, env: dict) -> None:
     fake_gh.write_text('#!/bin/bash\necho \'{"author": {"login": "human-user"}, "labels": []}\'\n')
     fake_gh.chmod(0o755)
     env["PATH"] = f"{fake_gh_dir}:{env.get('PATH', '')}"
-
-
-def _create_pending_file(
-    locks_dir: Path, pr_number: int, source: str | None = None, created_at: str | None = None
-) -> Path:
-    """创建 pending-ci 测试文件"""
-    data = {
-        "pr_number": str(pr_number),
-        "cwd": "/test/repo",
-        "created_at": created_at or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
-    if source is not None:
-        data["source"] = source
-
-    file_path = locks_dir / f"pending-ci-{pr_number}.json"
-    file_path.write_text(json.dumps(data))
-    return file_path
 
 
 class TestVAL_REG_005_Scanner_Silent_Cleanup:
