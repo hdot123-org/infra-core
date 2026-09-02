@@ -776,7 +776,9 @@ def test_infra578_main_stale_scanner_triggers_dispatch():
         patch("evolution_heartbeat.alert_issue_exists", return_value=False),
         patch("evolution_heartbeat.create_alert_issue") as mock_create,
         patch("evolution_heartbeat.write_monitor_heartbeat"),
-        patch("evolution_heartbeat.trigger_scanner_dispatch", return_value=(False, None)) as mock_dispatch,
+        patch(
+            "evolution_heartbeat.trigger_scanner_dispatch", return_value=(False, None)
+        ) as mock_dispatch,
     ):
         mock_run.return_value = _gh_result(json.dumps(runs))
         mock_hb.return_value = {"stale": True, "message": "advisory"}
