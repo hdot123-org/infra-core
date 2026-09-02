@@ -155,17 +155,16 @@ class TestCFArtifactsExist:
 
         # (a) Archive-state guard: routes block must carry non-production annotation
         archive_markers = [
-            "存档",       # Chinese for "archive"
+            "存档",  # Chinese for "archive"
             "archive",
-            "历史",       # "historical"
-            "非生产",     # "non-production"
+            "历史",  # "historical"
+            "非生产",  # "non-production"
             "non-production",
             "not production",
-            "历史记录",   # "historical record"
+            "历史记录",  # "historical record"
         ]
         has_archive_marker = any(
-            marker in content.lower() or marker in content
-            for marker in archive_markers
+            marker in content.lower() or marker in content for marker in archive_markers
         )
         assert has_archive_marker, (
             "wrangler.toml routes block must carry explicit non-production/archive "
@@ -180,9 +179,7 @@ class TestCFArtifactsExist:
             "workers-gateway-architecture.md",
             "wangguan",
         ]
-        found_pointers = [
-            p for p in pointer_markers if p in deployment_content
-        ]
+        found_pointers = [p for p in pointer_markers if p in deployment_content]
         assert len(found_pointers) >= 2, (
             f"DEPLOYMENT.md must contain pointers to cf project authoritative "
             f"source (expected >=2 of {pointer_markers}, found {found_pointers})"
