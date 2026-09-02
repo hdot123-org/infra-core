@@ -12,9 +12,10 @@ the worker's native test suite. It covers:
 node --test absence = FAIL (not skip) — this mission's contract must be reachable.
 """
 
-import shutil
 import subprocess
 from pathlib import Path
+
+from tests.node_contract_helpers import require_node
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -22,11 +23,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CF_DIR = REPO_ROOT / "cf" / "webhook-gateway"
 TEST_DIR = CF_DIR / "test"
-
-
-def _node_available():
-    """Check if node is available (return True/False)."""
-    return shutil.which("node") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -37,19 +33,7 @@ class TestCFWorkerContract:
 
     def test_node_available(self):
         """node >=18 must be available (fail, not skip)."""
-        node = shutil.which("node")
-        assert node is not None, "node not found in PATH — required for CF Worker contract"
-
-        # Verify version >= 18
-        result = subprocess.run(
-            [node, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        version_str = result.stdout.strip().lstrip("v")
-        major = int(version_str.split(".")[0])
-        assert major >= 18, f"node version {version_str} < 18"
+        require_node("CF Worker")
 
     def test_router_tests_pass(self):
         """VAL-CF-002: 5-class routing matrix tests all green."""

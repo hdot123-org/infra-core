@@ -14,9 +14,10 @@ Covers:
 node --test absence = FAIL (not skip) — this mission's contract must be reachable.
 """
 
-import shutil
 import subprocess
 from pathlib import Path
+
+from tests.node_contract_helpers import require_node
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -34,19 +35,7 @@ class TestGHProxyContract:
 
     def test_node_available(self):
         """node >=18 must be available (fail, not skip)."""
-        node = shutil.which("node")
-        assert node is not None, "node not found in PATH — required for gh-proxy contract"
-
-        # Verify version >= 18
-        result = subprocess.run(
-            [node, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        version_str = result.stdout.strip().lstrip("v")
-        major = int(version_str.split(".")[0])
-        assert major >= 18, f"node version {version_str} < 18"
+        require_node("gh-proxy")
 
     def test_worker_tests_pass(self):
         """All gh-proxy worker tests pass."""
