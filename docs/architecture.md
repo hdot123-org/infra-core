@@ -127,7 +127,7 @@ schedule/dispatch → release-please 扫描 conventional commits
 | 症状 | 根因与处置 |
 |------|-----------|
 | `Input required and not supplied: token` | 仓库 DISPATCH_TOKEN secret 缺失或值为空（2026-08-26 run 33008369603），按 1Password 权威值 `gh secret set` 重设 |
-| heartbeat 告警 `self-heal dispatch failed` 且 run 日志 `HTTP 403: Resource not accessible by personal access token` | DISPATCH_TOKEN 缺 workflow dispatch 能力，或**排队 job 持有 run 创建时快照的旧 secret**（2026-09-02 INFRA-722：00:34 入队的 heartbeat 在 03:17 token 轮换后 03:38 才执行，仍用轮换前 token → 403；同分钟后创建的 run 用新 token 正常）。处置：对照 1Password 权威值 `gh secret set DISPATCH_TOKEN -R hdot123-org/infra-core` 与 `-R hdot123-org/memory`，手动 `gh workflow run` 拉起扫描器；告警 issue 由下个 heartbeat tick 检测到 scanner 存活后自愈关闭。轮换 DISPATCH_TOKEN 后需留意：已在队列中的 run 仍持有旧值，长时间排队（自建 runner 拥塞）会放大新旧 token 并存窗口 |
+| heartbeat 告警 `self-heal dispatch failed` 且 run 日志 `HTTP 403: Resource not accessible by personal access token` | DISPATCH_TOKEN（fine-grained PAT）缺 **Actions: Read and write** 权限——workflow dispatch（INFRA-578/588 自愈）必需，2026-09-02 INFRA-722：03:02 换新 PAT 时规格遗漏该权限，自愈 dispatch 全部 403，03:45 补权限后恢复（PAT 编辑权限值不变，无需重设 secret）。处置：核对 1Password 条目权限规格（Contents+PullRequests+Issues+**Actions**），编辑 PAT 补权限即可；若值也变则按权威值 `gh secret set` 重设两仓并手动 `gh workflow run` 拉起扫描器；告警 issue 由下个 heartbeat tick 自愈关闭 |
 | `GitHub Actions is not permitted to create or approve pull requests` | token 用了 GITHUB_TOKEN，或仓库 Actions 权限被回退为 read 且禁止建 PR，检查 token 与仓库 Actions 设置 |
 | Release PR 合并后没出 tag | 合并凭证不是真实用户/PAT（GITHUB_TOKEN 合并被递归防护吞掉 push 事件），用 DISPATCH_TOKEN 或本人凭证重新合并/手动 dispatch 补救 |
 
