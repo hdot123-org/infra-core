@@ -1,0 +1,9 @@
+{
+  "type": "module",
+  "name": "gh-proxy-tests",
+  "version": "1.0.0",
+  "description": "Tests for gh-proxy worker",
+  "scripts": {
+    "test": "node --test"
+  }
+}
