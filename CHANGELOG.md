@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.11.0](https://github.com/hdot123-org/infra-core/compare/v0.10.0...v0.11.0) (2026-09-02)
+
+
+### Features
+
+* **cf-worker:** 四通道入站认证 + /webhook/posthog-error fail-closed 收紧（无路由行为变更） ([#190](https://github.com/hdot123-org/infra-core/issues/190)) ([df56b5b](https://github.com/hdot123-org/infra-core/commit/df56b5bd3cafa33b0358d17204284a2805e14cde))
+
+
+### Bug Fixes
+
+* **cf-worker:** M4 scrutiny 轮 1 移交修复（无路由行为变更） ([#186](https://github.com/hdot123-org/infra-core/issues/186)) ([8ab4f1f](https://github.com/hdot123-org/infra-core/commit/8ab4f1fdd515e9b055e9ca4b3127ff3159fb5fe8))
+* **cf-worker:** 通道3改读 Linear-Signature 头名并锁定生产路由形状 ([#191](https://github.com/hdot123-org/infra-core/issues/191)) ([4f5c73e](https://github.com/hdot123-org/infra-core/commit/4f5c73e157fcff799c20037ca469937f115c901a))
+
 ## [0.10.0](https://github.com/hdot123-org/infra-core/compare/v0.9.0...v0.10.0) (2026-09-02)
 
 
