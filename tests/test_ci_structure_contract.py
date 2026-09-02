@@ -220,6 +220,30 @@ class TestNotifyCiComplete:
         assert "ci_webhook_send_failed" in script, "投递失败必须上报 PostHog 事件"
         assert "exit 0" in script, "通知失败必须 exit 0（旁路语义）"
 
+    def test_run_steps_use_strict_mode(self, ci_jobs: dict[str, dict[str, Any]]) -> None:
+        """bash 加固契约（INFRA-710 回归锁定，INFRA-711）。
+
+        #151（2026-08-31）为 secret 验证与状态 webhook 两个 run block 补
+        ``set -euo pipefail`` 时未走 Droid 流程、无回归锁定，Linear 状态
+        门禁因此回退并重开跟踪 Issue。本契约补锁：job 内全部 run 步骤
+        首行必须是 ``set -euo pipefail``——既有步骤被摘除严格模式、或新增
+        run 步骤未启用严格模式，都会在此变红。
+        """
+        steps = ci_jobs["notify-ci-complete"].get("steps") or []
+        run_steps = [
+            (step.get("name") or "<unnamed>", str(step["run"])) for step in steps if "run" in step
+        ]
+        assert run_steps, "notify-ci-complete 必须包含至少一个 run 步骤"
+        offenders = []
+        for name, script in run_steps:
+            lines = script.strip().splitlines()
+            if not lines or lines[0].strip() != "set -euo pipefail":
+                offenders.append(name)
+        assert not offenders, (
+            "notify-ci-complete 以下 run 步骤首行缺少 set -euo pipefail"
+            f"（严格模式契约，INFRA-710）: {offenders}"
+        )
+
 
 class TestRunnerLabels:
     @pytest.mark.parametrize("job", sorted(EXPECTED_JOBS))
