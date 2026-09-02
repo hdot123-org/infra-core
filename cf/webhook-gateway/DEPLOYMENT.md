@@ -319,6 +319,30 @@ gh api repos/hdot123-org/memory-core/hooks/632882064 -X PATCH \
 
 ---
 
+### 2026-09-03 入口移交 wangguan 网关（本仓副本自此转为历史存档）
+
+> **状态变更**：`webhook.exa.edu.kg/*` zone 路由现指向 **wangguan 网关 Worker**（Dash 管理，非本仓副本直接承接）。
+> 本仓 `cf/webhook-gateway/` 转为**历史存档**——代码与配置保留作为迁移源快照，不再作为部署权威源。
+
+**移交要点**：
+
+1. **部署源已迁 cf 项目独立仓**：webhook Worker 部署源现位于 `/Users/busiji/cf/xun201811/`（本地），权威映射以 cf 项目 `xun201811/INDEX.md` 为准；架构定稿 `/Users/busiji/cf/memory/kb/infra/workers-gateway-architecture.md`。
+2. **三层鉴权模型**（wangguan 网关统一入口）：
+   - 网关通用层：非 webhook 目标走 `X-API-Key` Token 白名单（IP 白名单可选）
+   - 网关-webhook 层：目标为 webhook Worker 的请求走来源 IP 白名单（GitHub hooks 段 + Linear 官方段自动同步，每月 1/15 号）；其余来源需 `?gw=<Token>` 或 `X-API-Key` 头
+   - 后端层：webhook Worker 自做 HMAC 验签 / 各源 Token（github Worker 自做 IP+x-proxy-key）
+3. **workers.dev 全账号关闭**：含网关在内，所有 Worker 的 workers.dev 端点均已关闭（探针返回 000 属预期，非故障）。
+4. **ci-webhook 通配劫持事故与恢复**（2026-09-03）：exa.edu.kg zone 启用通配路由后，`ci-webhook.exa.edu.kg`（隧道子域名，指向 Mac:5555）被通配路由劫持→流量误指 wangguan 网关。恢复措施：exa.edu.kg **禁用通配路由**，改用具体路由 `webhook.exa.edu.kg/*` → wangguan（避免劫持该 zone 下的隧道子域名）。事故复盘见 `~/cf/memory/kb/infra/incident-2026-09-03-zone-wildcard-route-hijack.md`。
+5. **旧 CF API token 失效**：1P 条目 `jn2fibbj` 实测 10000 认证失败——cf 项目已换账户级 token（1P `Cloudflare-xun201811@gmail.com-Workers-11`）。infra-core 侧建立在旧 token 上的 /tmp 探针/部署工具链随之失效，旧条目待用户在 1P 标废。
+
+**权威源指针**：
+- 实时映射（Worker↔仓库↔域名↔Secrets）：cf 项目 `xun201811/INDEX.md`
+- 架构定稿：`~/cf/memory/kb/infra/workers-gateway-architecture.md`
+- 事故复盘：`~/cf/memory/kb/infra/incident-2026-09-03-zone-wildcard-route-hijack.md`
+- 本文件与 `cf/webhook-gateway/wrangler.toml` 中的路由描述自此为**历史记录**，非生产声明。
+
+---
+
 ### 前置条件检查
 
 1. **Worker 部署验证**

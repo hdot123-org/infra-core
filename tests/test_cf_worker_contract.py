@@ -142,29 +142,51 @@ class TestCFArtifactsExist:
         assert 'main = "src/worker.js"' in content
         assert "compatibility_date" in content
 
-    def test_webhook_exa_edu_kg_route_locked(self):
-        """VAL-CF-001 (updated 2026-09-02 cutover): the production route binding is
-        now user-authorized. It must exist in exactly the approved shape and nothing
-        broader: single pattern webhook.exa.edu.kg/* on zone exa.edu.kg."""
+    def test_webhook_exa_edu_kg_route_archived(self):
+        """2026-09-03 wangguan handoff: cf/webhook-gateway is now a historical archive.
+
+        Production route webhook.exa.edu.kg/* is now served by wangguan gateway
+        (Dash-managed, cf project xun201811/INDEX.md is the authoritative source).
+        This repo's copy is archived — the wrangler.toml routes block exists only
+        as a historical record and must be explicitly annotated as non-production.
+        """
         path = CF_DIR / "wrangler.toml"
         content = path.read_text()
-        # collect non-comment lines that bind the production domain
-        binding_lines = [
-            ln.strip()
-            for ln in content.splitlines()
-            if "webhook.exa.edu.kg" in ln and not ln.strip().startswith("#")
+
+        # (a) Archive-state guard: routes block must carry non-production annotation
+        archive_markers = [
+            "存档",       # Chinese for "archive"
+            "archive",
+            "历史",       # "historical"
+            "非生产",     # "non-production"
+            "non-production",
+            "not production",
+            "历史记录",   # "historical record"
         ]
-        assert binding_lines, (
-            "webhook.exa.edu.kg route binding missing (cutover active since 2026-09-02)"
+        has_archive_marker = any(
+            marker in content.lower() or marker in content
+            for marker in archive_markers
         )
-        for stripped in binding_lines:
-            assert "webhook.exa.edu.kg/*" in stripped, (
-                f"route pattern must be webhook.exa.edu.kg/* exactly: {stripped}"
-            )
-            assert "exa.edu.kg" in stripped, f"zone must be exa.edu.kg: {stripped}"
-        # no other hostname may be bound
-        for stripped in binding_lines:
-            assert "ci-webhook" not in stripped, f"no bindings beyond the unified entry: {stripped}"
+        assert has_archive_marker, (
+            "wrangler.toml routes block must carry explicit non-production/archive "
+            "annotation (2026-09-03 wangguan handoff)"
+        )
+
+        # (b) Pointer to authoritative source in cf project
+        # Check DEPLOYMENT.md for the pointer (wrangler.toml itself uses comments)
+        deployment_content = (CF_DIR / "DEPLOYMENT.md").read_text()
+        pointer_markers = [
+            "xun201811/INDEX.md",
+            "workers-gateway-architecture.md",
+            "wangguan",
+        ]
+        found_pointers = [
+            p for p in pointer_markers if p in deployment_content
+        ]
+        assert len(found_pointers) >= 2, (
+            f"DEPLOYMENT.md must contain pointers to cf project authoritative "
+            f"source (expected >=2 of {pointer_markers}, found {found_pointers})"
+        )
 
     def test_src_worker_js_exists(self):
         """src/worker.js present."""
