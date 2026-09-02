@@ -38,10 +38,9 @@ gh-proxy 是一个 Cloudflare Worker，用于代理 GitHub 请求，解决中国
 
 从 1Password 读取 CF API Token：
 
-```bash
-# 使用 1password-connect MCP 或 CLI
-export CLOUDFLARE_API_TOKEN=$(op item get "Cloudflare-xun201811@gmail.com-Workers-11" --vault sever --fields "API 令牌")
-```
+通过 1password-connect MCP 按需读取 CF API Token（条目：`Cloudflare-xun201811@gmail.com-Workers-11`，vault：`sever`，字段：`API 令牌`）。读取后立即 export 为环境变量，值不落盘、不回显。
+
+> **2026-09-02 裁定**：op CLI 一律禁止调用；1P 读取只走 op MCP 且按需最小化。
 
 ### 2. 部署 Worker
 
@@ -153,6 +152,7 @@ npx wrangler tail
 - **PAT 注入改 Basic 形式**：`Authorization: Basic <base64("x-access-token:PAT")>`。编排器实测确认 github.com git smart-http 端点（info/refs?service=git-upload-pack）拒绝 Bearer/token 形式（返回 401），只接受 Basic 形式；api.github.com 两者皆收
 - **PROXY_KEY 恢复溯源**：原始值取自 ce-01 /home/runner/.gitconfig（1799 行 X-Proxy-Key，48 字符，971a 开头），四份文件（当前+三备份）md5 一致后经管道上传 `wrangler secret put PROXY_KEY` 成功
 - **GH_PRIVATE_PAT 恢复溯源**：1P sever vault 条目 `GitHub-PAT-ghproxy-mirror-readonly`（id wflx3mtpqojpyohxcixdfhacby），fine-grained PAT（Contents: Read-only, All repositories）。编排器用 `op item get --fields credential --reveal | tr -d '\n' | wrangler secret put` 管道灌入（round-2 曾因漏加 `--reveal` 把提示字符串当值，round-3 修复）
+  - **注**：2026-09-02 起 op CLI 已禁用，该历史操作形态不再适用；现一律走 1password-connect MCP 按需最小化读取
 - **Secret 验证**：`wrangler secret list` 确认 PROXY_KEY + GH_PRIVATE_PAT 双双在位
 
 **验证结果**（编排器在 ce-01 以 runner 用户执行，2026-09-02）：

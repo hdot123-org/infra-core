@@ -1,0 +1,7 @@
+{
+  "type": "module",
+  "name": "gh-proxy",
+  "version": "1.0.0",
+  "description": "CF Worker — GitHub proxy with private repo support",
+  "private": true
+}
