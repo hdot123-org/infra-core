@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.0](https://github.com/hdot123-org/infra-core/compare/v0.8.0...v0.9.0) (2026-09-01)
+
+
+### Features
+
+* **ci:** add set -euo pipefail to notify job run blocks ([#151](https://github.com/hdot123-org/infra-core/issues/151)) ([3c0073b](https://github.com/hdot123-org/infra-core/commit/3c0073b4282ca67b7d5424411e5e13d9bbe88a7e))
+* **platform:** F7 repo 级 Actions 平台策略锁定 (VAL-M3-001~012) ([#164](https://github.com/hdot123-org/infra-core/issues/164)) ([e59d127](https://github.com/hdot123-org/infra-core/commit/e59d12750debc1f0e4951bc036ef5a144739d69a))
+* **platform:** F8 Rulesets 迁移与合并设置闭环 (VAL-M3-013~023) ([#166](https://github.com/hdot123-org/infra-core/issues/166)) ([b1fb69f](https://github.com/hdot123-org/infra-core/commit/b1fb69fb7802159f43c7e276b862e74a4b165254))
+
+
+### Bug Fixes
+
+* **infra:** uv.lock 根包版本对齐至 0.8.0 ([#163](https://github.com/hdot123-org/infra-core/issues/163)) ([1e28fc4](https://github.com/hdot123-org/infra-core/commit/1e28fc403342765508e0578df5bbdb31700c8b6f))
+* **release:** uv.lock 根包版本守护与 Release PR 自动 relock (INFRA-712) ([#165](https://github.com/hdot123-org/infra-core/issues/165)) ([e997363](https://github.com/hdot123-org/infra-core/commit/e997363033979f25ede50a170c32b52abba31dd0))
+* **workflow:** 恢复引擎仓自扫 evolution 定时触发面 (INFRA-717) ([#173](https://github.com/hdot123-org/infra-core/issues/173)) ([d2db025](https://github.com/hdot123-org/infra-core/commit/d2db0254b8130975d018d12bfc93a88b611bb93b))
+
 ## [0.8.0](https://github.com/hdot123-org/infra-core/compare/v0.7.2...v0.8.0) (2026-08-31)
 
 

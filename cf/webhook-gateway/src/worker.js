@@ -1,16 +1,17 @@
 /**
  * CF Worker — webhook-gateway
  *
- * Fetch handler: 入站 POST /webhook/events + POST /webhook/posthog-error
+ * Fetch handler: POST /webhook/events (unified multiplexer)
  * Scheduled handler: cron → repository_dispatch
  *
  * 硬边界：
- * - X-Hub-Signature-256 HMAC 验签 fail-closed（secret 未配置 = 拒绝）
+ * - 双通道认证：X-Hub-Signature-256 HMAC 或 token 头匹配任一放行；双缺失/错误 401
  * - 出站 token 全部来自 Worker secrets，代码零硬编码
- * - 全字段透传（不丢字段、不改写）
+ * - 全字段透传（不丢字段、不改写）；Linear Issue/Comment 重建 {action,type,data}
+ * - PostHog/Linear 类并入 /webhook/events 分类器（统一路径裁定）
  */
 
-import { route } from './router.js';
+import { route, detectLinear } from './router.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -195,10 +196,27 @@ async function handleGitHubWebhook(request, env) {
   const githubEvent = request.headers.get('x-github-event') || '';
   const requestId = request.headers.get('x-github-delivery') || '';
 
-  // HMAC verification (fail-closed)
+  // Dual-channel authentication (fail-closed):
+  // Channel 1: X-Hub-Signature-256 HMAC (standard GitHub webhook)
+  // Channel 2: Token header (ci-notify class with X-CI-Token matching CI_TOKEN secret)
+  // At least one must pass; both missing/wrong → 401
   const secret = env.GITHUB_WEBHOOK_SECRET || null;
-  const valid = await verifySignature(body, signature, secret);
-  if (!valid) {
+  const ciToken = env.CI_TOKEN || null;
+  const inboundCiToken = request.headers.get('x-ci-token') || '';
+
+  let hmacValid = false;
+  let tokenValid = false;
+
+  if (secret && signature) {
+    hmacValid = await verifySignature(body, signature, secret);
+  }
+
+  // ci-notify class: X-CI-Token header matches CI_TOKEN secret
+  if (ciToken && inboundCiToken && ciToken === inboundCiToken) {
+    tokenValid = true;
+  }
+
+  if (!hmacValid && !tokenValid) {
     const duration = Date.now() - startTime;
     capturePostHog(env, {
       route: 'github-webhook',
@@ -209,7 +227,7 @@ async function handleGitHubWebhook(request, env) {
       request_id: requestId,
     });
     return jsonResponse(
-      { status: 'error', error: 'Signature verification failed' },
+      { status: 'error', error: 'Authentication failed' },
       401
     );
   }
@@ -231,8 +249,12 @@ async function handleGitHubWebhook(request, env) {
     return jsonResponse({ status: 'error', error: 'Invalid JSON' }, 400);
   }
 
-  // Route decision
-  const decision = route(githubEvent, payload);
+  // Route decision (pass headers for posthog token detection)
+  const headersObj = {};
+  for (const [key, value] of request.headers.entries()) {
+    headersObj[key.toLowerCase()] = value;
+  }
+  const decision = route(githubEvent, payload, headersObj);
   const repo = payload.repository?.full_name || '';
 
   if (decision.action === 'none') {
@@ -262,19 +284,40 @@ async function handleGitHubWebhook(request, env) {
     'User-Agent': 'webhook-gateway/1.0',
   };
 
-  // Inject token from Worker secrets
+  // Inject token from Worker secrets based on route
   if (decision.tokenSecret === 'CI_TOKEN') {
     headers['X-CI-Token'] = env.CI_TOKEN || '';
   } else if (decision.tokenSecret === 'WIKI_TOKEN') {
     headers['X-Wiki-Token'] = env.WIKI_TOKEN || '';
+    headers['X-GitHub-Event'] = 'push'; // VAL-WPARITY-003: dual-header requirement
+  } else if (decision.tokenSecret === 'LINEAR_WEBHOOK_TOKEN') {
+    headers['X-Webhook-Token'] = env.LINEAR_WEBHOOK_TOKEN || '';
+  } else if (decision.tokenSecret === 'POSTHOG_PASSTHROUGH') {
+    headers['X-Posthog-Token'] = headersObj['x-posthog-token'] || '';
+  }
+
+  // Linear Issue/Comment reconstruction: extract {action, type, data}
+  let forwardBody = body;
+  if (decision.tokenSecret === 'LINEAR_WEBHOOK_TOKEN') {
+    const linearDetect = detectLinear(githubEvent, payload);
+    if (linearDetect.isLinear && (linearDetect.resourceType === 'Issue' || linearDetect.resourceType === 'Comment')) {
+      // Reconstruct minimal payload for linear-to-droid
+      const reconstructed = {
+        action: payload.action,
+        type: payload.type,
+        data: payload.data
+      };
+      forwardBody = JSON.stringify(reconstructed);
+    }
   }
 
   // Full field passthrough — body is sent as-is (no field drop/rewrite)
+  // Exception: Linear Issue/Comment reconstruction (minimal payload)
   try {
     await fetchWithRetry(targetUrl, {
       method: 'POST',
       headers,
-      body,
+      body: forwardBody,
     });
     const duration = Date.now() - startTime;
     capturePostHog(env, {
