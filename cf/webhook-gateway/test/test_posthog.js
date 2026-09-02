@@ -361,3 +361,151 @@ describe('PostHog metadata capture (VAL-CF-011)', () => {
     assert.notEqual(capturedBody.api_key, 'ph_token_for_inbound');
   });
 });
+
+describe('PostHog error endpoint auth (/webhook/posthog-error, fail-closed)', () => {
+  const POSTHOG_KEY = 'phc_test_key_12345';
+  const POSTHOG_TOKEN = 'test-posthog-secret';
+  const PAYLOAD = JSON.stringify({ error_type: 'test_error', count: 1 });
+
+  let originalFetch;
+  let fetchCalls;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    fetchCalls = [];
+    globalThis.fetch = async (url, opts) => {
+      fetchCalls.push({ url, opts });
+      return { ok: true, status: 200 };
+    };
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('valid x-posthog-token → forwarded with passthrough + capture outcome forwarded', async () => {
+    const request = new Request('https://worker.test/webhook/posthog-error', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Posthog-Token': POSTHOG_TOKEN,
+      },
+      body: PAYLOAD,
+    });
+
+    const env = {
+      POSTHOG_TOKEN,
+      POSTHOG_CAPTURE_KEY: POSTHOG_KEY,
+    };
+
+    const resp = await worker.fetch(request, env, {});
+    const body = await resp.json();
+
+    assert.equal(resp.status, 200);
+    assert.equal(body.forwarded, true);
+    assert.equal(body.route, 'posthog-error');
+
+    // Forwarded to Mac tunnel with transparent token passthrough
+    const forwardCall = fetchCalls.find(
+      (c) => c.url === 'https://ci-webhook.exa.edu.kg/hooks/posthog-error'
+    );
+    assert.ok(forwardCall, 'should forward to ci-webhook tunnel');
+    assert.equal(forwardCall.opts.headers['X-Posthog-Token'], POSTHOG_TOKEN);
+    assert.equal(forwardCall.opts.body, PAYLOAD);
+
+    // Capture metadata outcome=forwarded
+    const posthogCall = fetchCalls.find(
+      (c) => c.url === 'https://us.posthog.com/capture/'
+    );
+    assert.ok(posthogCall, 'PostHog capture should be called');
+    const capturedBody = JSON.parse(posthogCall.opts.body);
+    assert.equal(capturedBody.properties.route, 'posthog-error');
+    assert.equal(capturedBody.properties.outcome, 'forwarded');
+    assert.equal(capturedBody.properties.http_status, 200);
+  });
+
+  it('missing x-posthog-token → 401 rejected + capture outcome rejected', async () => {
+    const request = new Request('https://worker.test/webhook/posthog-error', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // no X-Posthog-Token header
+      },
+      body: PAYLOAD,
+    });
+
+    const env = {
+      POSTHOG_TOKEN,
+      POSTHOG_CAPTURE_KEY: POSTHOG_KEY,
+    };
+
+    const resp = await worker.fetch(request, env, {});
+    const body = await resp.json();
+
+    assert.equal(resp.status, 401);
+    assert.match(body.error, /Authentication failed/);
+
+    // No forward to Mac tunnel
+    const forwardCall = fetchCalls.find(
+      (c) => c.url === 'https://ci-webhook.exa.edu.kg/hooks/posthog-error'
+    );
+    assert.ok(!forwardCall, 'must NOT forward unauthenticated request');
+
+    // Capture metadata outcome=rejected http_status=401
+    const posthogCall = fetchCalls.find(
+      (c) => c.url === 'https://us.posthog.com/capture/'
+    );
+    assert.ok(posthogCall, 'PostHog capture should be called for rejected auth');
+    const capturedBody = JSON.parse(posthogCall.opts.body);
+    assert.equal(capturedBody.properties.route, 'posthog-error');
+    assert.equal(capturedBody.properties.event, 'posthog-error');
+    assert.equal(capturedBody.properties.outcome, 'rejected');
+    assert.equal(capturedBody.properties.http_status, 401);
+  });
+
+  it('wrong x-posthog-token → 401 rejected', async () => {
+    const request = new Request('https://worker.test/webhook/posthog-error', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Posthog-Token': 'wrong-posthog-token',
+      },
+      body: PAYLOAD,
+    });
+
+    const env = {
+      POSTHOG_TOKEN,
+      POSTHOG_CAPTURE_KEY: POSTHOG_KEY,
+    };
+
+    const resp = await worker.fetch(request, env, {});
+    const body = await resp.json();
+
+    assert.equal(resp.status, 401);
+    assert.match(body.error, /Authentication failed/);
+
+    const forwardCall = fetchCalls.find(
+      (c) => c.url === 'https://ci-webhook.exa.edu.kg/hooks/posthog-error'
+    );
+    assert.ok(!forwardCall, 'must NOT forward request with wrong token');
+  });
+
+  it('POSTHOG_TOKEN not configured → 401 rejected (fail-closed)', async () => {
+    const request = new Request('https://worker.test/webhook/posthog-error', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Posthog-Token': 'any-token-value',
+      },
+      body: PAYLOAD,
+    });
+
+    const env = {}; // no POSTHOG_TOKEN — fail-closed
+
+    const resp = await worker.fetch(request, env, {});
+    const body = await resp.json();
+
+    assert.equal(resp.status, 401);
+    assert.match(body.error, /Authentication failed/);
+  });
+});
