@@ -1,0 +1,7 @@
+{
+  "name": "webhook-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CF Worker — webhook-gateway (M4 基础层)"
+}
