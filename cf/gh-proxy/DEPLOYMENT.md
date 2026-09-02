@@ -103,7 +103,7 @@ ce-01 runner 通过 gitconfig 的 `insteadOf` 规则将 GitHub 请求重写到 g
 ### 404 错误
 
 - PROXY_KEY 未设置或不匹配
-- IP 不在白名单内（检查 CF WAF 规则）
+- 请求源 IP 不在 `ALLOWED_IPS` 白名单内（worker 代码 `CF-Connecting-IP` 校验，非 CF WAF）
 
 ### 403 错误
 
@@ -132,7 +132,7 @@ npx wrangler tail
 
 1. PAT 仅存储在 Cloudflare Workers Secrets 中，不进入代码、日志、PR
 2. PROXY_KEY 通过环境变量注入，不硬编码
-3. IP 白名单通过 CF WAF 管理，提供额外保护层
+3. IP 白名单在 worker 代码中（`ALLOWED_IPS` + `CF-Connecting-IP` 校验），提供额外保护层
 4. 仅对 `hdot123-org` 私有仓库注入 PAT，公开仓库不受影响
 
 ## 维护

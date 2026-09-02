@@ -104,9 +104,17 @@ const POSTHOG_ALLOWED_FIELDS = new Set([
 
 /**
  * Capture metadata-only event to PostHog.
+ * Returns a Promise (or undefined if skipped) so callers can wrap with ctx.waitUntil
+ * to prevent CF Workers runtime from truncating the fire-and-forget request.
  * Silently catches errors + 2s abort — never affects the main forwarding path.
  */
-export function capturePostHog(env, metadata) {
+export function capturePostHog(env, ctx, metadata) {
+  // Backward-compatible: if ctx is omitted (2-arg call from older tests), skip waitUntil
+  if (metadata === undefined && ctx && typeof ctx.waitUntil !== 'function') {
+    metadata = ctx;
+    ctx = null;
+  }
+
   const key = env.POSTHOG_CAPTURE_KEY;
   if (!key) {
     console.warn('[posthog] POSTHOG_CAPTURE_KEY not configured, capture skipped');
@@ -134,7 +142,7 @@ export function capturePostHog(env, metadata) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), POSTHOG_CAPTURE_TIMEOUT_MS);
 
-  fetch(POSTHOG_CAPTURE_URL, {
+  const promise = fetch(POSTHOG_CAPTURE_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -150,6 +158,13 @@ export function capturePostHog(env, metadata) {
       clearTimeout(timeout);
       console.warn(`[posthog] capture failed: ${err.message}`);
     });
+
+  // Wrap with ctx.waitUntil so CF Workers runtime doesn't truncate the request
+  if (ctx && typeof ctx.waitUntil === 'function') {
+    ctx.waitUntil(promise);
+  }
+
+  return promise;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,12 +188,12 @@ async function handleFetch(request, env, ctx) {
 
   // POST /webhook/events — GitHub webhook with HMAC verification
   if (pathname === '/webhook/events' && method === 'POST') {
-    return handleGitHubWebhook(request, env);
+    return handleGitHubWebhook(request, env, ctx);
   }
 
   // POST /webhook/posthog-error — passthrough to Mac:5555
   if (pathname === '/webhook/posthog-error' && method === 'POST') {
-    return handlePosthogError(request, env);
+    return handlePosthogError(request, env, ctx);
   }
 
   // Health / root
@@ -189,7 +204,7 @@ async function handleFetch(request, env, ctx) {
   return jsonResponse({ status: 'error', error: 'Not Found' }, 404);
 }
 
-async function handleGitHubWebhook(request, env) {
+async function handleGitHubWebhook(request, env, ctx) {
   const startTime = Date.now();
   const body = await request.text();
   const signature = request.headers.get('x-hub-signature-256');
@@ -218,7 +233,7 @@ async function handleGitHubWebhook(request, env) {
 
   if (!hmacValid && !tokenValid) {
     const duration = Date.now() - startTime;
-    capturePostHog(env, {
+    capturePostHog(env, ctx, {
       route: 'github-webhook',
       event: githubEvent,
       outcome: 'rejected',
@@ -238,7 +253,7 @@ async function handleGitHubWebhook(request, env) {
     payload = JSON.parse(body);
   } catch {
     const duration = Date.now() - startTime;
-    capturePostHog(env, {
+    capturePostHog(env, ctx, {
       route: 'github-webhook',
       event: githubEvent,
       outcome: 'rejected',
@@ -259,7 +274,7 @@ async function handleGitHubWebhook(request, env) {
 
   if (decision.action === 'none') {
     const duration = Date.now() - startTime;
-    capturePostHog(env, {
+    capturePostHog(env, ctx, {
       route: decision.route,
       event: decision.event,
       repo,
@@ -320,7 +335,7 @@ async function handleGitHubWebhook(request, env) {
       body: forwardBody,
     });
     const duration = Date.now() - startTime;
-    capturePostHog(env, {
+    capturePostHog(env, ctx, {
       route: decision.route,
       event: decision.event,
       repo,
@@ -331,7 +346,7 @@ async function handleGitHubWebhook(request, env) {
     });
   } catch (err) {
     const duration = Date.now() - startTime;
-    capturePostHog(env, {
+    capturePostHog(env, ctx, {
       route: decision.route,
       event: decision.event,
       repo,
@@ -360,7 +375,7 @@ async function handleGitHubWebhook(request, env) {
   });
 }
 
-async function handlePosthogError(request, env) {
+async function handlePosthogError(request, env, ctx) {
   const startTime = Date.now();
   const body = await request.text();
   const posthogToken = request.headers.get('x-posthog-token') || '';
@@ -380,7 +395,7 @@ async function handlePosthogError(request, env) {
       body,
     });
     const duration = Date.now() - startTime;
-    capturePostHog(env, {
+    capturePostHog(env, ctx, {
       route: 'posthog-error',
       event: 'posthog-error',
       outcome: 'forwarded',
@@ -389,7 +404,7 @@ async function handlePosthogError(request, env) {
     });
   } catch (err) {
     const duration = Date.now() - startTime;
-    capturePostHog(env, {
+    capturePostHog(env, ctx, {
       route: 'posthog-error',
       event: 'posthog-error',
       outcome: 'error',
@@ -420,7 +435,7 @@ async function handleScheduled(event, env, ctx) {
     if (existing) {
       console.log(`[scheduled] Idempotency hit: ${idempotencyKey}, skipping`);
       const duration = Date.now() - startTime;
-      capturePostHog(env, {
+      capturePostHog(env, ctx, {
         route: 'scheduled',
         event: 'cron',
         outcome: 'ok',
@@ -443,7 +458,7 @@ async function handleScheduled(event, env, ctx) {
   if (!dispatchToken) {
     console.warn('[scheduled] DISPATCH_TOKEN not configured, dispatch skipped');
     const duration = Date.now() - startTime;
-    capturePostHog(env, {
+    capturePostHog(env, ctx, {
       route: 'scheduled',
       event: 'cron',
       outcome: 'rejected',
@@ -477,7 +492,7 @@ async function handleScheduled(event, env, ctx) {
     });
     console.log(`[scheduled] dispatch status=${resp.status}`);
     const duration = Date.now() - startTime;
-    capturePostHog(env, {
+    capturePostHog(env, ctx, {
       route: 'scheduled',
       event: 'cron',
       outcome: resp.ok ? 'forwarded' : 'error',
@@ -488,7 +503,7 @@ async function handleScheduled(event, env, ctx) {
   } catch (err) {
     console.error(`[scheduled] dispatch failed: ${err.message}`);
     const duration = Date.now() - startTime;
-    capturePostHog(env, {
+    capturePostHog(env, ctx, {
       route: 'scheduled',
       event: 'cron',
       outcome: 'error',
