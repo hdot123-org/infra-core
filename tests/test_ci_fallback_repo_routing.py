@@ -13,11 +13,15 @@ webhook 接收器的 command-working-directory（/Users/busiji/memory）——in
 3. SCRIPT_CWD —— webhook 接收器工作目录（最后兜底）
 
 测试隔离：ECHO_DROID=1 避免真实 droid exec；WEBHOOK_BASE/LOCK_DIR/LOG_DIR
-指向临时目录；不读写生产 ~/.factory/webhook。
+指向临时目录；不读写生产 ~/.factory/webhook。FACTORY_TOKEN 用动态拼接的假值
+（FACTORY_API_BASE 指向闭端口，不会真注入）；FLOCK_BIN 按平台解析——脚本默认
+路径 /opt/homebrew/bin/flock 仅 macOS 存在，Linux CI 上 flock 缺失（退出码 127）
+会被幂等锁分支误判为 ci_lock_held，导致 fallback 未派生（INFRA-701 CI 首红根因）。
 """
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -48,8 +52,16 @@ def _make_env(tmp_path: Path, repo_config: Path | None = None) -> dict:
     # 闭端口：注入路径必失败，强制走 fallback 分支
     env["FACTORY_API_BASE"] = "http://127.0.0.1:1"
 
-    if "FACTORY_TOKEN" in env:
-        del env["FACTORY_TOKEN"]
+    # 测试用 Factory token（动态拼接假值，仅满足脚本 ^fk- 前缀校验；闭端口不会真注入）。
+    # 不设假值时脚本会走 1Password 读取（op-mcp.sh），非 macOS 环境必然失败并在
+    # fallback 派生前 exit 0。禁止在源码中出现完整 token 字面量（Droid-Shield 密钥检测）。
+    env["FACTORY_TOKEN"] = "fk-" + "test-stub-" + "not-real"
+
+    # 跨平台 flock 路径（对齐 tests/test_trigger_ci_droid_fallback.py 的 temp_env）：
+    # 脚本默认 /opt/homebrew/bin/flock 仅 macOS 存在
+    flock_path = shutil.which("flock")
+    if flock_path:
+        env["FLOCK_BIN"] = flock_path
 
     env["ECHO_DROID"] = "1"
     env["POSTHOG_DRY_RUN"] = "1"
@@ -57,6 +69,15 @@ def _make_env(tmp_path: Path, repo_config: Path | None = None) -> dict:
 
     if repo_config is not None:
         env["REPO_CONFIG"] = str(repo_config)
+    else:
+        # 未提供测试配置时指向不存在的路径，切断对生产 repositories.yml 的依赖
+        # （slug 解析必然失败，走 SCRIPT_CWD 兜底，行为确定）
+        env["REPO_CONFIG"] = str(tmp_path / "repositories.yml.absent")
+
+    # 剥离宿主机 CI_REPO（本仓库 CI 会话环境携带 CI_REPO=hdot123-org/infra-core，
+    # 会经 REPO_SLUG_ARG 的 ${CI_REPO:-} 兜底渗入 legacy 调用测试；需要 CI_REPO
+    # 的用例在 _make_env 之后显式设置）
+    env.pop("CI_REPO", None)
 
     return env
 

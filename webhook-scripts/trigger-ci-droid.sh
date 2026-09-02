@@ -30,7 +30,10 @@ LOG_DIR="${WEBHOOK_BASE}/logs"
 LOCK_DIR="${LOCK_DIR:-${WEBHOOK_BASE}/locks}"
 SESSIONS_INDEX="${SESSIONS_INDEX:-${HOME}/.factory/sessions-index.json}"
 PYTHON_BIN="${PYTHON_BIN:-/opt/homebrew/bin/python3}"
-FLOCK_BIN="${FLOCK_BIN:-/opt/homebrew/bin/flock}"
+# 跨平台 flock 解析：优先 PATH 中的 flock（Linux CI runner 为 /usr/bin/flock），
+# 无 PATH 命中时回退 macOS Homebrew 路径。硬编码 /opt/homebrew 会使非 macOS
+# 主机上 flock 执行失败（127），被幂等锁分支误判为 ci_lock_held 而静默跳过。
+FLOCK_BIN="${FLOCK_BIN:-$(command -v flock || echo /opt/homebrew/bin/flock)}"
 
 # VAL-INJ-010: 提前赋值 LOG_FILE，确保 ci_invalid_pr_number 事件回执落盘
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
