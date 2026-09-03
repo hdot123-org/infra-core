@@ -18,6 +18,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from tests.cf_contract_helpers import assert_wrangler_toml_contract
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -72,14 +74,7 @@ class TestGHProxyArtifactsExist:
 
     def test_wrangler_toml_exists(self):
         """wrangler.toml present with required fields."""
-        path = CF_DIR / "wrangler.toml"
-        assert path.exists(), "cf/gh-proxy/wrangler.toml missing"
-
-        content = path.read_text()
-        assert "account_id" in content
-        assert "97d8129421b7b8e445718ff9891be1d9" in content
-        assert 'main = "src/worker.js"' in content
-        assert "compatibility_date" in content
+        assert_wrangler_toml_contract(CF_DIR)
 
     def test_src_worker_js_exists(self):
         """src/worker.js present."""

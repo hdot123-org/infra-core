@@ -16,6 +16,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from tests.cf_contract_helpers import assert_wrangler_toml_contract
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -133,14 +135,7 @@ class TestCFArtifactsExist:
 
     def test_wrangler_toml_exists(self):
         """wrangler.toml present with required fields."""
-        path = CF_DIR / "wrangler.toml"
-        assert path.exists(), "cf/webhook-gateway/wrangler.toml missing"
-
-        content = path.read_text()
-        assert "account_id" in content
-        assert "97d8129421b7b8e445718ff9891be1d9" in content
-        assert 'main = "src/worker.js"' in content
-        assert "compatibility_date" in content
+        assert_wrangler_toml_contract(CF_DIR)
 
     def test_webhook_exa_edu_kg_route_archived(self):
         """2026-09-03 wangguan handoff: cf/webhook-gateway is now a historical archive.
