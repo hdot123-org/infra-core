@@ -4,10 +4,17 @@
 #
 # 所有权（M5 shrink，INFRA mission）：webhook 生产同步的真源自本仓库
 # （hdot123-org/infra-core）。memory-core 侧同名 manifest 已随 M5 收缩删除，
-# 过渡期两 manifest 不双 claim 同一生产文件名。memory-core 仓内曾保留的
-# 4 个 CROSS_DIR 文件副本（scripts/{extract_anchor,evolution_utils,
-# evolution_adapters,anchor_gate}.py）已随其 INFRA-679 对偶 PR（memory
-# #1097）删除，回滚窗口关闭。
+# 过渡期两 manifest 不双 claim 同一生产文件名。
+#
+# M5 回滚窗口关闭口径（INFRA-738 对齐）：权威口径以 memory 仓处置记录
+# docs/specs/M5-SHRINK-DISPOSITION.md 为准（memory #1104 追加 §6 窗口关闭
+# 记录），本 manifest 叙述与其不一致时以处置记录为准：
+# - 窗口载体是 evolution 四件套回滚副本 scripts/evolution_{scanner,
+#   heartbeat,utils,adapters}.py（处置记录 §2 保留窗口），由 memory #1097
+#   删除；关闭门为「release v0.45.0（2026-08-30T09:44:45Z）+ ≥3 天稳定期」
+#   （门成熟 2026-09-02T09:44Z，#1097 早于门约 29.5h，零 revert 敞口损失）。
+# - 锚点助手副本 scripts/{extract_anchor,anchor_gate}.py 不设窗口，随 M5
+#   收缩 PR 直接删除（处置记录 §1），并非回滚窗口的一部分。
 #
 # 注意：本文件被 source 时不应改变调用方的 shell 选项（如 errexit/nounset）
 # 因此故意不使用 set -euo pipefail
@@ -50,7 +57,8 @@ MANAGED_LIB_FILES=(
 # 血缘收敛（INFRA-679）：M5 迁移时点曾在本仓 webhook-scripts/cross-dir/
 # 维护 memory-core 生产血统的逐字节快照作为同步源，与 src/infra_core/engine/
 # 的引擎演化线形成双副本（CODE_HYGIENE_DUPLICATE_BLOCK 重复块根因）。
-# memory-core 侧回滚副本删除（memory #1097）后窗口关闭，本清单收敛到
+# memory 侧回滚窗口四件套（evolution_{scanner,heartbeat,utils,adapters}.py）
+# 随 memory #1097 删除、窗口按处置记录 §6 权威口径关闭后，本清单收敛到
 # 引擎单源 src/infra_core/engine/——与 CI/CLI 的 python -m
 # infra_core.engine.* 消费面同源，快照副本目录 cross-dir/ 随之退役。
 # 引擎版本与旧快照在生产消费面（extract_linkback_anchor / sanitize_* /
