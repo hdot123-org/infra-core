@@ -207,10 +207,9 @@ op_get_field() { echo "fake-key"; }
 """)
         op_mcp.chmod(0o755)
 
-        # Stub scripts/extract_anchor.py
-        scripts_dir = sandbox / "scripts"
-        scripts_dir.mkdir()
-        (scripts_dir / "extract_anchor.py").write_text('import sys; print("")  # no anchor\n')
+        # Stub extract_anchor.py — flat in SCRIPT_DIR, mirroring prod CROSS_DIR
+        # 平铺部署布局（~/.factory/webhook/scripts/extract_anchor.py）
+        (sandbox / "extract_anchor.py").write_text('import sys; print("")  # no anchor\n')
 
         # Modify script for sandbox
         content = sandbox_script.read_text()

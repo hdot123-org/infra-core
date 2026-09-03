@@ -375,7 +375,7 @@ if [ "$TERMINAL_COUNT" -gt 0 ]; then
             # 锚点一致性校验（issue-flow.md §9.4）：提取评论中的 linear-linkback，必须 == T_REF
             # 失败留痕 anchor-extract.log（INFRA-357），fail-closed 语义不变
             ANCHOR_ERR="$(mktemp)"
-            ANCHOR=$(/opt/homebrew/bin/python3 "${SCRIPT_DIR%/*}/scripts/extract_anchor.py" issue "$GH_NUMBER" "$REPO" 2>"$ANCHOR_ERR" || echo "")
+            ANCHOR=$(/opt/homebrew/bin/python3 "$SCRIPT_DIR/extract_anchor.py" issue "$GH_NUMBER" "$REPO" 2>"$ANCHOR_ERR" || echo "")
             log_anchor_extract_err "issue#${GH_NUMBER}" "$(cat "$ANCHOR_ERR")"
             rm -f "$ANCHOR_ERR"
             if [ "$ANCHOR" = "$T_REF" ]; then
