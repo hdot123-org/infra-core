@@ -6,13 +6,15 @@
 
 infra-core 是从 memory-core 抽离的组织级共享引擎，提供：
 
-- **引擎层**：scanner、utils、adapters、heartbeat、droid-review 分片/发布
+- **引擎层**：scanner、utils、adapters、heartbeat、self-audit、version-sync、锚点助手、droid-review 分片/发布（单源 `src/infra_core/engine/`）
 - **规则包**：memory pack（含 daily-audit、layout-audit、hygiene、error-patterns 等规则模块）
 - **webhook 脚本**：manifest + trigger 家族（生产同步源）
 - **CI/CD**：reusable workflows + composite actions
 - **CLI**：infra-cli 统一入口
 
 ## 安装
+
+要求 Python 3.12（`requires-python = "==3.12.*"` 锁定）。
 
 ```bash
 # 从源码安装（开发模式）
@@ -41,6 +43,9 @@ infra-cli audit --target /path/to/project
 
 # 版本同步
 infra-cli version-sweep --target /path/to/project
+
+# venv 环境工具组（创建独立 venv 并安装依赖）
+infra-cli venv create --path .venv --extras dev
 ```
 
 独立审计入口（随包安装提供）：`infra-self-audit`、`infra-daily-audit`、`infra-layout-audit`、`infra-hygiene-audit`、`infra-error-patterns`。
@@ -68,11 +73,13 @@ audit_tools:
 ```
 infra-core/
 ├── src/infra_core/
-│   ├── engine/          # 自进化引擎（scanner/utils/adapters/heartbeat）
-│   ├── packs/           # 规则包（memory 等）
+│   ├── engine/          # 自进化引擎单源（scanner/utils/adapters/heartbeat/self-audit/version-sync/锚点助手）
+│   ├── packs/           # 规则包（memory 等，经 entry points 发现）
+│   ├── shell/           # shell 辅助层（auto-merge/branch-cleanup 家族源码）
+│   ├── governance.py    # 治理自检（受保护路径修改判定，fail-closed）
 │   └── cli.py           # infra-cli 统一入口
 ├── actions/             # composite actions（auto-merge / branch-cleanup / droid-review-aggregate / governance-check）
-├── .github/workflows/   # reusable workflows
+├── .github/workflows/   # reusable workflows + CI/QA 门禁
 ├── webhook-scripts/     # webhook 脚本（生产同步源）
 └── tests/               # 测试套件
 ```
