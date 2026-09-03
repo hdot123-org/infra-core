@@ -7,8 +7,16 @@ main = "src/worker.js"
 compatibility_date = "2024-12-01"
 account_id = "97d8129421b7b8e445718ff9891be1d9"
 
+# ===========================================================================
+# 2026-09-03 存档声明：本仓 cf/webhook-gateway 副本已转为历史存档。
+# 生产入口 webhook.exa.edu.kg/* 现由 wangguan 网关 Worker 承接（Dash 管理）。
+# 部署权威源已迁 cf 项目独立仓（xun201811/INDEX.md）。
+# 以下 routes 块为非生产的历史记录，不作为生产路由声明。
+# ===========================================================================
+
 # 2026-09-02 域名切换（用户批准）：统一入口 webhook.exa.edu.kg/* 由本 Worker 承接。
 # 回滚 = 删除本 routes 块并重新 deploy（流量立即回到 cloudflared tunnel → n8n）。
+# [2026-09-03 存档标注] 上述切换已被 wangguan 网关接管取代，本 routes 块为历史记录。
 routes = [
   { pattern = "webhook.exa.edu.kg/*", zone_name = "exa.edu.kg" }
 ]
