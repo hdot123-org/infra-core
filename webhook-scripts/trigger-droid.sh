@@ -446,7 +446,7 @@ for pr in candidates:
         continue
     # 提取锚点；失败留痕 anchor-extract.log（INFRA-357，fail-closed 不变）
     result = subprocess.run(
-        ['/opt/homebrew/bin/python3', '$SCRIPT_DIR/../scripts/extract_anchor.py', 'pr', str(pr_num), '$_override_gh_repo'],
+        ['/opt/homebrew/bin/python3', '$SCRIPT_DIR/extract_anchor.py', 'pr', str(pr_num), '$_override_gh_repo'],
         capture_output=True, text=True
     )
     if result.returncode != 0 or result.stderr.strip():
@@ -520,7 +520,7 @@ try:
 
         # Extract anchor；失败留痕 anchor-extract.log（INFRA-357，fail-closed 不变）
         result = subprocess.run(
-            ['/opt/homebrew/bin/python3', '$SCRIPT_DIR/../scripts/extract_anchor.py', 'issue', str(issue_num), '$_sync_gh_repo'],
+            ['/opt/homebrew/bin/python3', '$SCRIPT_DIR/extract_anchor.py', 'issue', str(issue_num), '$_sync_gh_repo'],
             capture_output=True, text=True
         )
         if result.returncode != 0 or result.stderr.strip():
@@ -1177,7 +1177,7 @@ except Exception as e:
                         # 仅当锚点 == $p_ref 才关闭；无锚点/不匹配/提取失败 → skip 关闭
                         # （fail-closed：宁可漏关留给 reconcile 兜底，不可误关）
                         local p_gh_issue_number
-                        p_gh_issue_number=$(echo "$p_candidates_json" | /opt/homebrew/bin/python3 "$SCRIPT_DIR/../scripts/anchor_gate.py" "$p_ref" "$p_github_repo" "$LOG_DIR" 2>>"$LOG_FILE")
+                        p_gh_issue_number=$(echo "$p_candidates_json" | /opt/homebrew/bin/python3 "$SCRIPT_DIR/anchor_gate.py" "$p_ref" "$p_github_repo" "$LOG_DIR" 2>>"$LOG_FILE")
 
                         if [ -n "$p_gh_issue_number" ]; then
                             local p_close_comment="对应的 Linear Issue ${p_ref} 已处于终态 (${p_linear_state_type})，自动关闭 GitHub Issue。"

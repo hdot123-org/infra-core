@@ -20,7 +20,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Add scripts/ to path so we can import evolution_utils
+# Add the engine dir to path so we can import evolution_utils:
+# repo layout = src/infra_core/engine/（引擎单源）; prod layout = CROSS_DIR
+# 平铺部署目录（~/.factory/webhook/scripts/），两种布局下均为本文件同目录。
 SCRIPT_DIR = str(Path(__file__).resolve().parent)
 sys.path.insert(0, SCRIPT_DIR)
 

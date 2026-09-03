@@ -34,8 +34,8 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 # Same resolution as GATE A 4.5/4.6 in trigger-droid.sh:
-# repo layout  <root>/webhook-scripts/../scripts/extract_anchor.py
-# prod layout  ~/.factory/webhook/scripts/../scripts/extract_anchor.py
+# repo layout  <root>/src/infra_core/engine/extract_anchor.py（引擎单源）
+# prod layout  ~/.factory/webhook/scripts/extract_anchor.py（CROSS_DIR 平铺部署）
 EXTRACTOR = str(SCRIPT_DIR / "extract_anchor.py")
 
 EXTRACT_TIMEOUT = 60  # extract_anchor.py has its own 30s gh timeout
