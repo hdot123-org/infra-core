@@ -7,7 +7,7 @@
 infra-core 是从 memory-core 抽离的组织级共享引擎，提供：
 
 - **引擎层**：scanner、utils、adapters、heartbeat、droid-review 分片/发布
-- **规则包**：daily-audit、layout-audit、hygiene、self-audit（memory 等）
+- **规则包**：memory pack（含 daily-audit、layout-audit、hygiene、error-patterns 等规则模块）
 - **webhook 脚本**：manifest + trigger 家族（生产同步源）
 - **CI/CD**：reusable workflows + composite actions
 - **CLI**：infra-cli 统一入口
@@ -43,6 +43,8 @@ infra-cli audit --target /path/to/project
 infra-cli version-sweep --target /path/to/project
 ```
 
+独立审计入口（随包安装提供）：`infra-self-audit`、`infra-daily-audit`、`infra-layout-audit`、`infra-hygiene-audit`、`infra-error-patterns`。
+
 ### 规则包
 
 消费仓通过 `.evolution/config.yml` 声明使用的规则包：
@@ -57,6 +59,10 @@ audit_tools:
     output_format: json
 ```
 
+### 消费仓接入
+
+新仓库接入引擎只需三件事：复制 thin-caller workflow 模板、声明 `.evolution/config.yml`、配置 secrets，消费仓零 pip 安装、零脚本副本。详见[消费仓接入指南](docs/onboarding/consumer-onboarding.md)，thin-caller 模板位于 `docs/onboarding/templates/`。
+
 ## 架构
 
 ```
@@ -65,7 +71,7 @@ infra-core/
 │   ├── engine/          # 自进化引擎（scanner/utils/adapters/heartbeat）
 │   ├── packs/           # 规则包（memory 等）
 │   └── cli.py           # infra-cli 统一入口
-├── actions/             # composite actions
+├── actions/             # composite actions（auto-merge / branch-cleanup / droid-review-aggregate / governance-check）
 ├── .github/workflows/   # reusable workflows
 ├── webhook-scripts/     # webhook 脚本（生产同步源）
 └── tests/               # 测试套件
