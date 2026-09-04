@@ -51,9 +51,6 @@ def _make_env(tmp_path: Path, home_override: Path | None = None) -> dict:
     log_dir.mkdir(exist_ok=True)
     env["LOG_DIR"] = str(log_dir)
 
-    # 避免真实 droid exec
-    env["ECHO_DROID"] = "1"
-
     # 跨平台 Python
     env["PYTHON_BIN"] = sys.executable
 
@@ -473,3 +470,338 @@ class TestShellQuality:
         manifest_path = REPO_ROOT / "webhook-scripts" / "MANIFEST.sh"
         content = manifest_path.read_text()
         assert "trigger-release.sh" in content, "MANIFEST.sh 应登记 trigger-release.sh"
+
+
+def _create_stub_droid(tmp_path: Path) -> Path:
+    """创建 stub droid 脚本，捕获 argv 并返回 JSON"""
+    stub_path = tmp_path / "droid"
+    stub_script = """#!/bin/bash
+# Stub droid: 捕获调用信息到日志文件
+CAPTURE_FILE="${DROID_CAPTURE_FILE:-/tmp/droid_capture.log}"
+
+# 记录完整调用（含 [STUB_DROID] 标记供测试计数）
+{
+    echo "[STUB_DROID] === $(date) ==="
+    echo "ARGV: $*"
+    # 提取关键参数
+    TAG=""
+    METADATA=""
+    for arg in "$@"; do
+        case "$arg" in
+            --tag) shift; TAG="$1" ;;
+            *) ;;
+        esac
+    done
+    echo "TAG: $TAG"
+} >> "$CAPTURE_FILE"
+
+# 返回 JSON（含 session_id）
+cat <<EOF
+{"type":"result","session_id":"test-session-$$","result":"ok"}
+EOF
+"""
+    stub_path.write_text(stub_script)
+    stub_path.chmod(0o755)
+    return stub_path
+
+
+def _create_bare_remote(tmp_path: Path, name: str) -> tuple[Path, Path]:
+    """创建 bare remote + 可 clone 的仓（用于测试 git pull --ff-only）"""
+    import subprocess as sp
+
+    # 创建 bare remote
+    remote = tmp_path / f"{name}_remote.git"
+    remote.mkdir()
+    sp.run(["git", "init", "--bare", str(remote)], capture_output=True, check=True)
+
+    # 创建可 clone 的仓并设置 remote
+    repo = tmp_path / name
+    sp.run(["git", "clone", str(remote), str(repo)], capture_output=True, check=True)
+    sp.run(["git", "config", "user.email", "test@example.com"], cwd=repo, capture_output=True, check=True)
+    sp.run(["git", "config", "user.name", "Test User"], cwd=repo, capture_output=True, check=True)
+
+    # 初始提交
+    (repo / "README.md").write_text(f"# {name}\n")
+    sp.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
+    sp.run(["git", "commit", "-m", "initial"], cwd=repo, capture_output=True, check=True)
+    sp.run(["git", "push", "origin", "main"], cwd=repo, capture_output=True, check=True)
+
+    return remote, repo
+
+
+class TestCleanRepoFastForward:
+    """VAL-MAC-014: 干净仓先 ff 拉取再派发"""
+
+    def test_clean_repo_pulls_before_dispatch(self, tmp_path):
+        """干净仓执行 git pull --ff-only，HEAD 推进到 upstream tip"""
+        env = _make_env(tmp_path)
+        remote, repo = _create_bare_remote(tmp_path, "clean_repo")
+
+        # 在 remote 添加一个提交（模拟 upstream 领先）
+        import subprocess as sp
+
+        tmp_clone = tmp_path / "tmp_clone"
+        sp.run(["git", "clone", str(remote), str(tmp_clone)], capture_output=True, check=True)
+        sp.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_clone, capture_output=True, check=True)
+        sp.run(["git", "config", "user.name", "Test User"], cwd=tmp_clone, capture_output=True, check=True)
+        (tmp_clone / "new_file.txt").write_text("new content\n")
+        sp.run(["git", "add", "."], cwd=tmp_clone, capture_output=True, check=True)
+        sp.run(["git", "commit", "-m", "upstream commit"], cwd=tmp_clone, capture_output=True, check=True)
+        sp.run(["git", "push", "origin", "main"], cwd=tmp_clone, capture_output=True, check=True)
+
+        # 创建 stub droid
+        stub_droid = _create_stub_droid(tmp_path)
+        env["PATH"] = f"{tmp_path}:{os.environ.get('PATH', '')}"
+        env["DROID_CAPTURE_FILE"] = str(tmp_path / "droid_capture.log")
+
+        config_path = _create_repositories_yml(
+            tmp_path,
+            [{"repoKey": "clean", "repoPath": str(repo), "engineConsumer": True}],
+        )
+        env["REPO_CONFIG"] = str(config_path)
+
+        head_before = _get_head_sha(repo)
+
+        result = subprocess.run(
+            [str(TRIGGER_SCRIPT), "v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        assert result.returncode == 0
+
+        # 等待后台派发完成
+        time.sleep(2)
+
+        head_after = _get_head_sha(repo)
+        assert head_before != head_after, "HEAD 应推进（git pull --ff-only 生效）"
+
+        # 检查 stub droid 被调用
+        assert _count_stub_droid_calls(Path(env["DROID_CAPTURE_FILE"])) >= 1
+
+
+class TestErrorIsolationMultipleConsumers:
+    """VAL-MAC-017: 单点失败错误隔离（多消费者）"""
+
+    def test_multiple_consumers_one_fails_others_succeed(self, tmp_path):
+        """多消费者场景：一个仓失败，其他仓仍被派发"""
+        env = _make_env(tmp_path)
+
+        # 创建两个仓：一个正常，一个 repoPath 不存在
+        remote1, repo1 = _create_bare_remote(tmp_path, "good_repo")
+        bad_repo_path = tmp_path / "nonexistent_repo"  # 不创建
+
+        # 创建 stub droid
+        stub_droid = _create_stub_droid(tmp_path)
+        env["PATH"] = f"{tmp_path}:{os.environ.get('PATH', '')}"
+        env["DROID_CAPTURE_FILE"] = str(tmp_path / "droid_capture.log")
+
+        config_path = _create_repositories_yml(
+            tmp_path,
+            [
+                {"repoKey": "good", "repoPath": str(repo1), "engineConsumer": True},
+                {"repoKey": "bad", "repoPath": str(bad_repo_path), "engineConsumer": True},
+            ],
+        )
+        env["REPO_CONFIG"] = str(config_path)
+
+        log_file = Path(env["LOG_DIR"]) / "trigger-release.log"
+
+        result = subprocess.run(
+            [str(TRIGGER_SCRIPT), "v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        assert result.returncode == 0
+
+        # 等待后台派发完成
+        time.sleep(2)
+
+        # 检查日志：应同时包含坏仓失败记录和好仓派发记录
+        if log_file.exists():
+            content = log_file.read_text()
+            # 坏仓应被跳过
+            assert "bad" in content and ("不存在" in content or "ERROR" in content or "跳过" in content)
+            # 好仓应被派发
+            assert "good" in content and "派发" in content
+
+        # 检查 stub droid 被调用至少一次（好仓）
+        assert _count_stub_droid_calls(Path(env["DROID_CAPTURE_FILE"])) >= 1
+
+
+class TestDroidCallShape:
+    """VAL-MAC-018/019/020: droid 调用形状与 session_id 提取"""
+
+    def test_droid_called_with_correct_options(self, tmp_path):
+        """droid exec 携带 --auto high --output-format json --tag release-gateway"""
+        env = _make_env(tmp_path)
+        remote, repo = _create_bare_remote(tmp_path, "test_repo")
+
+        # 创建 stub droid
+        stub_droid = _create_stub_droid(tmp_path)
+        env["PATH"] = f"{tmp_path}:{os.environ.get('PATH', '')}"
+        capture_file = tmp_path / "droid_capture.log"
+        env["DROID_CAPTURE_FILE"] = str(capture_file)
+
+        config_path = _create_repositories_yml(
+            tmp_path,
+            [{"repoKey": "test", "repoPath": str(repo), "engineConsumer": True}],
+        )
+        env["REPO_CONFIG"] = str(config_path)
+
+        result = subprocess.run(
+            [str(TRIGGER_SCRIPT), "v2.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        assert result.returncode == 0
+
+        # 等待后台派发完成
+        time.sleep(2)
+
+        # 检查 stub droid 捕获文件
+        assert capture_file.exists(), "stub droid 应被调用"
+        content = capture_file.read_text()
+
+        # 验证关键选项
+        assert "--auto high" in content, "应包含 --auto high"
+        assert "--output-format json" in content, "应包含 --output-format json"
+        assert "--tag" in content, "应包含 --tag"
+        assert "release-gateway" in content, "tag 应含 release-gateway"
+        assert "v2.0.0" in content, "指令文本应含公告 tag"
+
+    def test_metadata_contains_tag_sourceRepo_triggerSource(self, tmp_path):
+        """metadata 含 tag/sourceRepo/triggerSource 三元组"""
+        env = _make_env(tmp_path)
+        remote, repo = _create_bare_remote(tmp_path, "test_repo")
+
+        # 创建 stub droid
+        stub_droid = _create_stub_droid(tmp_path)
+        env["PATH"] = f"{tmp_path}:{os.environ.get('PATH', '')}"
+        capture_file = tmp_path / "droid_capture.log"
+        env["DROID_CAPTURE_FILE"] = str(capture_file)
+
+        config_path = _create_repositories_yml(
+            tmp_path,
+            [{"repoKey": "test", "repoPath": str(repo), "engineConsumer": True}],
+        )
+        env["REPO_CONFIG"] = str(config_path)
+
+        result = subprocess.run(
+            [str(TRIGGER_SCRIPT), "v3.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        assert result.returncode == 0
+
+        # 等待后台派发完成
+        time.sleep(2)
+
+        # 检查 metadata JSON
+        assert capture_file.exists()
+        content = capture_file.read_text()
+
+        # metadata 应含三元组
+        assert '"tag"' in content or "tag" in content, "应含 tag 键"
+        assert "v3.0.0" in content, "tag 值应为公告 tag"
+        assert "sourceRepo" in content, "应含 sourceRepo"
+        assert "hdot123-org/infra-core" in content, "sourceRepo 应为公告 repo"
+        assert "triggerSource" in content, "应含 triggerSource"
+        assert "release-announce" in content, "triggerSource 应为 release-announce"
+
+    def test_session_id_extracted_to_log(self, tmp_path):
+        """droid 桩返回的 session_id 被记录进日志"""
+        env = _make_env(tmp_path)
+        remote, repo = _create_bare_remote(tmp_path, "test_repo")
+
+        # 创建 stub droid（返回固定 session_id）
+        stub_droid = _create_stub_droid(tmp_path)
+        env["PATH"] = f"{tmp_path}:{os.environ.get('PATH', '')}"
+        env["DROID_CAPTURE_FILE"] = str(tmp_path / "droid_capture.log")
+
+        config_path = _create_repositories_yml(
+            tmp_path,
+            [{"repoKey": "test", "repoPath": str(repo), "engineConsumer": True}],
+        )
+        env["REPO_CONFIG"] = str(config_path)
+
+        log_file = Path(env["LOG_DIR"]) / "trigger-release.log"
+
+        result = subprocess.run(
+            [str(TRIGGER_SCRIPT), "v4.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        assert result.returncode == 0
+
+        # 等待后台派发完成
+        time.sleep(2)
+
+        # 检查日志含 session_id
+        assert log_file.exists()
+        log_content = log_file.read_text()
+        session_ids = _extract_session_ids(log_file)
+        assert len(session_ids) > 0, "日志应含 session_id"
+        assert any("test-session-" in sid for sid in session_ids), "session_id 应来自 stub droid 返回"
+
+
+class TestBackgroundDispatch:
+    """VAL-MAC-034: hook 及时应答，派发后台化"""
+
+    def test_script_returns_immediately_dispatch_runs_in_background(self, tmp_path):
+        """脚本立即返回，派发在后台执行"""
+        env = _make_env(tmp_path)
+        remote, repo = _create_bare_remote(tmp_path, "test_repo")
+
+        # 创建慢速 stub droid（sleep 5s）
+        stub_droid = _create_stub_droid(tmp_path)
+        stub_script = """#!/bin/bash
+sleep 5
+echo '{"type":"result","session_id":"slow-session","result":"ok"}'
+"""
+        stub_droid.write_text(stub_script)
+        stub_droid.chmod(0o755)
+
+        env["PATH"] = f"{tmp_path}:{os.environ.get('PATH', '')}"
+
+        config_path = _create_repositories_yml(
+            tmp_path,
+            [{"repoKey": "test", "repoPath": str(repo), "engineConsumer": True}],
+        )
+        env["REPO_CONFIG"] = str(config_path)
+
+        log_file = Path(env["LOG_DIR"]) / "trigger-release.log"
+        start_time = time.time()
+
+        result = subprocess.run(
+            [str(TRIGGER_SCRIPT), "v5.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        elapsed = time.time() - start_time
+
+        # 脚本应在 3 秒内返回（远小于 5s sleep）
+        assert elapsed < 3, f"脚本应快速返回，实际耗时 {elapsed:.2f}s"
+        assert result.returncode == 0
+
+        # 检查日志：应记录后台派发启动
+        if log_file.exists():
+            content = log_file.read_text()
+            assert "后台" in content or "background" in content.lower() or "PID" in content
