@@ -28,6 +28,7 @@
 MANAGED_FILES=(
     "trigger-droid.sh"
     "trigger-ci-droid.sh"
+    "trigger-release.sh"
     "reconcile-evolution.sh"
     "ci-timeout-watchdog.sh"
     "trigger-error-droid.sh"
