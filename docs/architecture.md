@@ -131,7 +131,42 @@ schedule/dispatch → release-please 扫描 conventional commits
 | `GitHub Actions is not permitted to create or approve pull requests` | token 用了 GITHUB_TOKEN，或仓库 Actions 权限被回退为 read 且禁止建 PR，检查 token 与仓库 Actions 设置 |
 | Release PR 合并后没出 tag | 合并凭证不是真实用户/PAT（GITHUB_TOKEN 合并被递归防护吞掉 push 事件），用 DISPATCH_TOKEN 或本人凭证重新合并/手动 dispatch 补救 |
 
-## 7. 演进路线
+## 7. 发版公告链路
+
+infra-core 每次 release 发布（含 patch）时自动广播升级公告到 Mac 侧 webhook，
+由 `trigger-release.sh` 按消费方清单逐仓派发 droid 会话自动接单开 pin-bump PR。
+
+### 链路要素
+
+| 要素 | 值 |
+|------|-----|
+| 公告 URL | `https://ci-webhook.exa.edu.kg/hooks/release-broadcast`（repo secret `RELEASE_BROADCAST_URL`） |
+| Hook ID | `release-broadcast`（`~/.factory/webhook/hooks.json` 条目） |
+| 脚本 | `trigger-release.sh`（仓内源码 `webhook-scripts/trigger-release.sh`，经 `sync-webhook-scripts.sh` 同步部署到 `~/.factory/webhook/scripts/`） |
+| 路由键 | `engineConsumer: true`（`~/.factory/config/repositories.yml` 仓条目） |
+| 接单 skill | `release-gateway`（`~/.factory/skills/release-gateway/SKILL.md`） |
+| 认证头 | `X-Release-Token: $RELEASE_BROADCAST_TOKEN`（repo secret，高熵随机值） |
+
+### 核心语义
+
+- **触发**：`on: release: types: [published]`，每次 release 全量含 patch
+- **送达语义**：fire-and-forget——2xx 视为已送达路由层，非 2xx 终态（404 / 5xx / 网络失败）走告警路径（`::warning::` + best-effort PostHog 事件），**job 永不 fail**，发版流程永不因公告阻塞
+- **per-tag 幂等**：锁文件 `~/.factory/webhook/locks/release-announce-{tag}.json`，锁已存在时跳过派发
+- **逐仓错误隔离**：单仓失败（工作树脏 / pull 失败 / droid exec 异常）不影响其他仓，跳过原因记入日志
+- **零权限 job**：`permissions: {}`，不 checkout 仓库，纯网络送达
+
+### 已知限制
+
+- **HTTP 200 ≠ 接单成功**：adnanh/webhook 对 trigger-rule 不满足的请求也返回 200，
+  200 只证明公告已送达路由层，不证明规则命中或脚本执行
+- **Mac 离线期间公告丢失**：靠下次发版或手动 reconcile 补齐
+- **release 事件平台行为**：GitHub Actions 的 `on: release` 按 tag commit 解析
+  workflow 文件——对 tag commit 早于 `release-announce.yml` 落地 main 的旧 release
+  做 draft→publish 重发**不会触发公告**（2026-09-04 实证）。补救 = 手动 reconcile。
+  该限制属 GitHub 平台行为而非实现缺陷，生产语义不受影响（release-please 自当前
+  main 切新 tag，未来自然发版正常触发）
+
+## 8. 演进路线
 
 - M2：引擎移植（copy-not-move）——`src/infra_core/engine/` 落地 scanner 家族 + argparse（`--repo-root` / `--report-only`）
 - M3：memory 规则包迁入 `packs/memory/`；version_sync 整体迁入 + resign 注入钩子

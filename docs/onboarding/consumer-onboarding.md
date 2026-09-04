@@ -114,7 +114,66 @@ dependencies = [
 公开仓免认证拉取（实测 ~40s）。升级 = bump tag 字符串。workflow_call
 inputs/secrets 一律 **snake_case**（如 `dispatch_token`、`shard_max_files`）。
 
-## 6. 验证接入
+## 6. 升级分发（公告规则）
+
+infra-core 每次 release 发布（含 patch）后自动广播升级公告，已声明的消费仓由
+Mac 侧派发 droid 会话自动接单开 pin-bump PR，走 CI → auto-merge 闭环。
+
+### 接入方式
+
+在宿主 `repositories.yml` 的仓条目中声明 `engineConsumer: true` 即接入自动升级，
+除此之外**零预埋**——消费仓不需要安装任何 workflow、脚本或 secret。
+
+### 七项语义
+
+① **声明即接入**：`engineConsumer: true` 是唯一路由依据，声明后下一次 release
+公告即向该仓派发接单会话。
+
+② **接单形态**：下游 droid 会话按 `release-gateway` skill 配方全仓搜索
+infra-core pin 面、bump 到新 tag、本地自测后开 PR。消费仓**零预埋**——不需要
+提前安装任何 workflow、脚本或配置。
+
+③ **公告粒度**：每次 release 全量含 patch，无任何过滤（无论 release 由
+release-please 还是人工发布、无论 minor 还是 patch）。
+
+④ **同 tag 幂等**：同一 tag 重复公告不产生重复接单——per-tag 幂等锁拦截，
+锁已存在时跳过派发、零副作用。
+
+⑤ **Mac 离线兜底**：Mac 离线期间公告会丢失，补齐方式有二：
+- 下次发版时自动补齐（新 tag 公告正常触发）
+- 手动 reconcile：以相同 payload 形状对 webhook 端点重发 curl 即可
+
+⑥ **已知限制**：
+- **HTTP 200 ≠ 接单成功**：webhook 对 trigger-rule 不满足的请求也返回 200
+  （adnanh/webhook 实证），200 只证明公告已送达路由层，不证明规则命中或脚本执行
+- **离线窗口公告会丢**：Mac 侧 webhook 服务不可达期间（离线/崩溃）的公告
+  不会重试或补发，靠 §6 兜底路径补齐
+- **release 事件平台行为**：GitHub Actions 的 `on: release` 按 tag commit
+  解析 workflow 文件——对 tag commit 早于 `release-announce.yml` 落地 main 的
+  旧 release 做 draft→publish 重发**不会触发公告**（2026-09-04 实证：
+  published ReleaseEvent 已发、workflow state=active、历史零 run）。补救 =
+  手动 reconcile（见 §6 兜底路径）。该限制属 GitHub 平台行为而非实现缺陷，
+  生产语义不受影响（release-please 自当前 main 切新 tag，未来自然发版正常触发）
+
+⑦ **与 §5 手动 bump 指引的边界划分**：
+- **已声明 `engineConsumer: true` 的仓**：升级由公告自动接单，无需按 §5 手动
+  bump tag 字符串——接单会话自动完成全仓搜索 + bump + 测试 + PR
+- **未声明的仓**：沿用 §5 手动 bump 指引，自行跟踪 infra-core release 并手动
+  更新 pin tag
+- 两处不矛盾：自动接单是 §5 手动操作的自动化替代，适用于已声明的消费仓
+
+### 送达语义
+
+- **2xx 终态**：视为公告已送达路由层，无告警
+- **非 2xx 终态**（404 / 5xx / 网络失败）：走告警路径（`::warning::` + best-effort
+  PostHog 事件），发版流程**不 fail**——公告永不阻塞发版
+
+### 逐仓错误隔离
+
+派发层逐仓执行，单仓失败（工作树脏 / pull 失败 / droid exec 异常）不影响其他仓，
+跳过原因记入日志。
+
+## 7. 验证接入
 
 ```bash
 # 模板静态检查
