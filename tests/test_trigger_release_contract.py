@@ -28,8 +28,6 @@ import sys
 import time
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).parent.parent
 TRIGGER_SCRIPT = REPO_ROOT / "webhook-scripts" / "trigger-release.sh"
 
@@ -71,7 +69,9 @@ def _create_repositories_yml(tmp_path: Path, consumers: list[dict]) -> Path:
     return config_path
 
 
-def _create_fixture_repo(tmp_path: Path, name: str, dirty: bool = False, diverged: bool = False) -> Path:
+def _create_fixture_repo(
+    tmp_path: Path, name: str, dirty: bool = False, diverged: bool = False
+) -> Path:
     """创建 fixture git 仓（干净可 ff / 工作树脏 / 本地分叉）"""
     import subprocess as sp
 
@@ -80,7 +80,12 @@ def _create_fixture_repo(tmp_path: Path, name: str, dirty: bool = False, diverge
     repo = tmp_path / name
     repo.mkdir()
     sp.run(["git", "init"], cwd=repo, capture_output=True, check=True)
-    sp.run(["git", "config", "user.email", "test@example.com"], cwd=repo, capture_output=True, check=True)
+    sp.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
     sp.run(["git", "config", "user.name", "Test User"], cwd=repo, capture_output=True, check=True)
 
     # 初始提交
@@ -102,7 +107,9 @@ def _create_fixture_repo(tmp_path: Path, name: str, dirty: bool = False, diverge
 
 def _get_head_sha(repo: Path) -> str:
     """获取仓 HEAD sha"""
-    result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True)
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    )
     return result.stdout.strip()
 
 
@@ -138,14 +145,24 @@ class TestDryRun:
         config_path = _create_repositories_yml(
             tmp_path,
             [
-                {"repoKey": "memory-core", "repoPath": str(tmp_path / "memory"), "engineConsumer": True},
+                {
+                    "repoKey": "memory-core",
+                    "repoPath": str(tmp_path / "memory"),
+                    "engineConsumer": True,
+                },
                 {"repoKey": "other", "repoPath": str(tmp_path / "other"), "engineConsumer": False},
             ],
         )
         env["REPO_CONFIG"] = str(config_path)
 
         result = subprocess.run(
-            [str(TRIGGER_SCRIPT), "--dry-run", "v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "--dry-run",
+                "v1.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -173,7 +190,13 @@ class TestDryRun:
         locks_dir = Path(env["LOCKS_DIR"])
 
         result = subprocess.run(
-            [str(TRIGGER_SCRIPT), "--dry-run", "v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "--dry-run",
+                "v1.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -195,14 +218,24 @@ class TestConsumerSelection:
         config_path = _create_repositories_yml(
             tmp_path,
             [
-                {"repoKey": "memory-core", "repoPath": str(tmp_path / "memory"), "engineConsumer": True},
+                {
+                    "repoKey": "memory-core",
+                    "repoPath": str(tmp_path / "memory"),
+                    "engineConsumer": True,
+                },
                 {"repoKey": "other", "repoPath": str(tmp_path / "other"), "engineConsumer": False},
             ],
         )
         env["REPO_CONFIG"] = str(config_path)
 
         result = subprocess.run(
-            [str(TRIGGER_SCRIPT), "--dry-run", "v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "--dry-run",
+                "v1.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -225,7 +258,12 @@ class TestConsumerSelection:
         log_file = Path(env["LOG_DIR"]) / "trigger-release.log"
 
         result = subprocess.run(
-            [str(TRIGGER_SCRIPT), "v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "v1.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -255,7 +293,12 @@ class TestIdempotentLock:
         locks_dir = Path(env["LOCKS_DIR"])
 
         result = subprocess.run(
-            [str(TRIGGER_SCRIPT), "v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "v1.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -295,7 +338,12 @@ class TestIdempotentLock:
 
         # 第一次触发
         result1 = subprocess.run(
-            [str(TRIGGER_SCRIPT), "v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "v1.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -309,7 +357,12 @@ class TestIdempotentLock:
 
         # 第二次触发
         result2 = subprocess.run(
-            [str(TRIGGER_SCRIPT), "v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "v1.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -347,7 +400,12 @@ class TestErrorIsolation:
         head_before = _get_head_sha(repo)
 
         result = subprocess.run(
-            [str(TRIGGER_SCRIPT), "v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "v1.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -375,7 +433,12 @@ class TestErrorIsolation:
         log_file = Path(env["LOG_DIR"]) / "trigger-release.log"
 
         result = subprocess.run(
-            [str(TRIGGER_SCRIPT), "v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "v1.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -410,7 +473,13 @@ class TestTagSafety:
         locks_before = set(locks_dir.iterdir()) if locks_dir.exists() else set()
 
         result = subprocess.run(
-            [str(TRIGGER_SCRIPT), "--dry-run", "release/v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "--dry-run",
+                "release/v1.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -457,7 +526,14 @@ class TestShellQuality:
 
         # 用系统 bash（3.2.57 on macOS）运行
         result = subprocess.run(
-            ["/bin/bash", str(TRIGGER_SCRIPT), "--dry-run", "v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                "/bin/bash",
+                str(TRIGGER_SCRIPT),
+                "--dry-run",
+                "v1.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -517,7 +593,12 @@ def _create_bare_remote(tmp_path: Path, name: str) -> tuple[Path, Path]:
     # 创建可 clone 的仓并设置 remote
     repo = tmp_path / name
     sp.run(["git", "clone", str(remote), str(repo)], capture_output=True, check=True)
-    sp.run(["git", "config", "user.email", "test@example.com"], cwd=repo, capture_output=True, check=True)
+    sp.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
     sp.run(["git", "config", "user.name", "Test User"], cwd=repo, capture_output=True, check=True)
 
     # 初始提交
@@ -542,15 +623,30 @@ class TestCleanRepoFastForward:
 
         tmp_clone = tmp_path / "tmp_clone"
         sp.run(["git", "clone", str(remote), str(tmp_clone)], capture_output=True, check=True)
-        sp.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_clone, capture_output=True, check=True)
-        sp.run(["git", "config", "user.name", "Test User"], cwd=tmp_clone, capture_output=True, check=True)
+        sp.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=tmp_clone,
+            capture_output=True,
+            check=True,
+        )
+        sp.run(
+            ["git", "config", "user.name", "Test User"],
+            cwd=tmp_clone,
+            capture_output=True,
+            check=True,
+        )
         (tmp_clone / "new_file.txt").write_text("new content\n")
         sp.run(["git", "add", "."], cwd=tmp_clone, capture_output=True, check=True)
-        sp.run(["git", "commit", "-m", "upstream commit"], cwd=tmp_clone, capture_output=True, check=True)
+        sp.run(
+            ["git", "commit", "-m", "upstream commit"],
+            cwd=tmp_clone,
+            capture_output=True,
+            check=True,
+        )
         sp.run(["git", "push", "origin", "main"], cwd=tmp_clone, capture_output=True, check=True)
 
         # 创建 stub droid
-        stub_droid = _create_stub_droid(tmp_path)
+        _create_stub_droid(tmp_path)
         env["PATH"] = f"{tmp_path}:{os.environ.get('PATH', '')}"
         env["DROID_CAPTURE_FILE"] = str(tmp_path / "droid_capture.log")
 
@@ -563,7 +659,12 @@ class TestCleanRepoFastForward:
         head_before = _get_head_sha(repo)
 
         result = subprocess.run(
-            [str(TRIGGER_SCRIPT), "v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "v1.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -594,7 +695,7 @@ class TestErrorIsolationMultipleConsumers:
         bad_repo_path = tmp_path / "nonexistent_repo"  # 不创建
 
         # 创建 stub droid
-        stub_droid = _create_stub_droid(tmp_path)
+        _create_stub_droid(tmp_path)
         env["PATH"] = f"{tmp_path}:{os.environ.get('PATH', '')}"
         env["DROID_CAPTURE_FILE"] = str(tmp_path / "droid_capture.log")
 
@@ -610,7 +711,12 @@ class TestErrorIsolationMultipleConsumers:
         log_file = Path(env["LOG_DIR"]) / "trigger-release.log"
 
         result = subprocess.run(
-            [str(TRIGGER_SCRIPT), "v1.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "v1.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -626,7 +732,9 @@ class TestErrorIsolationMultipleConsumers:
         if log_file.exists():
             content = log_file.read_text()
             # 坏仓应被跳过
-            assert "bad" in content and ("不存在" in content or "ERROR" in content or "跳过" in content)
+            assert "bad" in content and (
+                "不存在" in content or "ERROR" in content or "跳过" in content
+            )
             # 好仓应被派发
             assert "good" in content and "派发" in content
 
@@ -643,7 +751,7 @@ class TestDroidCallShape:
         remote, repo = _create_bare_remote(tmp_path, "test_repo")
 
         # 创建 stub droid
-        stub_droid = _create_stub_droid(tmp_path)
+        _create_stub_droid(tmp_path)
         env["PATH"] = f"{tmp_path}:{os.environ.get('PATH', '')}"
         capture_file = tmp_path / "droid_capture.log"
         env["DROID_CAPTURE_FILE"] = str(capture_file)
@@ -655,7 +763,12 @@ class TestDroidCallShape:
         env["REPO_CONFIG"] = str(config_path)
 
         result = subprocess.run(
-            [str(TRIGGER_SCRIPT), "v2.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "v2.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -684,7 +797,7 @@ class TestDroidCallShape:
         remote, repo = _create_bare_remote(tmp_path, "test_repo")
 
         # 创建 stub droid
-        stub_droid = _create_stub_droid(tmp_path)
+        _create_stub_droid(tmp_path)
         env["PATH"] = f"{tmp_path}:{os.environ.get('PATH', '')}"
         capture_file = tmp_path / "droid_capture.log"
         env["DROID_CAPTURE_FILE"] = str(capture_file)
@@ -696,7 +809,12 @@ class TestDroidCallShape:
         env["REPO_CONFIG"] = str(config_path)
 
         result = subprocess.run(
-            [str(TRIGGER_SCRIPT), "v3.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "v3.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -726,7 +844,7 @@ class TestDroidCallShape:
         remote, repo = _create_bare_remote(tmp_path, "test_repo")
 
         # 创建 stub droid（返回固定 session_id）
-        stub_droid = _create_stub_droid(tmp_path)
+        _create_stub_droid(tmp_path)
         env["PATH"] = f"{tmp_path}:{os.environ.get('PATH', '')}"
         env["DROID_CAPTURE_FILE"] = str(tmp_path / "droid_capture.log")
 
@@ -739,7 +857,12 @@ class TestDroidCallShape:
         log_file = Path(env["LOG_DIR"]) / "trigger-release.log"
 
         result = subprocess.run(
-            [str(TRIGGER_SCRIPT), "v4.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "v4.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
@@ -753,10 +876,11 @@ class TestDroidCallShape:
 
         # 检查日志含 session_id
         assert log_file.exists()
-        log_content = log_file.read_text()
         session_ids = _extract_session_ids(log_file)
         assert len(session_ids) > 0, "日志应含 session_id"
-        assert any("test-session-" in sid for sid in session_ids), "session_id 应来自 stub droid 返回"
+        assert any("test-session-" in sid for sid in session_ids), (
+            "session_id 应来自 stub droid 返回"
+        )
 
 
 class TestBackgroundDispatch:
@@ -788,7 +912,12 @@ echo '{"type":"result","session_id":"slow-session","result":"ok"}'
         start_time = time.time()
 
         result = subprocess.run(
-            [str(TRIGGER_SCRIPT), "v5.0.0", "https://example.com/release", "hdot123-org/infra-core"],
+            [
+                str(TRIGGER_SCRIPT),
+                "v5.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
             env=env,
             capture_output=True,
             text=True,
