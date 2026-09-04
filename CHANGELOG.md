@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.11.1](https://github.com/hdot123-org/infra-core/compare/v0.11.0...v0.11.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **workflow:** branch-cleanup 自仓 action pin 补 bump 至 PR [#198](https://github.com/hdot123-org/infra-core/issues/198) squash SHA，修复 freshness 契约红 (INFRA-737) ([#199](https://github.com/hdot123-org/infra-core/issues/199)) ([442abb5](https://github.com/hdot123-org/infra-core/commit/442abb577a4690455be53875b1b52d5645657783))
+
+
+### Documentation
+
+* **cf-worker:** wangguan 网关接管后文档与守卫对齐（契约测试墓碑化） ([#196](https://github.com/hdot123-org/infra-core/issues/196)) ([8068886](https://github.com/hdot123-org/infra-core/commit/80688864bb5e50230d51bbef43ca821115e8b915))
+* README 对齐引擎迁移终态 ([#201](https://github.com/hdot123-org/infra-core/issues/201)) ([fc83128](https://github.com/hdot123-org/infra-core/commit/fc831286f83598f1c9100c947dd776d440736e92))
+* README 补齐引擎迁移终态遗漏面 (INFRA-739) ([#202](https://github.com/hdot123-org/infra-core/issues/202)) ([d3a013d](https://github.com/hdot123-org/infra-core/commit/d3a013d267115d955fb0ad8eba39d39787baf5d5))
+
 ## [0.11.0](https://github.com/hdot123-org/infra-core/compare/v0.10.0...v0.11.0) (2026-09-02)
 
 
