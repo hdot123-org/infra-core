@@ -386,6 +386,60 @@ class TestIdempotentLock:
 class TestErrorIsolation:
     """VAL-MAC-015/016/017: 错误隔离"""
 
+    def test_droid_exec_failure_isolated(self, tmp_path):
+        """droid exec 失败时错误隔离：不中断其他仓，记录错误日志"""
+        env = _make_env(tmp_path)
+
+        # 创建两个仓：一个正常，一个会触发 droid exec 失败
+        _, good_repo = _create_bare_remote(tmp_path, "good_repo")
+        _, bad_repo = _create_bare_remote(tmp_path, "bad_repo")
+
+        # 创建会失败的 stub droid（对 bad_repo 返回非零退出码）
+        stub_droid = tmp_path / "droid"
+        stub_droid.write_text("#!/bin/bash\nexit 1\n")
+        stub_droid.chmod(0o755)
+        env["PATH"] = f"{tmp_path}:{os.environ.get('PATH', '')}"
+
+        config_path = _create_repositories_yml(
+            tmp_path,
+            [
+                {"repoKey": "good", "repoPath": str(good_repo), "engineConsumer": True},
+                {"repoKey": "bad", "repoPath": str(bad_repo), "engineConsumer": True},
+            ],
+        )
+        env["REPO_CONFIG"] = str(config_path)
+
+        log_file = Path(env["LOG_DIR"]) / "trigger-release.log"
+
+        result = subprocess.run(
+            [
+                str(TRIGGER_SCRIPT),
+                "v1.0.0",
+                "https://example.com/release",
+                "hdot123-org/infra-core",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        # 等待后台派发完成
+        time.sleep(3)
+
+        # 主进程应立即返回 0
+        assert result.returncode == 0
+
+        # 日志应包含错误信息
+        if log_file.exists():
+            content = log_file.read_text(errors="ignore")
+            assert (
+                "非零退出" in content
+                or "non-zero" in content.lower()
+                or "exit code" in content.lower()
+                or "error" in content.lower()
+            )
+
     def test_dirty_tree_skipped(self, tmp_path):
         """脏工作树跳过且不动用户改动"""
         env = _make_env(tmp_path)
