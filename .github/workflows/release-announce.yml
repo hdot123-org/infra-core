@@ -1,0 +1,69 @@
+name: Release announce
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+jobs:
+  announce:
+    name: Announce release to broadcast endpoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify broadcast secrets
+        run: |
+          set -euo pipefail
+          if [ -z "${BROADCAST_URL:-}" ]; then
+            echo "::warning::RELEASE_BROADCAST_URL secret is not configured, skipping announcement"
+            exit 0
+          fi
+          if [ -z "${BROADCAST_TOKEN:-}" ]; then
+            echo "::warning::RELEASE_BROADCAST_TOKEN secret is not configured, skipping announcement"
+            exit 0
+          fi
+        env:
+          BROADCAST_URL: ${{ secrets.RELEASE_BROADCAST_URL }}
+          BROADCAST_TOKEN: ${{ secrets.RELEASE_BROADCAST_TOKEN }}
+
+      - name: Post release announcement
+        env:
+          BROADCAST_URL: ${{ secrets.RELEASE_BROADCAST_URL }}
+          BROADCAST_TOKEN: ${{ secrets.RELEASE_BROADCAST_TOKEN }}
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          TAG: ${{ github.event.release.tag_name }}
+          REPO: ${{ github.repository }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          SHA: ${{ github.event.release.target_commitish }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          PAYLOAD=$(jq -nc \
+            --arg repo "$REPO" \
+            --arg tag "$TAG" \
+            --arg release_url "$RELEASE_URL" \
+            --arg sha "$SHA" \
+            '{repo:$repo, tag:$tag, release_url:$release_url, sha:$sha}')
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            --retry 3 --retry-delay 5 --retry-all-errors \
+            --max-time 30 \
+            -X POST "$BROADCAST_URL" \
+            -H "Content-Type: application/json" \
+            -H "X-Release-Token: ${BROADCAST_TOKEN}" \
+            -d "$PAYLOAD") || HTTP_CODE="000"
+
+          if [[ "$HTTP_CODE" != "200" ]] && [[ "$HTTP_CODE" != "201" ]] && [[ "$HTTP_CODE" != "202" ]] && [[ "$HTTP_CODE" != "204" ]]; then
+            echo "::warning::Release announcement failed (HTTP $HTTP_CODE for tag $TAG)"
+            if [ -n "${POSTHOG_API_KEY:-}" ]; then
+              TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              curl -s -X POST "https://us.posthog.com/batch/" \
+                -H "Content-Type: application/json" \
+                -d "{\"api_key\":\"${POSTHOG_API_KEY}\",\"batch\":[{\"event\":\"release_announce_failed\",\"properties\":{\"error_type\":\"broadcast_delivery_failed\",\"tag\":\"$TAG\",\"repo\":\"$REPO\",\"stage\":\"github_actions\",\"workflow\":\"release-announce\",\"detail\":\"HTTP $HTTP_CODE\",\"run_url\":\"$RUN_URL\",\"distinct_id\":\"release-broadcast\"},\"timestamp\":\"$TIMESTAMP\"}]}" || true
+            else
+              echo "::notice::POSTHOG_API_KEY not configured, skipping event reporting"
+            fi
+          fi
+          exit 0
