@@ -608,6 +608,13 @@ def _create_bare_remote(tmp_path: Path, name: str) -> tuple[Path, Path]:
     # 确保本地分支名为 main（CI runner 的 defaultBranch 可能不是 main）
     sp.run(["git", "branch", "-M", "main"], cwd=repo, capture_output=True, check=True)
     sp.run(["git", "push", "origin", "main"], cwd=repo, capture_output=True, check=True)
+    # 设置 bare remote 的 HEAD 指向 main，确保 git pull 时拉取正确的分支
+    sp.run(
+        ["git", "symbolic-ref", "HEAD", "refs/heads/main"],
+        cwd=remote,
+        capture_output=True,
+        check=True,
+    )
 
     return remote, repo
 
