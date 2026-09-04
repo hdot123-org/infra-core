@@ -67,7 +67,7 @@ select_consumers() {
     fi
 
     "$PYTHON_BIN" -c "
-import yaml, sys
+import os, yaml, sys
 try:
     with open('$REPO_CONFIG') as f:
         cfg = yaml.safe_load(f)
@@ -77,7 +77,7 @@ try:
                 repo_key = repo.get('repoKey', '')
                 repo_path = repo.get('repoPath', '')
                 if repo_key and repo_path:
-                    print(f'{repo_key}|{repo_path}')
+                    print(f'{repo_key}|{os.path.expanduser(repo_path)}')
 except Exception as e:
     print(f'ERROR: {e}', file=sys.stderr)
     sys.exit(1)
