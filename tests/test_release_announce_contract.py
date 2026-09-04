@@ -180,10 +180,15 @@ class TestNoTagFiltering:
 
     def test_no_tag_pattern_in_scripts(self, full_script: str) -> None:
         """No tag pattern matching/exclusion in run scripts."""
-        # Should not have regex checks on tag format
-        assert "grep" not in full_script or "tag" not in full_script, (
-            "script should not grep-filter tags"
-        )
+        # Should not have regex checks on tag format for filtering purposes
+        # Exclude SHA validation (grep -qE for hex patterns is for SHA, not tag filtering)
+        lines = full_script.split("\n")
+        for line in lines:
+            if "grep" in line and "tag" in line.lower():
+                # Allow SHA validation grep (checks for 40-char hex, not tag patterns)
+                assert "[0-9a-f]{40}" in line, (
+                    "script should not grep-filter tags (except SHA validation)"
+                )
         # No semver threshold checks
         assert "semver" not in full_script.lower(), "script should not have semver threshold logic"
 
@@ -210,9 +215,20 @@ class TestPayloadShape:
         )
 
     def test_payload_sha_from_release_context(self, workflow_dump: str) -> None:
-        """SHA must come from release commit context."""
+        """SHA must come from release commit context with fallback."""
         assert "github.event.release.target_commitish" in workflow_dump, (
             "sha must come from github.event.release.target_commitish"
+        )
+        # Check for 40-hex validation and fallback logic
+        assert "grep -qE" in workflow_dump or "grep -E" in workflow_dump, (
+            "script must validate SHA format"
+        )
+        assert "40" in workflow_dump, "script must check for 40-character hex"
+
+    def test_sha_fallback_to_github_sha(self, full_script: str) -> None:
+        """When target_commitish is not 40-hex, fall back to github.sha."""
+        assert "FALLBACK_SHA" in full_script or "github.sha" in full_script, (
+            "script must have fallback SHA from github.sha"
         )
 
     def test_payload_constructed_with_jq(self, full_script: str) -> None:
@@ -323,9 +339,9 @@ class TestSuccessSilent:
         # The warning should only be in the non-2xx branch
         # Check that the structure is: if NOT 2xx -> warning; else silent
         assert "::warning::" in full_script
-        # The warning must be inside an if block for non-2xx
-        assert "!=" in full_script or "-ne" in full_script, (
-            "there must be a conditional check for non-2xx"
+        # Now uses regex pattern ^2[0-9]{2}$ to match any 2xx status
+        assert "^2[0-9]{2}$" in full_script or "\\^2[0-9]{2}$" in full_script, (
+            "must use regex pattern ^2[0-9]{2}$ to match any 2xx status"
         )
 
 
@@ -381,6 +397,14 @@ class TestPostHogAlert:
         """PostHog send must be best-effort (|| true)."""
         assert "|| true" in full_script, "PostHog send must be best-effort (|| true)"
 
+    def test_posthog_has_max_time(self, full_script: str) -> None:
+        """PostHog curl must have --max-time to prevent hanging."""
+        # Count occurrences of --max-time: main curl + PostHog curl
+        max_time_count = full_script.count("--max-time")
+        assert max_time_count >= 2, (
+            f"Both main curl and PostHog curl must have --max-time, found {max_time_count} occurrences"
+        )
+
 
 # ── VAL-ANN-018: secret 缺失时预警跳过 ──
 
@@ -402,6 +426,39 @@ class TestSecretMissingHandling:
         """Missing secret must ::warning:: and exit 0."""
         # The verify step should have warning + exit 0
         assert "::warning::" in full_script
+
+    def test_verify_secrets_step_has_id(self, workflow: dict[str, Any]) -> None:
+        """verify-secrets step must have id: verify-secrets and outputs.secrets_ok."""
+        job = _get_job(workflow)
+        steps = job.get("steps", [])
+        verify_step = None
+        for step in steps:
+            if step.get("name") == "Verify broadcast secrets":
+                verify_step = step
+                break
+        assert verify_step is not None, "verify-secrets step must exist"
+        assert verify_step.get("id") == "verify-secrets", (
+            "verify-secrets step must have id: verify-secrets"
+        )
+        # Check the run script outputs secrets_ok
+        run_script = verify_step.get("run", "")
+        assert "secrets_ok=" in run_script, "verify-secrets step must output secrets_ok"
+
+    def test_delivery_step_gated_by_verify_secrets(self, workflow: dict[str, Any]) -> None:
+        """Post delivery step must have if: steps.verify-secrets.outputs.secrets_ok == 'true'."""
+        job = _get_job(workflow)
+        steps = job.get("steps", [])
+        delivery_step = None
+        for step in steps:
+            if step.get("name") == "Post release announcement":
+                delivery_step = step
+                break
+        assert delivery_step is not None, "delivery step must exist"
+        if_condition = delivery_step.get("if", "")
+        assert "verify-secrets" in if_condition, (
+            "delivery step must be gated by verify-secrets output"
+        )
+        assert "secrets_ok" in if_condition, "delivery step must check secrets_ok output"
 
 
 # ── VAL-ANN-019: 零权限 ──

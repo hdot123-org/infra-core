@@ -34,6 +34,30 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"; }
 # === Python binary ===
 PYTHON_BIN="${PYTHON_BIN:-$(command -v python3 || command -v python)}"
 
+# === with_timeout() — macOS 无 timeout 命令，纯 bash 实现（参照 trigger-error-droid.sh）===
+with_timeout() {
+    local timeout_sec=$1; shift
+    local tmp_output
+    tmp_output=$(mktemp)
+    "$@" > "$tmp_output" 2>&1 &
+    local pid=$!
+    local elapsed=0
+    while [ "$elapsed" -lt "$timeout_sec" ]; do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 1; elapsed=$((elapsed + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -TERM "$pid" 2>/dev/null; sleep 5
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -KILL "$pid" 2>/dev/null
+        fi
+        wait "$pid" 2>/dev/null
+        cat "$tmp_output"; rm -f "$tmp_output"; return 124
+    fi
+    wait "$pid" 2>/dev/null; local rc=$?
+    cat "$tmp_output"; rm -f "$tmp_output"; return "$rc"
+}
+
 # === 辅助函数 ===
 
 # 选仓：读 repositories.yml，返回 engineConsumer: true 的仓清单（repoKey|repoPath 格式）
@@ -176,31 +200,31 @@ log "锁已创建: $LOCK_FILE (consumers: $CONSUMER_KEYS)"
 # 后台派发（hook 立即应答）
 (
     # 遍历消费者
-    echo "$CONSUMERS_LIST" | while IFS='|' read -r repo_key repo_path; do
-        [ -z "$repo_key" ] && continue
+    echo "$CONSUMERS_LIST" | while IFS='|' read -r repo_key repo_path || [ -n "${repo_key:-}" ]; do
+        [ -z "${repo_key:-}" ] && continue
 
-        log "=== 派发 $repo_key ($repo_path) ==="
+        log "=== 派发 ${repo_key:-unknown} (${repo_path:-unknown}) ==="
 
         # cd 到仓
-        if ! cd "$repo_path" 2>/dev/null; then
-            log "ERROR: cd $repo_path 失败，跳过"
+        if ! cd "${repo_path:-}" 2>/dev/null; then
+            log "ERROR: cd ${repo_path:-unknown} 失败，跳过"
             continue
         fi
 
         # 检查工作树是否干净
         if ! git diff-index --quiet HEAD -- 2>/dev/null; then
-            log "跳过 $repo_key: 工作树脏（有未提交改动）"
+            log "跳过 ${repo_key:-unknown}: 工作树脏（有未提交改动）"
             continue
         fi
 
         # git pull --ff-only
         if ! git pull --ff-only >/dev/null 2>&1; then
-            log "跳过 $repo_key: git pull --ff-only 失败（可能是分叉或网络问题）"
+            log "跳过 ${repo_key:-unknown}: git pull --ff-only 失败（可能是分叉或网络问题）"
             continue
         fi
 
         # droid exec
-        log "执行 droid exec for $repo_key"
+        log "执行 droid exec for ${repo_key:-unknown}"
 
         PROMPT="infra-core ${TAG} 已发布，请按 release-gateway skill 执行升级。
 
@@ -215,18 +239,25 @@ log "锁已创建: $LOCK_FILE (consumers: $CONSUMER_KEYS)"
 2. 全仓搜索 infra-core pin 面
 3. bump 到新 tag
 4. 跑测试
-5. 开 PR + write-pending-ci.sh --source session --context engine-upgrade <PR>
+5. 开 PR + write-pending-ci.sh --source session --context \"engine pin bump to ${TAG}\" <PR>
 "
 
         if [ "${ECHO_DROID:-0}" = "1" ]; then
-            log "[STUB_DROID] Would run: droid exec --auto high --output-format json --tag '{\"name\":\"release-gateway\",\"metadata\":{\"tag\":\"${TAG}\",\"sourceRepo\":\"${SOURCE_REPO}\",\"triggerSource\":\"release-announce\"}}' \"<prompt>\""
+            log "[STUB_DROID] Would run: with_timeout 3600 droid exec --auto high --output-format json --tag '{\"name\":\"release-gateway\",\"metadata\":{\"tag\":\"${TAG}\",\"sourceRepo\":\"${SOURCE_REPO}\",\"triggerSource\":\"release-announce\"}}' \"<prompt>\""
             DROID_OUTPUT='{"type":"result","session_id":"stub-session-id-12345","result":"dry-run ok"}'
+            DROID_EXIT=0
         else
-            DROID_OUTPUT=$(droid exec \
+            DROID_OUTPUT=$(with_timeout 3600 droid exec \
                 --auto high \
                 --output-format json \
                 --tag "{\"name\":\"release-gateway\",\"metadata\":{\"tag\":\"${TAG}\",\"sourceRepo\":\"${SOURCE_REPO}\",\"triggerSource\":\"release-announce\"}}" \
-                "$PROMPT" 2>&1) || true
+                "$PROMPT" 2>&1) || DROID_EXIT=$?
+        fi
+
+        DROID_EXIT=${DROID_EXIT:-0}
+
+        if [ "$DROID_EXIT" -ne 0 ]; then
+            log "WARN: droid exec 非零退出 ($DROID_EXIT) for ${repo_key:-unknown}，错误隔离继续下一仓"
         fi
 
         # 提取 session_id
@@ -251,7 +282,7 @@ except:
             log "WARN: 无法提取 session_id"
         fi
 
-        log "=== 完成 $repo_key ==="
+        log "=== 完成 ${repo_key:-unknown} ==="
     done
 ) >> "$LOG_FILE" 2>&1 &
 SUBSHELL_PID=$!
