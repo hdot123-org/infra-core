@@ -245,6 +245,52 @@ class TestConsumerSelection:
         assert "memory-core" in result.stdout
         assert "other" not in result.stdout
 
+    def test_tilde_path_expanded(self, tmp_path):
+        """VAL-MAC-011 补充：~/ 前缀路径应被展开为绝对路径"""
+        env = _make_env(tmp_path)
+        # 创建 ~/test-tilde-repo 目录
+        home = Path.home()
+        tilde_repo = home / "test-tilde-repo-expanduser"
+        tilde_repo.mkdir(exist_ok=True)
+        try:
+            config_path = _create_repositories_yml(
+                tmp_path,
+                [
+                    {
+                        "repoKey": "tilde-test",
+                        "repoPath": "~/test-tilde-repo-expanduser",
+                        "engineConsumer": True,
+                    }
+                ],
+            )
+            env["REPO_CONFIG"] = str(config_path)
+
+            result = subprocess.run(
+                [
+                    str(TRIGGER_SCRIPT),
+                    "--dry-run",
+                    "v1.0.0",
+                    "https://example.com/release",
+                    "hdot123-org/infra-core",
+                ],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+
+            assert result.returncode == 0
+            output = result.stdout
+            # 应输出展开后的绝对路径，而非 ~/...
+            assert str(tilde_repo) in output, f"应展开 ~ 为绝对路径，实际输出：{output}"
+            assert "~/" not in output, "不应包含未展开的 ~/"
+        finally:
+            # 清理测试目录
+            if tilde_repo.exists():
+                import shutil
+
+                shutil.rmtree(tilde_repo)
+
     def test_no_consumers_quiet_exit_no_lock(self, tmp_path):
         """无消费者时安静退出且不写锁"""
         env = _make_env(tmp_path)
