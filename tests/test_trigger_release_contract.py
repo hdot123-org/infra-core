@@ -606,9 +606,7 @@ def _create_bare_remote(tmp_path: Path, name: str) -> tuple[Path, Path]:
     sp.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
     sp.run(["git", "commit", "-m", "initial"], cwd=repo, capture_output=True, check=True)
     # 确保本地分支名为 main（CI runner 的 defaultBranch 可能不是 main）
-    sp.run(
-        ["git", "branch", "-M", "main"], cwd=repo, capture_output=True, check=True
-    )
+    sp.run(["git", "branch", "-M", "main"], cwd=repo, capture_output=True, check=True)
     sp.run(["git", "push", "origin", "main"], cwd=repo, capture_output=True, check=True)
 
     return remote, repo
