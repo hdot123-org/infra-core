@@ -127,19 +127,21 @@ class TestTriggers:
         release_config = triggers["release"]
         assert isinstance(release_config, dict), "release trigger must have config"
         types = release_config.get("types", [])
-        assert types == ["published"], (
-            f"release types must be exactly [published], got {types}"
-        )
+        assert types == ["published"], f"release types must be exactly [published], got {types}"
 
     def test_no_other_trigger_events(self, workflow: dict[str, Any]) -> None:
         """No push, schedule, workflow_dispatch, or other events."""
         triggers = _get_triggers(workflow)
-        forbidden = {"push", "schedule", "workflow_dispatch", "pull_request",
-                     "workflow_call", "repository_dispatch"}
+        forbidden = {
+            "push",
+            "schedule",
+            "workflow_dispatch",
+            "pull_request",
+            "workflow_call",
+            "repository_dispatch",
+        }
         found_forbidden = set(triggers.keys()) & forbidden
-        assert not found_forbidden, (
-            f"unexpected trigger events: {found_forbidden}"
-        )
+        assert not found_forbidden, f"unexpected trigger events: {found_forbidden}"
 
     def test_no_release_other_activity_types(self, workflow: dict[str, Any]) -> None:
         """No created/edited/prereleased/unpublished etc."""
@@ -147,12 +149,16 @@ class TestTriggers:
         release_config = triggers.get("release", {})
         if isinstance(release_config, dict):
             types = release_config.get("types", [])
-            forbidden_types = {"created", "edited", "prereleased", "unpublished",
-                              "deleted", "released"}
+            forbidden_types = {
+                "created",
+                "edited",
+                "prereleased",
+                "unpublished",
+                "deleted",
+                "released",
+            }
             found = set(types) & forbidden_types
-            assert not found, (
-                f"release trigger has extra activity types: {found}"
-            )
+            assert not found, f"release trigger has extra activity types: {found}"
 
 
 # ── VAL-ANN-004: 无 tag 模式门槛 ──
@@ -179,9 +185,7 @@ class TestNoTagFiltering:
             "script should not grep-filter tags"
         )
         # No semver threshold checks
-        assert "semver" not in full_script.lower(), (
-            "script should not have semver threshold logic"
-        )
+        assert "semver" not in full_script.lower(), "script should not have semver threshold logic"
 
 
 # ── VAL-ANN-005: payload 四字段精确 ──
@@ -224,9 +228,7 @@ class TestPayloadShape:
 class TestAuthHeader:
     def test_x_release_token_header_present(self, full_script: str) -> None:
         """POST must carry X-Release-Token header (exact name)."""
-        assert "X-Release-Token" in full_script, (
-            "curl must include X-Release-Token header"
-        )
+        assert "X-Release-Token" in full_script, "curl must include X-Release-Token header"
 
     def test_token_from_secret(self, full_script: str) -> None:
         """Token value must reference RELEASE_BROADCAST_TOKEN secret."""
@@ -258,10 +260,10 @@ class TestUrlFromSecret:
 class TestContentType:
     def test_json_content_type(self, full_script: str) -> None:
         """POST must carry Content-Type: application/json."""
-        assert "Content-Type: application/json" in full_script or \
-               "Content-Type:application/json" in full_script, (
-            "curl must set Content-Type: application/json"
-        )
+        assert (
+            "Content-Type: application/json" in full_script
+            or "Content-Type:application/json" in full_script
+        ), "curl must set Content-Type: application/json"
 
 
 # ── VAL-ANN-009: 传输层失败重试 ──
@@ -271,9 +273,7 @@ class TestRetryAndTimeout:
     def test_retry_flags(self, full_script: str) -> None:
         """curl must have --retry 3 --retry-all-errors."""
         assert "--retry 3" in full_script, "curl must have --retry 3"
-        assert "--retry-all-errors" in full_script, (
-            "curl must have --retry-all-errors"
-        )
+        assert "--retry-all-errors" in full_script, "curl must have --retry-all-errors"
 
     def test_exit_code_capture(self, full_script: str) -> None:
         """Script must capture HTTP code and handle non-zero exit."""
@@ -284,9 +284,7 @@ class TestRetryAndTimeout:
 
     def test_http_code_capture(self, full_script: str) -> None:
         """curl must use -w to capture HTTP status code."""
-        assert "%{http_code}" in full_script, (
-            "curl must use -w '%{http_code}' to capture status"
-        )
+        assert "%{http_code}" in full_script, "curl must use -w '%{http_code}' to capture status"
 
 
 # ── VAL-ANN-010: 非 2xx 告警路径，job 永不失败 ──
@@ -295,16 +293,12 @@ class TestRetryAndTimeout:
 class TestFireAndForget:
     def test_non_2xx_warning(self, full_script: str) -> None:
         """Non-2xx must trigger ::warning::."""
-        assert "::warning::" in full_script, (
-            "non-2xx response must emit ::warning::"
-        )
+        assert "::warning::" in full_script, "non-2xx response must emit ::warning::"
 
     def test_job_never_fails(self, full_script: str) -> None:
         """Script must end with exit 0 (never fail the job)."""
         # The last line of the run script should ensure success
-        assert "exit 0" in full_script, (
-            "script must explicitly exit 0 (job never fails)"
-        )
+        assert "exit 0" in full_script, "script must explicitly exit 0 (job never fails)"
 
     def test_no_set_e_without_protection(self, full_script: str) -> None:
         """Even with set -e, the script must not fail on curl error."""
@@ -317,9 +311,7 @@ class TestFireAndForget:
                 # Main curl should be in a pattern that captures failure
                 pass
         # The overall script should have the exit code capture
-        assert "|| HTTP_CODE" in full_script, (
-            "curl failure must be caught with || HTTP_CODE=..."
-        )
+        assert "|| HTTP_CODE" in full_script, "curl failure must be caught with || HTTP_CODE=..."
 
 
 # ── VAL-ANN-012: 2xx 静默通过 ──
@@ -343,20 +335,14 @@ class TestSuccessSilent:
 class TestNoResponseBodyValidation:
     def test_discards_response_body(self, full_script: str) -> None:
         """curl must discard response body (-o /dev/null)."""
-        assert "-o /dev/null" in full_script, (
-            "curl must discard response body with -o /dev/null"
-        )
+        assert "-o /dev/null" in full_script, "curl must discard response body with -o /dev/null"
 
     def test_no_body_parsing(self, full_script: str) -> None:
         """Script must not parse response body."""
         # Should not have jq/grep/variable reference on response body
         # Only HTTP code is captured
-        assert "RESPONSE_BODY" not in full_script, (
-            "script must not store response body"
-        )
-        assert "RESPONSE=" not in full_script, (
-            "script must not store response for inspection"
-        )
+        assert "RESPONSE_BODY" not in full_script, "script must not store response body"
+        assert "RESPONSE=" not in full_script, "script must not store response for inspection"
 
 
 # ── VAL-ANN-014: 时间上界 ──
@@ -371,9 +357,7 @@ class TestTimeBounds:
 
     def test_job_timeout(self, job: dict[str, Any]) -> None:
         """Job should have timeout-minutes."""
-        assert "timeout-minutes" in job, (
-            "job should have timeout-minutes to prevent infinite hang"
-        )
+        assert "timeout-minutes" in job, "job should have timeout-minutes to prevent infinite hang"
 
 
 # ── VAL-ANN-015: PostHog 告警 + key 缺失跳过 ──
@@ -382,26 +366,20 @@ class TestTimeBounds:
 class TestPostHogAlert:
     def test_posthog_event_on_failure(self, full_script: str) -> None:
         """Failure branch must send PostHog event."""
-        assert "posthog" in full_script.lower(), (
-            "failure branch must include PostHog event"
-        )
-        assert "release_announce" in full_script.lower() or \
-               "release_announce_failed" in full_script.lower() or \
-               "release_broadcast" in full_script.lower(), (
-            "PostHog event should identify the workflow"
-        )
+        assert "posthog" in full_script.lower(), "failure branch must include PostHog event"
+        assert (
+            "release_announce" in full_script.lower()
+            or "release_announce_failed" in full_script.lower()
+            or "release_broadcast" in full_script.lower()
+        ), "PostHog event should identify the workflow"
 
     def test_posthog_key_missing_notice(self, full_script: str) -> None:
         """Missing POSTHOG_API_KEY must ::notice:: skip."""
-        assert "::notice::" in full_script, (
-            "missing POSTHOG_API_KEY must emit ::notice:: and skip"
-        )
+        assert "::notice::" in full_script, "missing POSTHOG_API_KEY must emit ::notice:: and skip"
 
     def test_posthog_best_effort(self, full_script: str) -> None:
         """PostHog send must be best-effort (|| true)."""
-        assert "|| true" in full_script, (
-            "PostHog send must be best-effort (|| true)"
-        )
+        assert "|| true" in full_script, "PostHog send must be best-effort (|| true)"
 
 
 # ── VAL-ANN-018: secret 缺失时预警跳过 ──
@@ -412,8 +390,7 @@ class TestSecretMissingHandling:
         """Script must check RELEASE_BROADCAST_URL is set."""
         assert "RELEASE_BROADCAST_URL" in full_script
         # Check for empty string test
-        assert '-z "$' in full_script or "[ -z" in full_script or \
-               '[ -z' in full_script, (
+        assert '-z "$' in full_script or "[ -z" in full_script or "[ -z" in full_script, (
             "script must check if URL secret is empty"
         )
 
@@ -454,9 +431,7 @@ class TestNoCheckout:
         steps = job.get("steps") or []
         for step in steps:
             uses = str(step.get("uses", ""))
-            assert "actions/checkout" not in uses, (
-                "job must not checkout the repository"
-            )
+            assert "actions/checkout" not in uses, "job must not checkout the repository"
 
     def test_no_git_commands(self, full_script: str) -> None:
         """No git commands in the workflow."""
@@ -466,7 +441,7 @@ class TestNoCheckout:
             stripped = line.strip()
             if stripped.startswith("#"):
                 continue
-            assert not re.match(r'\bgit\s', stripped), (
+            assert not re.match(r"\bgit\s", stripped), (
                 f"workflow should not run git commands: {stripped}"
             )
 
@@ -478,7 +453,7 @@ class TestTokenHygiene:
     def test_no_plaintext_token(self, workflow_text: str) -> None:
         """No 64-char hex string (token value) in workflow."""
         # Look for 64+ char hex strings that could be token values
-        matches = re.findall(r'\b[0-9a-f]{64}\b', workflow_text)
+        matches = re.findall(r"\b[0-9a-f]{64}\b", workflow_text)
         assert not matches, (
             f"workflow contains potential plaintext token(s): {len(matches)} matches"
         )
@@ -494,25 +469,24 @@ class TestTokenHygiene:
         for line in lines:
             if "curl" in line:
                 # Match -v as a standalone flag (not part of --max-time etc.)
-                assert not re.search(r'\bcurl\s+.*\s-v\s', line), (
-                    "curl must not use -v flag"
-                )
+                assert not re.search(r"\bcurl\s+.*\s-v\s", line), "curl must not use -v flag"
 
     def test_token_only_referenced_by_secret_name(self, workflow_text: str) -> None:
         """RELEASE_BROADCAST_TOKEN should only appear as secret reference."""
         # All mentions should be in secrets context or variable reference
         mentions = [
-            line for line in workflow_text.split("\n")
+            line
+            for line in workflow_text.split("\n")
             if "RELEASE_BROADCAST_TOKEN" in line and not line.strip().startswith("#")
         ]
         for line in mentions:
             # Allow: secrets.RELEASE_BROADCAST_TOKEN, env: BROADCAST_TOKEN: ${{ secrets.RELEASE_BROADCAST_TOKEN }}
             # Also allow: echo messages that mention the secret name
-            assert "secrets.RELEASE_BROADCAST_TOKEN" in line or \
-                   "echo" in line or \
-                   "warning" in line.lower(), (
-                f"RELEASE_BROADCAST_TOKEN must be referenced as secret or in message: {line}"
-            )
+            assert (
+                "secrets.RELEASE_BROADCAST_TOKEN" in line
+                or "echo" in line
+                or "warning" in line.lower()
+            ), f"RELEASE_BROADCAST_TOKEN must be referenced as secret or in message: {line}"
 
 
 # ── VAL-ANN-026: 零远程 action 引用 ──
@@ -525,9 +499,7 @@ class TestNoRemoteActions:
         for step in steps:
             uses = str(step.get("uses", ""))
             if uses:
-                assert uses.startswith("./"), (
-                    f"no remote action references allowed, found: {uses}"
-                )
+                assert uses.startswith("./"), f"no remote action references allowed, found: {uses}"
 
 
 # ── VAL-ANN-027: 增量式变更 ──
