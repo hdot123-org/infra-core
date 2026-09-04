@@ -582,13 +582,25 @@ EOF
 
 
 def _create_bare_remote(tmp_path: Path, name: str) -> tuple[Path, Path]:
-    """创建 bare remote + 可 clone 的仓（用于测试 git pull --ff-only）"""
+    """创建 bare remote + 可 clone 的仓（用于测试 git pull --ff-only）
+
+    关键：CI runner 的 init.defaultBranch 可能不是 main（如 master），
+    因此必须在 clone 之前就把 bare remote 的 HEAD 指向 main，
+    并在首次 push 后显式设置 upstream tracking，确保 git pull --ff-only 可用。
+    """
     import subprocess as sp
 
     # 创建 bare remote
     remote = tmp_path / f"{name}_remote.git"
     remote.mkdir()
     sp.run(["git", "init", "--bare", str(remote)], capture_output=True, check=True)
+    # 在 clone 之前设置 bare remote HEAD 指向 main，不依赖宿主 init.defaultBranch
+    sp.run(
+        ["git", "symbolic-ref", "HEAD", "refs/heads/main"],
+        cwd=remote,
+        capture_output=True,
+        check=True,
+    )
 
     # 创建可 clone 的仓并设置 remote
     repo = tmp_path / name
@@ -608,10 +620,10 @@ def _create_bare_remote(tmp_path: Path, name: str) -> tuple[Path, Path]:
     # 确保本地分支名为 main（CI runner 的 defaultBranch 可能不是 main）
     sp.run(["git", "branch", "-M", "main"], cwd=repo, capture_output=True, check=True)
     sp.run(["git", "push", "origin", "main"], cwd=repo, capture_output=True, check=True)
-    # 设置 bare remote 的 HEAD 指向 main，确保 git pull 时拉取正确的分支
+    # 显式设置 upstream tracking，确保 git pull --ff-only 能找到正确的 tracking branch
     sp.run(
-        ["git", "symbolic-ref", "HEAD", "refs/heads/main"],
-        cwd=remote,
+        ["git", "branch", "--set-upstream-to=origin/main", "main"],
+        cwd=repo,
         capture_output=True,
         check=True,
     )
