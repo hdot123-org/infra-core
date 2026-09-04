@@ -310,7 +310,7 @@ class TestFireAndForget:
         """Even with set -e, the script must not fail on curl error."""
         # Check that curl failure is caught
         lines = full_script.split("\n")
-        curl_lines = [l for l in lines if "curl" in l and "posthog" not in l.lower()]
+        curl_lines = [ln for ln in lines if "curl" in ln and "posthog" not in ln.lower()]
         for line in curl_lines:
             # The main delivery curl must have || HTTP_CODE= pattern
             if "RELEASE_BROADCAST_URL" in full_script and "$WEBHOOK_URL" not in line:
