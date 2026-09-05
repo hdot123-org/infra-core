@@ -13,6 +13,7 @@ node --test absence = FAIL (not skip) — this mission's contract must be reacha
 """
 
 import subprocess
+import tomllib
 from pathlib import Path
 
 from tests.cf_contract_helpers import assert_node_contract, assert_wrangler_toml_contract
@@ -182,6 +183,25 @@ class TestCFArtifactsExist:
         assert "secret" in content.lower()
         assert "迁移范围" in content or "migration" in content.lower()
         assert "切换" in content or "switch" in content.lower()
+
+    def test_routes_key_not_active_toml(self):
+        """VAL-CF-001: routes key must not exist as active TOML syntax.
+
+        2026-09-06 CF archive deactivation: the routes block in wrangler.toml
+        must be fully commented out or removed. The parsed TOML must not contain
+        a 'routes' key. This prevents accidental re-activation of production routing
+        from this archived copy.
+        """
+        path = CF_DIR / "wrangler.toml"
+        content = path.read_text()
+
+        # Parse TOML and assert routes key does not exist
+        parsed = tomllib.loads(content)
+        assert "routes" not in parsed, (
+            "wrangler.toml must not contain an active 'routes' key. "
+            "The routes block must be fully commented out or removed (2026-09-06 archive deactivation). "
+            "See DEPLOYMENT.md for archive notes; do not deploy this directory directly."
+        )
 
 
 # ---------------------------------------------------------------------------
