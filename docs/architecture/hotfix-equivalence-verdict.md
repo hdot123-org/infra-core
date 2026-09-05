@@ -41,10 +41,10 @@ try:
 ### 证据 2：现行 trigger-droid.sh 直查路径
 
 **生产文件**：`~/.factory/webhook/scripts/trigger-droid.sh` L205-224
-**仓库文件**：`/Users/busiji/infra-core/webhook-scripts/trigger-droid.sh` L205-224（sha256 一致）
+**仓库文件**：`webhook-scripts/trigger-droid.sh` L205-224（sha256 一致）
 
 ```python
-query = '{ issue(id: \"%s\") { identifier team { key } title } }' % '$issue_uuid'
+query = '{ issue(id: "%s") { identifier team { key } title } }' % "$issue_uuid"
 # ... 直接 issue(id:) 查询，无 comment(id:) 前置尝试 ...
 ```
 
@@ -52,7 +52,7 @@ query = '{ issue(id: \"%s\") { identifier team { key } title } }' % '$issue_uuid
 
 ### 证据 3：CF 网关 Linear comment 载荷处理
 
-**文件**：`/Users/busiji/cf/xun201811/webhook/worker.js`
+**文件**：`<cf-repo>/webhook/worker.js`
 
 **路由逻辑**（L26-35）：
 ```javascript
@@ -62,7 +62,7 @@ if (linearDetect.resourceType === "Issue" || linearDetect.resourceType === "Comm
         route: "linear-to-droid",
         event: `linear-${linearDetect.resourceType.toLowerCase()}`,
         path: "/hooks/linear-to-droid",
-        tokenSecret: "LINEAR_WEBHOOK_TOKEN"
+        tokenSecret: "<LINEAR_WEBHOOK_TOKEN>"
     };
 }
 ```
@@ -158,7 +158,7 @@ CF 网关（worker.js）**不做 comment UUID → issue UUID 翻译**。如果�
 | E1 | `~/.factory/webhook/scripts/trigger-droid.sh.bak-comment-uuid-20260902` | L205-232 | 热修复 `comment(id:)` 反查逻辑 |
 | E2 | `~/.factory/webhook/scripts/.sync-backups/trigger-droid.sh.bak.20260905-012303` | L205-239 | 覆盖前快照（与 E1 热修复逻辑一致） |
 | E3 | `~/.factory/webhook/scripts/trigger-droid.sh`（生产） | L205-224 | 现行 `issue(id:)` 直查（无 comment 反查） |
-| E4 | `/Users/busiji/infra-core/webhook-scripts/trigger-droid.sh`（仓库） | L205-224 | 仓库版本（与生产一致） |
-| E5 | `/Users/busiji/cf/xun201811/webhook/worker.js` | L26-35, L342-351 | 网关转发逻辑（无 UUID 翻译） |
+| E4 | `webhook-scripts/trigger-droid.sh`（仓库） | L205-224 | 仓库版本（与生产一致） |
+| E5 | `<cf-repo>/webhook/worker.js` | L26-35, L342-351 | 网关转发逻辑（无 UUID 翻译） |
 | E6 | `~/.factory/webhook/hooks.json` | L3-26 | hooks 参数映射（data.id→ISSUE_UUID, data.identifier→ISSUE_REF） |
 | E7 | `~/.factory/webhook/scripts/trigger-droid.sh`（生产） | L680-732 | 执行路径（resolve → GAP-D 过滤链） |
