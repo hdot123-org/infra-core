@@ -142,12 +142,18 @@ release-please 还是人工发布、无论 minor 还是 patch）。
 ⑤ **Mac 离线兜底**：Mac 离线期间公告会丢失，补齐方式有二：
 - 下次发版时自动补齐（新 tag 公告正常触发）
 - 手动 reconcile：以相同 payload 形状对 webhook 端点重发 curl 即可
+- **重试窗口**：仅有 run 内 15-30s 有限 curl 重试（--retry 3），窗口级离线不重试不补发
 
 ⑥ **已知限制**：
 - **HTTP 200 ≠ 接单成功**：webhook 对 trigger-rule 不满足的请求也返回 200
   （adnanh/webhook 实证），200 只证明公告已送达路由层，不证明规则命中或脚本执行
 - **离线窗口公告会丢**：Mac 侧 webhook 服务不可达期间（离线/崩溃）的公告
   不会重试或补发，靠 §6 兜底路径补齐
+- **公网公告 Cloudflare Access 302（临时，Service Token 生效前兜底=手动 reconcile）**：
+  公网公告当前经 Cloudflare Access 网关拦截返回 302 跳转登录页（Bypass 缺 GitHub Actions
+  段）。仓内侧已适配可选 CF-Access-Client-Id/Secret 头（引用 secrets CF_ACCESS_CLIENT_ID /
+  CF_ACCESS_CLIENT_SECRET，secrets 未配置时优雅跳过），Service Token 与 gate 策略由用户侧
+  落地。生效前兜底 = 手动 reconcile（对 Mac 本机 webhook 端点直接 curl，绕过公网）
 - **release 事件平台行为**：GitHub Actions 的 `on: release` 按 tag commit
   解析 workflow 文件——对 tag commit 早于 `release-announce.yml` 落地 main 的
   旧 release 做 draft→publish 重发**不会触发公告**（2026-09-04 实证：
@@ -172,6 +178,9 @@ release-please 还是人工发布、无论 minor 还是 patch）。
 
 派发层逐仓执行，单仓失败（工作树脏 / pull 失败 / droid exec 异常）不影响其他仓，
 跳过原因记入日志。
+
+**工作树脏检测范围**：仅覆盖 tracked 改动（git status --porcelain 检测已跟踪文件的修改/删除），
+untracked 文件不拦截派发（会话层保护兜底，session 8c635f22 实证无害）。
 
 ## 7. 验证接入
 

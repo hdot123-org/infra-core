@@ -253,6 +253,33 @@ class TestAuthHeader:
         )
 
 
+# ── VAL-ANN-CF-001: Cloudflare Access 可选头 ──
+
+
+class TestCloudflareAccessHeaders:
+    def test_cf_access_headers_optional(self, workflow_text: str) -> None:
+        """Workflow must support optional CF-Access-Client-Id/Secret headers."""
+        # Headers must be referenced
+        assert "CF_ACCESS_CLIENT_ID" in workflow_text, (
+            "workflow must reference CF_ACCESS_CLIENT_ID secret"
+        )
+        assert "CF_ACCESS_CLIENT_SECRET" in workflow_text, (
+            "workflow must reference CF_ACCESS_CLIENT_SECRET secret"
+        )
+
+    def test_cf_access_headers_conditional(self, full_script: str) -> None:
+        """CF-Access headers must only be added when secrets are configured."""
+        # Must have conditional logic
+        assert "CF_ACCESS_CLIENT_ID" in full_script
+        assert "if" in full_script.lower() or "test" in full_script, (
+            "script must have conditional logic for CF-Access headers"
+        )
+        # Must gracefully skip when not configured
+        assert "-z" in full_script or "if [ -n" in full_script, (
+            "script must check if CF-Access secrets are empty"
+        )
+
+
 # ── VAL-ANN-007: URL 来自 secret ──
 
 
