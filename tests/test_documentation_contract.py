@@ -234,3 +234,108 @@ def test_architecture_platform_behavior_limitation():
         "Known limitations must mention 2026-09-04 platform behavior: "
         "draft→publish re-publish of old releases does not trigger announcement"
     )
+
+
+def test_onboarding_polling_trigger_surface():
+    """VAL-ANN-029: consumer-onboarding.md 必须说明轮询触发面为默认触发机制。"""
+    content = _load_onboarding()
+
+    # 必须说明轮询为默认触发面
+    assert re.search(r"(?:轮询.*默认|polling.*default)", content, re.IGNORECASE), (
+        "Must clarify that polling is the default trigger mechanism"
+    )
+
+
+def test_onboarding_launchd_timer():
+    """VAL-ANN-030: consumer-onboarding.md 必须说明宿主 launchd 定时器（300s 间隔）。"""
+    content = _load_onboarding()
+
+    # 必须提及 launchd 或定时器
+    assert re.search(r"(?:launchd|定时器|timer|300.*秒|300s)", content, re.IGNORECASE), (
+        "Must mention launchd timer with 300s interval"
+    )
+
+
+def test_onboarding_push_surface_sleep():
+    """VAL-ANN-031: consumer-onboarding.md 必须说明推送面休眠机制（RELEASE_BROADCAST_URL 删除即休眠）。"""
+    content = _load_onboarding()
+
+    # 必须提及推送面休眠
+    assert re.search(
+        r"(?:推送面.*休眠|push.*sleep|RELEASE_BROADCAST_URL.*删除)", content, re.IGNORECASE
+    ), "Must mention push surface sleep mechanism (delete RELEASE_BROADCAST_URL to sleep)"
+
+    # 必须说明可唤醒
+    assert re.search(r"(?:可唤醒|wake|恢复.*secret|restore.*secret)", content, re.IGNORECASE), (
+        "Must mention that push surface can be woken up by restoring the secret"
+    )
+
+
+def test_onboarding_dual_trigger_idempotent():
+    """VAL-ANN-032: consumer-onboarding.md 必须说明双触发幂等共存（推送+轮询）。"""
+    content = _load_onboarding()
+
+    # 必须提及双触发共存
+    assert re.search(r"(?:双触发|dual\s+trigger|推送.*轮询|push.*poll)", content, re.IGNORECASE), (
+        "Must mention dual trigger (push + polling) coexistence"
+    )
+
+    # 必须说明幂等锁保证只派发一次
+    assert re.search(
+        r"(?:幂等.*锁|idempotent.*lock|只派发一次|only\s+dispatch\s+once)", content, re.IGNORECASE
+    ), "Must clarify that idempotent lock ensures only one dispatch per tag"
+
+
+def test_architecture_polling_trigger_surface():
+    """VAL-ANN-029: docs/architecture.md 必须说明轮询触发面（poll-releases.sh）为默认触发机制。"""
+    content = _load_architecture()
+
+    # 必须提及 poll-releases.sh
+    assert re.search(r"poll-releases\.sh", content), (
+        "Must mention poll-releases.sh as the polling trigger mechanism"
+    )
+
+    # 必须说明轮询为默认触发面
+    assert re.search(r"(?:轮询.*默认|polling.*default)", content, re.IGNORECASE), (
+        "Must clarify that polling is the default trigger mechanism"
+    )
+
+
+def test_architecture_launchd_timer():
+    """VAL-ANN-030: docs/architecture.md 必须说明宿主 launchd 定时器（300s 间隔）。"""
+    content = _load_architecture()
+
+    # 必须提及 launchd 或定时器
+    assert re.search(r"(?:launchd|定时器|timer|300.*秒|300s)", content, re.IGNORECASE), (
+        "Must mention launchd timer with 300s interval"
+    )
+
+
+def test_architecture_push_surface_sleep():
+    """VAL-ANN-031: docs/architecture.md 必须说明推送面休眠机制（RELEASE_BROADCAST_URL 删除即休眠）。"""
+    content = _load_architecture()
+
+    # 必须提及推送面休眠
+    assert re.search(
+        r"(?:推送面.*休眠|push.*sleep|RELEASE_BROADCAST_URL.*删除)", content, re.IGNORECASE
+    ), "Must mention push surface sleep mechanism (delete RELEASE_BROADCAST_URL to sleep)"
+
+    # 必须说明可唤醒
+    assert re.search(r"(?:可唤醒|wake|恢复.*secret|restore.*secret)", content, re.IGNORECASE), (
+        "Must mention that push surface can be woken up by restoring the secret"
+    )
+
+
+def test_architecture_dual_trigger_idempotent():
+    """VAL-ANN-032: docs/architecture.md 必须说明双触发幂等共存（推送+轮询）。"""
+    content = _load_architecture()
+
+    # 必须提及双触发共存
+    assert re.search(r"(?:双触发|dual\s+trigger|推送.*轮询|push.*poll)", content, re.IGNORECASE), (
+        "Must mention dual trigger (push + polling) coexistence"
+    )
+
+    # 必须说明幂等锁保证只派发一次
+    assert re.search(
+        r"(?:幂等.*锁|idempotent.*lock|只派发一次|only\s+dispatch\s+once)", content, re.IGNORECASE
+    ), "Must clarify that idempotent lock ensures only one dispatch per tag"
