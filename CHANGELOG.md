@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0](https://github.com/hdot123-org/infra-core/compare/v0.12.0...v0.13.0) (2026-09-05)
+
+
+### Features
+
+* **webhook-scripts:** 收编 write_comment.py + 修正 trigger-ci-droid 误导注释 ([#226](https://github.com/hdot123-org/infra-core/issues/226)) ([38f720a](https://github.com/hdot123-org/infra-core/commit/38f720a55e57e0820a89d81562539d1f14b8038a))
+
+
+### Bug Fixes
+
+* **gate:** 修复引擎 gate 三缺陷——自排除+具名打印+落盘 jq (INFRA-767) ([#224](https://github.com/hdot123-org/infra-core/issues/224)) ([0bcb45b](https://github.com/hdot123-org/infra-core/commit/0bcb45b612c4d7eef102741ffcc4be2468565f79))
+
 ## [0.12.0](https://github.com/hdot123-org/infra-core/compare/v0.11.1...v0.12.0) (2026-09-05)
 
 
