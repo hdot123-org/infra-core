@@ -11,6 +11,7 @@ infra-core 是从 memory-core 抽离的组织级共享引擎，提供：
 - **webhook 脚本**：manifest + trigger 家族（生产同步源）
 - **CI/CD**：reusable workflows + composite actions
 - **CLI**：infra-cli 统一入口
+- **发版公告链路**：引擎发版时自动广播升级公告，消费仓自动接单开 pin-bump PR（详见[发版公告与下游自动接单](#发版公告与下游自动接单)）
 
 ## 安装
 
@@ -67,6 +68,22 @@ audit_tools:
 ### 消费仓接入
 
 新仓库接入引擎只需三件事：复制 thin-caller workflow 模板、声明 `.evolution/config.yml`、配置 secrets，消费仓零 pip 安装、零脚本副本。详见[消费仓接入指南](docs/onboarding/consumer-onboarding.md)，thin-caller 模板位于 `docs/onboarding/templates/`。
+
+
+## 发版公告与下游自动接单
+
+infra-core 发版时，通过两条触发面（推送 + 轮询）自动广播升级公告，消费仓（`engineConsumer: true`）自动接单开 pin-bump PR，CI → auto-merge 闭环。
+
+**链路要素**：
+- **推送触发面**：`release-announce.yml` workflow（on: release published）POST 到 Mac 侧 webhook → `trigger-release.sh` 派发 droid session
+- **轮询触发面**（默认）：`poll-releases.sh` + launchd 定时轮询 GitHub Releases API，发现新 release 后调用 `trigger-release.sh`
+- **接单 skill**：`release-gateway` skill 指导 droid 升级消费仓 infra-core pin（pyproject git+、workflow @tag、测试断言、文档等）
+- **幂等保证**：per-tag 锁文件，重复触发零副作用
+- **双触发面共存**：推送 + 轮询经幂等锁天然共存，推送面可休眠（secret 缺失时优雅跳过）
+
+**消费仓接入**：在 `~/.factory/config/repositories.yml` 中添加 `engineConsumer: true` 标记即可自动接收升级公告。
+
+详细架构：[`docs/architecture.md` §7 发版公告链路](docs/architecture.md) § C9 轮询触发面；消费仓接入指南：[`docs/onboarding/consumer-onboarding.md`](docs/onboarding/consumer-onboarding.md)。
 
 ## 架构
 
