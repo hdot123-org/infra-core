@@ -504,7 +504,7 @@ jobs:
         # auto-merge@5a0fc1b 行为等价移植，该仓退役归档）。owner/repo 全路径 +
         # 不可变 tag pin（INFRA-678）：远程 action 由 GitHub 服务端按 ref 解析，
         # 本 job 零 checkout 也可用（防毒铁律不变）；升级 = 显式 bump tag。
-        uses: hdot123-org/infra-core/actions/auto-merge@0bcb45b612c4d7eef102741ffcc4be2468565f79 # v0.12.1 (PR #224)
+        uses: hdot123-org/infra-core/actions/auto-merge@6ffed5aa14eeb8424996edd6546e8bb229a0c02e # v0.13.0 (PR #231)
         with:
           pr-number: ${{ matrix.pr_number }}
         env:

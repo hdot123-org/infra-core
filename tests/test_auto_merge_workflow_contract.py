@@ -48,7 +48,7 @@ AUTO_MERGE_CARRIERS = (AUTO_MERGE_YML, AUTO_MERGE_PIPELINE_YML)
 # 一并还原，归档仓的旧 pin 仍可解析，无第二处 pin 需要同步）。
 # 注意：YAML 解析会剥离 # vTag 注释，所以这里只存 SHA 部分
 AUTO_MERGE_ACTION_REF = (
-    "hdot123-org/infra-core/actions/auto-merge@0bcb45b612c4d7eef102741ffcc4be2468565f79"
+    "hdot123-org/infra-core/actions/auto-merge@6ffed5aa14eeb8424996edd6546e8bb229a0c02e"
 )
 TRIAGE_SH = REPO_ROOT / "src/infra_core/shell/auto_merge_triage.sh"
 GUARDED_CHECKOUT_WORKFLOWS = ("ci.yml", "qa.yml", "droid-review.yml")
