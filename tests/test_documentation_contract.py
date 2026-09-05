@@ -361,7 +361,7 @@ def test_onboarding_permission_sync_covenant_content():
     """VAL-DS-036: 权限同步守则必须包含核心原则与实例。
 
     核心原则：调用方授予集必须覆盖 callee 顶层声明集。
-    实例：infra-core v0.11.1 actions: read 事件。
+    实例：actions: read 由 PR #176 引入，自 v0.10.0 起存在（非 v0.11.1 新增）。
     """
     content = _load_onboarding()
 
@@ -375,9 +375,19 @@ def test_onboarding_permission_sync_covenant_content():
         "callee top-level permissions to avoid startup_failure"
     )
 
-    # 实例：actions: read
+    # 实例：actions: read（勘误后口径：PR #176 引入，v0.10.0 起存在）
     assert re.search(r"actions:\s*read", content), (
-        "Permission sync covenant must mention the actions: read instance from infra-core v0.11.1"
+        "Permission sync covenant must mention the actions: read instance"
+    )
+    # 勘误口径：必须提及 PR #176 或 v0.10.0 或 v0.7.2→v0.11.1 大跨跳
+    assert re.search(
+        r"(?:PR\s*#176|v0\.10\.0|v0\.7\.2.*v0\.11\.1|大跨跳|cross-version)",
+        content,
+        re.IGNORECASE,
+    ), (
+        "Permission sync covenant must use corrected attribution: "
+        "actions: read introduced by PR #176 (v0.10.0+), not v0.11.1. "
+        "Trigger = v0.7.2→v0.11.1 large version jump."
     )
 
     # 实操规则：升级引擎 pin 时核对
