@@ -72,8 +72,10 @@ runs:
         gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" --paginate > "$CHECK_RUNS_FILE" 2>/dev/null || true
 
         # total_count 翻页守卫：验证收集数量与 API 声明总数一致
-        COLLECTED_COUNT=$(jq '[.check_runs // . | if type == "array" then .[] else . end] | length' "$CHECK_RUNS_FILE" 2>/dev/null || echo 0)
-        DECLARED_TOTAL=$(jq '[.total_count // empty] | first // empty' "$CHECK_RUNS_FILE" 2>/dev/null || echo "")
+        # INFRA-769 修复：必须 jq -s 聚合多页（--paginate 逐页 jq 无 -s 产出 N 个
+        # 换行分隔值，bash [ -lt ] 报错 exit 2 被 if 吞为 false，::warning:: 永不响）
+        COLLECTED_COUNT=$(jq -s '[.[] | .check_runs // . | if type == "array" then .[] else . end] | length' "$CHECK_RUNS_FILE" 2>/dev/null || echo 0)
+        DECLARED_TOTAL=$(jq -s '[.[] | .total_count // empty] | first // empty' "$CHECK_RUNS_FILE" 2>/dev/null || echo "")
         if [ -n "$DECLARED_TOTAL" ] && [ "$COLLECTED_COUNT" -lt "$DECLARED_TOTAL" ]; then
           echo "::warning::Pagination guard: collected $COLLECTED_COUNT < declared total_count $DECLARED_TOTAL"
         fi

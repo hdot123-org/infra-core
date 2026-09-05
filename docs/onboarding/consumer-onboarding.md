@@ -199,10 +199,12 @@ untracked 文件不拦截派发（会话层保护兜底，session 8c635f22 实�
 2. 调用方的 job-level permissions 同样需要覆盖 callee 所需集合
 3. 升级 infra-core pin 版本时，必须核对 callee 顶层权限 vs 调用方授予集
 
-**实例**：infra-core v0.11.1 在 `auto-merge-pipeline.yml` 顶层新增 `permissions: actions: read`，
+**实例**：`actions: read` 由 PR #176（commit 71917c1）引入，自 v0.10.0 起存在。
+PR #1113 把 infra-core pin 从 v0.7.2 直升 v0.11.1 的大跨跳跨过了引入版本，
 memory 仓的 `auto-merge.yml` 调用方 job 权限原为 `contents: write / pull-requests: write / checks: read`，
 缺少 `actions: read`，导致 main 上 Auto Merge 自 2026-09-04T23:20:46Z 起连续 `startup_failure`。
 修复：memory `auto-merge.yml` 顶层块与 job 级 permissions 均补 `actions: read`。
+（出处：library/memory-v0.11.1-permission-audit.md 归因勘误节）
 
 **检查方法**：升级 infra-core pin 后，执行：
 ```bash
