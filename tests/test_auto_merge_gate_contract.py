@@ -255,6 +255,41 @@ class TestGatePaginateAndDump:
             "必须有 total_count 翻页守卫——确保 --paginate 覆盖全部 check runs"
         )
 
+    def test_pagination_guard_uses_jq_slash_s_for_aggregation(self) -> None:
+        """INFRA-769 语义测试：total_count 翻页守卫两值必须用 jq -s 聚合。
+
+        --paginate 逐页 jq 无 -s 会产出 N 个换行分隔值，bash [ -lt ] 报错
+        exit 2 被 if 吞为 false，::warning:: 永不响（死代码）。
+        本测试验证守卫两值（COLLECTED_COUNT 与 DECLARED_TOTAL）均使用 jq -s
+        聚合，确保多页情形下产生单值而非 N 个换行分隔值。
+        """
+        script = _action_script()
+        lines = script.splitlines()
+
+        # 定位翻页守卫两值赋值行，验证均使用 jq -s
+        pagination_guard_lines: list[str] = []
+        for i, line in enumerate(lines):
+            # 查找 COLLECTED_COUNT 和 DECLARED_TOTAL 的赋值行
+            if "COLLECTED_COUNT=" in line or "DECLARED_TOTAL=" in line:
+                pagination_guard_lines.append(line)
+            # 到达 if 判定行时停止
+            if "-lt" in line and "COLLECTED_COUNT" in line and "DECLARED_TOTAL" in line:
+                break
+
+        # 必须有至少两行赋值（COLLECTED_COUNT 与 DECLARED_TOTAL）
+        assert len(pagination_guard_lines) >= 2, (
+            "翻页守卫两值赋值行缺失：必须存在 COLLECTED_COUNT 与 DECLARED_TOTAL 赋值"
+        )
+
+        for guard_line in pagination_guard_lines:
+            # 关键语义：必须使用 jq -s（聚合多页），不可仅 jq
+            # 匹配 jq -s 或 jq ... -s ...（允许 -s 在其他旗标之间）
+            assert re.search(r"jq\s+.*-s\b|jq\s+-s", guard_line), (
+                f"翻页守卫赋值行必须使用 jq -s 聚合多页，否则 "
+                f"--paginate 多页情形产出 N 个换行分隔值，bash [ -lt ] 报错 "
+                f"exit 2 被 if 吞为 false，::warning:: 永不响。行: {guard_line.strip()}"
+            )
+
     def test_local_jq_processing_after_dump(self) -> None:
         """落盘后必须有本地 jq 处理（从文件读取，非管道）。"""
         script = _action_script()
