@@ -12,8 +12,8 @@
 
 ### 证据 1：备份热修复逻辑
 
-**文件**：`~/.factory/webhook/scripts/trigger-droid.sh.bak-comment-uuid-20260902` L205-232
-**交叉验证**：`~/.factory/webhook/scripts/.sync-backups/trigger-droid.sh.bak.20260905-012303` L205-239（覆盖前快照，与 bak 文件 diff 仅 3 处 extract_anchor.py 路径差异，热修复逻辑完全一致）
+**文件**：`~/.factory/webhook/scripts/trigger-droid.sh.bak-comment-uuid-20260902` L205-232（热修复前备份，含 comment(id:) 反查逻辑）
+**代码源**：`~/.factory/webhook/scripts/.sync-backups/trigger-droid.sh.bak.20260905-012303` L205-239（覆盖前快照，与 bak-comment-uuid 文件 diff 仅 3 处 extract_anchor.py 路径差异，热修复逻辑完全一致）
 
 `resolve_issue_ref()` 函数内嵌 Python：
 
@@ -155,7 +155,7 @@ CF 网关（worker.js）**不做 comment UUID → issue UUID 翻译**。如果�
 
 | 编号 | 文件 | 行号 | 内容 |
 |------|------|------|------|
-| E1 | `~/.factory/webhook/scripts/trigger-droid.sh.bak-comment-uuid-20260902` | L205-232 | 热修复 `comment(id:)` 反查逻辑 |
+| E1 | `~/.factory/webhook/scripts/.sync-backups/trigger-droid.sh.bak.20260905-012303` | L205-239 | 热修复 `comment(id:)` 反查逻辑（覆盖前快照，热修复代码源） |
 | E2 | `~/.factory/webhook/scripts/.sync-backups/trigger-droid.sh.bak.20260905-012303` | L205-239 | 覆盖前快照（与 E1 热修复逻辑一致） |
 | E3 | `~/.factory/webhook/scripts/trigger-droid.sh`（生产） | L205-224 | 现行 `issue(id:)` 直查（无 comment 反查） |
 | E4 | `webhook-scripts/trigger-droid.sh`（仓库） | L205-224 | 仓库版本（与生产一致） |
