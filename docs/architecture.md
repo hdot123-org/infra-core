@@ -166,6 +166,30 @@ infra-core 每次 release 发布（含 patch）时自动广播升级公告到 Ma
   该限制属 GitHub 平台行为而非实现缺陷，生产语义不受影响（release-please 自当前
   main 切新 tag，未来自然发版正常触发）
 
+### C9 轮询触发面（2026-09-05 裁定：轮询为默认，推送面休眠可唤醒）
+
+**裁定背景**：公网推送路径被用户 2026-09-04 的 Cloudflare Access 全域门禁拦截（用户安全姿态"默认不对外公开"，且裁定网络侧 agent 永不触碰）；轮询模式零公网入站、`api.github.com` 本机可达性全天实证，成为默认触发面。推送组件保留休眠，配 Service Token 后可随时唤醒，双触发经幂等锁天然共存。
+
+#### C9.1 poll-releases.sh（仓内 webhook-scripts/，生产位经 sync-webhook-scripts.sh 同步）
+
+- **列表式轮询**（非 latest 单点）：`gh api 'repos/hdot123-org/infra-core/releases?per_page=20'`（认证，凭据经环境/shell 变量注入，不硬编码、不回显值），遍历返回的全部非 draft release 的 tag，**latest 与非 latest 一视同仁**——保持推送面「每次 release 全量广播、含 patch」的语义等价，`--latest=false` 的探针 release 同样可被发现（探针可见性的设计依据）。
+- **幂等语义**：per-tag 锁即"已见状态"（`~/.factory/webhook/locks/release-announce-<tag>.json`，复用既有锁体系，零新增状态文件）。tag 无锁 → 调用本仓库内 `trigger-release.sh <tag> <release_url>`（锁创建与逐仓派发由其负责）；有锁 → 跳过记日志。
+- **首装自举 `--init`**：为当前全部现存 tag 预建锁（一次性，登记装置）——避免首跑把历史 tag 全量当新公告派发。
+- **工程约束**：bash 3.2.57 兼容；API 失败/超时 → 日志留痕 + exit 0（不进 crash loop，下个周期自然重试）；token 经环境变量/gh 凭据注入不落日志；契约测试覆盖（锁存在跳过/无锁调用/自举/API 容错四分支，另含列表式断言——非 latest release 可被发现）。
+
+#### C9.2 宿主 launchd 定时器
+
+- plist `com.factory.poll-releases`（~/Library/LaunchAgents/），`StartInterval=300`（5 分钟），日志落 `~/.factory/webhook/logs/poll-releases.log`；装载/存活验证 = `launchctl list` + 日志时间戳序列。
+
+#### C9.3 推送面休眠（可逆装置）
+
+- 摘除 repo secret `RELEASE_BROADCAST_URL`（登记装置，恢复 = 重设该 secret 即唤醒推送；`RELEASE_BROADCAST_TOKEN` 保留不动——仅 URL 缺席即足以休眠）。release-announce.yml 组件与契约测试**保留不删**——其"secret 缺失 → `::warning::` + 优雅跳过"分支即休眠态（发版事件到来时零 POST、零失败）。
+- **双触发共存**：同 tag 推送先到建锁干活、轮询后到看锁跳过（或反之），幂等锁保证只派发一次；极端同秒双到最坏产生重复 bump PR，由下游 CI 门禁拦截。
+
+#### C9.4 语义变更
+
+- "Mac 离线公告丢失 → 下次发版补齐" 升级为 "轮询自动补齐（≤1 个轮询间隔）"；手动 reconcile 降级为可选兜底；推送唤醒后为秒级加速道。onboarding §6 与仓内 architecture.md 同步改写。
+
 ## 8. 演进路线
 
 - M2：引擎移植（copy-not-move）——`src/infra_core/engine/` 落地 scanner 家族 + argparse（`--repo-root` / `--report-only`）

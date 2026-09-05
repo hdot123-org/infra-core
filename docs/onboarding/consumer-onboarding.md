@@ -139,27 +139,30 @@ release-please 还是人工发布、无论 minor 还是 patch）。
 ④ **同 tag 幂等**：同一 tag 重复公告不产生重复接单——per-tag 幂等锁拦截，
 锁已存在时跳过派发、零副作用。
 
-⑤ **Mac 离线兜底**：Mac 离线期间公告会丢失，补齐方式有二：
-- 下次发版时自动补齐（新 tag 公告正常触发）
-- 手动 reconcile：以相同 payload 形状对 webhook 端点重发 curl 即可
-- **重试窗口**：仅有 run 内 15-30s 有限 curl 重试（--retry 3），窗口级离线不重试不补发
+⑤ **兜底与补齐**：轮询自动补齐（≤1 个轮询间隔，默认 5 分钟）为默认机制；
+手动 reconcile 为可选兜底（对 Mac 本机 webhook 端点直接 curl 即可）；推送面
+（webhook）休眠可唤醒（配 Service Token 后秒级加速）
+- **重试窗口**：推送面仅有 run 内 15-30s 有限 curl 重试（--retry 3），窗口级
+  离线不重试不补发——但轮询面会在下个周期自动发现并补齐
 
 ⑥ **已知限制**：
 - **HTTP 200 ≠ 接单成功**：webhook 对 trigger-rule 不满足的请求也返回 200
   （adnanh/webhook 实证），200 只证明公告已送达路由层，不证明规则命中或脚本执行
-- **离线窗口公告会丢**：Mac 侧 webhook 服务不可达期间（离线/崩溃）的公告
-  不会重试或补发，靠 §6 兜底路径补齐
-- **公网公告 Cloudflare Access 302（临时，Service Token 生效前兜底=手动 reconcile）**：
-  公网公告当前经 Cloudflare Access 网关拦截返回 302 跳转登录页（Bypass 缺 GitHub Actions
-  段）。仓内侧已适配可选 CF-Access-Client-Id/Secret 头（引用 secrets CF_ACCESS_CLIENT_ID /
-  CF_ACCESS_CLIENT_SECRET，secrets 未配置时优雅跳过），Service Token 与 gate 策略由用户侧
-  落地。生效前兜底 = 手动 reconcile（对 Mac 本机 webhook 端点直接 curl，绕过公网）
+- **推送面（休眠期）离线窗口公告会丢**：Mac 侧 webhook 服务不可达期间
+  （离线/崩溃）的推送公告不会重试或补发，但轮询面会在下个轮询间隔自动补齐
+- **公网公告 Cloudflare Access 302（临时，Service Token 生效前兜底=轮询自动补齐）**：
+  公网推送路径当前被 Cloudflare Access 全域门禁拦截（用户安全姿态"默认不对外公开"），
+  轮询模式零公网入站成为默认触发面。仓内侧已适配可选 CF-Access-Client-Id/Secret 头
+  （引用 secrets CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET，secrets 未配置时优雅
+  跳过），Service Token 与 gate 策略由用户侧落地。生效前兜底 = 轮询自动补齐（≤1 个
+  轮询间隔）；推送面唤醒后为秒级加速道
 - **release 事件平台行为**：GitHub Actions 的 `on: release` 按 tag commit
   解析 workflow 文件——对 tag commit 早于 `release-announce.yml` 落地 main 的
   旧 release 做 draft→publish 重发**不会触发公告**（2026-09-04 实证：
   published ReleaseEvent 已发、workflow state=active、历史零 run）。补救 =
-  手动 reconcile（见 §6 兜底路径）。该限制属 GitHub 平台行为而非实现缺陷，
-  生产语义不受影响（release-please 自当前 main 切新 tag，未来自然发版正常触发）
+  轮询自动补齐（下个轮询周期发现新 release）或手动 reconcile。该限制属 GitHub
+  平台行为而非实现缺陷，生产语义不受影响（release-please 自当前 main 切新 tag，
+  未来自然发版正常触发）
 
 ⑦ **与 §5 手动 bump 指引的边界划分**：
 - **已声明 `engineConsumer: true` 的仓**：升级由公告自动接单，无需按 §5 手动
