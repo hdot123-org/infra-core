@@ -3,11 +3,13 @@
 覆盖：
 - 锁存在 → 跳过
 - 锁不存在 → 调用 trigger-release.sh
-- --init 自举：为全部现存 tag 预建锁
-- API 容错：失败/超时 → 日志留痕 + exit 0
+- --init 自举：为全部现存 tag 预建锁（API 失败/解析失败 exit 非零）
+- API 容错：正常模式失败/超时 → 日志留痕 + exit 0
 - 列表式轮询：latest 与非 latest 一视同仁
+- 哨兵机制：无 .poll-bootstrap-done 禁绝派发；--init 成功后落哨兵
+- PYTHON_BIN 惯例（对齐 trigger-release.sh）
 
-测试策略：stub gh api + stub trigger-release.sh，验证四分支行为。
+测试策略：stub gh api + stub trigger-release.sh，验证行为分支。
 """
 
 from __future__ import annotations
@@ -26,14 +28,24 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATH = REPO_ROOT / "webhook-scripts" / "poll-releases.sh"
 
 
-def _make_env(tmp_path: Path) -> dict[str, str]:
-    """构造测试环境变量（隔离 webhook 目录）"""
+def _make_env(tmp_path: Path, with_sentinel: bool = False) -> dict[str, str]:
+    """构造测试环境变量（隔离 webhook 目录）
+
+    Args:
+        tmp_path: pytest 临时目录
+        with_sentinel: 是否创建 .poll-bootstrap-done 哨兵文件
+    """
     webhook_base = tmp_path / "webhook"
     webhook_base.mkdir(exist_ok=True)
     locks_dir = webhook_base / "locks"
     locks_dir.mkdir(exist_ok=True)
     logs_dir = webhook_base / "logs"
     logs_dir.mkdir(exist_ok=True)
+
+    # 哨兵文件（正常模式需要）
+    if with_sentinel:
+        sentinel = locks_dir / ".poll-bootstrap-done"
+        sentinel.touch()
 
     return {
         "WEBHOOK_BASE": str(webhook_base),
@@ -77,7 +89,7 @@ class TestPollReleasesLockExists:
 
     def test_lock_exists_skips_tag(self, tmp_path):
         """tag 已有锁时，不调用 trigger-release.sh"""
-        env = _make_env(tmp_path)
+        env = _make_env(tmp_path, with_sentinel=True)
         locks_dir = Path(env["LOCKS_DIR"])
 
         # 预建锁
@@ -136,7 +148,7 @@ class TestPollReleasesLockNotExists:
 
     def test_lock_not_exists_calls_trigger(self, tmp_path):
         """tag 无锁时，调用 trigger-release.sh"""
-        env = _make_env(tmp_path)
+        env = _make_env(tmp_path, with_sentinel=True)
 
         # 创建 stub gh（返回一个 release）
         releases = [
@@ -227,6 +239,10 @@ class TestPollReleasesInit:
             assert lock_data["repo"] == "hdot123-org/infra-core"
             assert lock_data.get("bootstrap") is True, "--init 创建的锁应含 bootstrap: true"
 
+        # --init 成功后应落哨兵
+        sentinel = locks_dir / ".poll-bootstrap-done"
+        assert sentinel.exists(), "--init 成功后应落哨兵 .poll-bootstrap-done"
+
     def test_init_skips_existing_locks(self, tmp_path):
         """--init 跳过已存在锁的 tag"""
         env = _make_env(tmp_path)
@@ -278,13 +294,43 @@ class TestPollReleasesInit:
         new_lock = locks_dir / "release-announce-v0.9.0.json"
         assert new_lock.exists(), "应为新 tag 创建锁"
 
+    def test_init_api_failure_exits_nonzero(self, tmp_path):
+        """--init API 调用失败时应 exit 非零（禁静默半自举）"""
+        env = _make_env(tmp_path)
+        locks_dir = Path(env["LOCKS_DIR"])
+
+        # 创建会失败的 stub gh
+        stub_gh = tmp_path / "gh"
+        stub_gh.write_text("#!/bin/bash\necho 'API error' >&2\nexit 1\n")
+        stub_gh.chmod(0o755)
+
+        result = subprocess.run(
+            [str(SCRIPT_PATH), "--init"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        assert result.returncode != 0, "--init API 失败时应 exit 非零（禁静默半自举）"
+
+        # 不应落哨兵
+        sentinel = locks_dir / ".poll-bootstrap-done"
+        assert not sentinel.exists(), "API 失败时不应落哨兵"
+
+        # 应记录错误日志
+        log_file = Path(env["LOG_DIR"]) / "poll-releases.log"
+        assert log_file.exists()
+        log_content = log_file.read_text()
+        assert "ERROR" in log_content or "失败" in log_content
+
 
 class TestPollReleasesAPIError:
     """VAL-ANN-029: API 容错"""
 
     def test_api_failure_logs_and_exits_zero(self, tmp_path):
-        """API 调用失败时，记录日志并 exit 0"""
-        env = _make_env(tmp_path)
+        """正常模式 API 调用失败时，记录日志并 exit 0"""
+        env = _make_env(tmp_path, with_sentinel=True)
 
         # 创建会失败的 stub gh
         stub_gh = tmp_path / "gh"
@@ -299,7 +345,7 @@ class TestPollReleasesAPIError:
             timeout=10,
         )
 
-        assert result.returncode == 0, "API 失败时应 exit 0（不 crash loop）"
+        assert result.returncode == 0, "正常模式 API 失败时应 exit 0（不 crash loop）"
 
         # 应记录错误日志
         log_file = Path(env["LOG_DIR"]) / "poll-releases.log"
@@ -308,12 +354,92 @@ class TestPollReleasesAPIError:
         assert "ERROR" in log_content or "失败" in log_content
 
 
+class TestPollReleasesSentinel:
+    """VAL-ANN-029: 哨兵机制"""
+
+    def test_sentinel_missing_blocks_dispatch(self, tmp_path):
+        """正常模式：无哨兵时禁绝派发（exit 0 但记错误日志）"""
+        env = _make_env(tmp_path, with_sentinel=False)
+
+        # 创建 stub gh（返回 release）
+        releases = [
+            {
+                "tag_name": "v1.0.0",
+                "draft": False,
+                "html_url": "https://github.com/hdot123-org/infra-core/releases/tag/v1.0.0",
+            }
+        ]
+        _create_stub_gh(tmp_path, releases)
+
+        # 创建 stub trigger（不应被调用）
+        capture_file = tmp_path / "trigger_calls.log"
+        _create_stub_trigger(tmp_path, capture_file)
+        env["TRIGGER_SCRIPT"] = str(tmp_path / "trigger-release.sh")
+
+        result = subprocess.run(
+            [str(SCRIPT_PATH)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        # 应 exit 0（不 crash loop），但不应派发
+        assert result.returncode == 0, "无哨兵时应 exit 0"
+
+        # trigger 不应被调用
+        if capture_file.exists():
+            calls = capture_file.read_text().strip()
+            assert calls == "", f"无哨兵时不应调用 trigger，实际调用：{calls}"
+
+        # 应记录错误日志
+        log_file = Path(env["LOG_DIR"]) / "poll-releases.log"
+        assert log_file.exists()
+        log_content = log_file.read_text()
+        assert "哨兵" in log_content or "sentinel" in log_content.lower()
+
+    def test_sentinel_present_allows_dispatch(self, tmp_path):
+        """正常模式：有哨兵且 tag 无锁时，应正常派发"""
+        env = _make_env(tmp_path, with_sentinel=True)
+
+        # 创建 stub gh（返回 release）
+        releases = [
+            {
+                "tag_name": "v1.0.0",
+                "draft": False,
+                "html_url": "https://github.com/hdot123-org/infra-core/releases/tag/v1.0.0",
+            }
+        ]
+        _create_stub_gh(tmp_path, releases)
+
+        # 创建 stub trigger（应被调用）
+        capture_file = tmp_path / "trigger_calls.log"
+        _create_stub_trigger(tmp_path, capture_file)
+        env["TRIGGER_SCRIPT"] = str(tmp_path / "trigger-release.sh")
+
+        result = subprocess.run(
+            [str(SCRIPT_PATH)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        assert result.returncode == 0, "有哨兵时应成功退出"
+
+        # trigger 应被调用
+        assert capture_file.exists(), "有哨兵时 trigger 应被调用"
+        calls = capture_file.read_text().strip()
+        assert calls != "", "有哨兵且 tag 无锁时应派发"
+        assert "v1.0.0" in calls
+
+
 class TestPollReleasesListStyle:
     """VAL-ANN-029: 列表式轮询，latest 与非 latest 一视同仁"""
 
     def test_discovers_all_non_draft_releases(self, tmp_path):
         """遍历全部非 draft release，不区分 latest"""
-        env = _make_env(tmp_path)
+        env = _make_env(tmp_path, with_sentinel=True)
 
         # 创建 stub gh（返回多个 release，含非 latest）
         releases = [
@@ -362,7 +488,7 @@ class TestPollReleasesListStyle:
 
     def test_skips_draft_releases(self, tmp_path):
         """跳过 draft release"""
-        env = _make_env(tmp_path)
+        env = _make_env(tmp_path, with_sentinel=True)
 
         # 创建 stub gh（含 draft）
         releases = [
@@ -428,7 +554,7 @@ class TestPollReleasesShellQuality:
 
     def test_bash_3_2_compatible(self, tmp_path):
         """bash 3.2 运行时兼容"""
-        env = _make_env(tmp_path)
+        env = _make_env(tmp_path, with_sentinel=True)
 
         # 创建 stub gh
         releases = [{"tag_name": "v1.0.0", "draft": False, "html_url": "https://example.com"}]
