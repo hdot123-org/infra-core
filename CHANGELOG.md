@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.12.0](https://github.com/hdot123-org/infra-core/compare/v0.11.1...v0.12.0) (2026-09-05)
+
+
+### Features
+
+* **release:** add error isolation and timeout handling ([#215](https://github.com/hdot123-org/infra-core/issues/215)) ([6cfd4d3](https://github.com/hdot123-org/infra-core/commit/6cfd4d34b55d15c31b6e82ba8a3ed8c25b569896))
+* **webhook:** 新增 trigger-release.sh 发版公告触发脚本 (INFRA-753) ([#213](https://github.com/hdot123-org/infra-core/issues/213)) ([35459d0](https://github.com/hdot123-org/infra-core/commit/35459d00144fbf9f86e8465144fb3d2242ea8443))
+* 实现轮询触发面 poll-releases.sh 与文档同步 ([#219](https://github.com/hdot123-org/infra-core/issues/219)) ([fbf4630](https://github.com/hdot123-org/infra-core/commit/fbf463058ccbe48e67d18aba4670453f4bba4a4c))
+* 新增 release-announce 工作流与契约测试 (INFRA-754) ([#212](https://github.com/hdot123-org/infra-core/issues/212)) ([5bb512a](https://github.com/hdot123-org/infra-core/commit/5bb512ae01bd7e77a70ea17412d272493eb1e5b7))
+
+
+### Bug Fixes
+
+* **announce:** 支持 Cloudflare Access Service Token 可选头 + onboarding 三处纠偏 ([#218](https://github.com/hdot123-org/infra-core/issues/218)) ([89df0e8](https://github.com/hdot123-org/infra-core/commit/89df0e86acd040705e9219b381544164109d1393))
+* **poll:** 加固 poll-releases.sh 自举失败语义与哨兵机制 (INFRA-762) ([#220](https://github.com/hdot123-org/infra-core/issues/220)) ([f5668ca](https://github.com/hdot123-org/infra-core/commit/f5668cafcb8014fb46e20a2944e85c8e48b8a438))
+* **webhook:** select_consumers() 对 repoPath 做 os.path.expanduser 展开 (INFRA-758) ([#216](https://github.com/hdot123-org/infra-core/issues/216)) ([2a10205](https://github.com/hdot123-org/infra-core/commit/2a1020508983799633c5308239969489c52f2e2b))
+
+
+### Documentation
+
+* README 增加发版公告链路与轮询触发面说明 (INFRA-764) ([#222](https://github.com/hdot123-org/infra-core/issues/222)) ([f075d3a](https://github.com/hdot123-org/infra-core/commit/f075d3aab4b49d4fb8f380c5b646d5eae611ca70))
+* 固化发版公告接入标准与文档契约测试 (INFRA-760) ([#217](https://github.com/hdot123-org/infra-core/issues/217)) ([c92de37](https://github.com/hdot123-org/infra-core/commit/c92de3747f392bc007de4e85329179c2acf9ea38))
+* 固化权限同步守则 (INFRA-764) ([#221](https://github.com/hdot123-org/infra-core/issues/221)) ([161b9d0](https://github.com/hdot123-org/infra-core/commit/161b9d0e0ba103432d0437c570b6b23691045381))
+
 ## [0.11.1](https://github.com/hdot123-org/infra-core/compare/v0.11.0...v0.11.1) (2026-09-04)
 
 
