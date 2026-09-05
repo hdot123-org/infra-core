@@ -22,6 +22,10 @@ from typing import Any
 REQUIRED_FINDING_FIELDS = {"severity", "file", "line", "message"}
 VALID_SEVERITIES = {"P0", "P1", "P2", "P3"}
 
+# Marker for cross-run dedup: summary comments contain this marker so reruns
+# can detect and skip/update instead of duplicating.
+SUMMARY_MARKER = "<!-- droid-review-summary -->"
+
 
 def validate_findings(data: dict[str, Any]) -> bool:
     """
@@ -126,6 +130,74 @@ def load_findings_files(pattern: str) -> list[dict[str, Any]]:
     return all_findings
 
 
+def find_existing_summary_comment(pr_number: int, repository: str) -> int | None:
+    """
+    Retrieve existing PR comments and find one containing the SUMMARY_MARKER.
+
+    Returns the comment ID if found, None otherwise.
+    This enables cross-run dedup: reruns skip posting if marker already exists.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "api",
+                f"repos/{repository}/issues/{pr_number}/comments",
+            ],
+            capture_output=True,
+            check=True,
+        )
+        comments = json.loads(result.stdout.decode())
+        for comment in comments:
+            body = comment.get("body", "")
+            if SUMMARY_MARKER in body:
+                comment_id = comment.get("id")
+                if isinstance(comment_id, int):
+                    return comment_id
+    except (
+        subprocess.CalledProcessError,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as e:
+        # Fail-open for dedup: if we can't retrieve, just post normally
+        print(f"Warning: could not retrieve existing comments for dedup: {e}", file=sys.stderr)
+    return None
+
+
+def find_existing_inline_comments(pr_number: int, repository: str) -> set[tuple[str, int]]:
+    """
+    Retrieve existing PR review comments and return set of (path, line) tuples.
+
+    This enables cross-run dedup: reruns skip posting if same location already commented.
+    """
+    existing = set()
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "api",
+                f"repos/{repository}/pulls/{pr_number}/comments",
+            ],
+            capture_output=True,
+            check=True,
+        )
+        comments = json.loads(result.stdout.decode())
+        for comment in comments:
+            path = comment.get("path")
+            line = comment.get("line")
+            if path and line:
+                existing.add((path, int(line)))
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, ValueError) as e:
+        # Fail-open for dedup: if we can't retrieve, just post normally
+        print(
+            f"Warning: could not retrieve existing inline comments for dedup: {e}",
+            file=sys.stderr,
+        )
+    return existing
+
+
 def post_inline_comment(
     finding: dict[str, Any],
     pr_number: int,
@@ -133,10 +205,18 @@ def post_inline_comment(
     commit_id: str,
 ) -> bool:
     """
-    Post inline review comment on PR.
+    Post inline review comment on PR (with cross-run dedup).
 
-    Returns True if successful, False if API call failed.
+    Checks for existing comments at the same (file, line) before posting.
+    Returns True if successful or skipped (dedup), False if API call failed.
     """
+    # Cross-run dedup: skip if same (file, line) already has a comment
+    existing = find_existing_inline_comments(pr_number, repository)
+    key = (finding["file"], finding["line"])
+    if key in existing:
+        print(f"  ⊘ Skipped (already exists): {finding['file']}:{finding['line']}")
+        return True
+
     body = f"**[{finding['severity']}]** {finding['message']}"
 
     payload = {
@@ -180,13 +260,21 @@ def post_summary_comment(
     by_shard: dict[int, list[dict[str, Any]]],
 ) -> bool:
     """
-    Post summary comment on PR with findings grouped by shard.
+    Post summary comment on PR with findings grouped by shard (with cross-run dedup).
 
-    Returns True if successful.
+    Checks for existing summary comment marker before posting.
+    Returns True if successful or skipped (dedup).
     """
+    # Cross-run dedup: skip if summary comment already exists
+    existing_comment_id = find_existing_summary_comment(pr_number, repository)
+    if existing_comment_id is not None:
+        print(f"  ⊘ Skipped summary (already exists, id={existing_comment_id})")
+        return True
+
     total_counts = count_by_severity(findings)
 
     body_lines = [
+        SUMMARY_MARKER,
         "## 🔍 Droid Auto Review — Findings Summary",
         "",
         f"**Total findings**: {len(findings)}",
