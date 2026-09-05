@@ -39,6 +39,7 @@ MANAGED_FILES=(
     "webhook-hygiene.sh"
     "local_branch_cleanup.sh"
     "write_comment.py"
+    "drift-gate.sh"
 )
 
 # lib/ 子目录下的受管文件（source 依赖，非独立脚本）
