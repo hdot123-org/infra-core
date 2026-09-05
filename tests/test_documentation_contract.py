@@ -339,3 +339,52 @@ def test_architecture_dual_trigger_idempotent():
     assert re.search(
         r"(?:幂等.*锁|idempotent.*lock|只派发一次|only\s+dispatch\s+once)", content, re.IGNORECASE
     ), "Must clarify that idempotent lock ensures only one dispatch per tag"
+
+
+def test_onboarding_permission_sync_covenant_section_exists():
+    """VAL-DS-036: consumer-onboarding.md 必须含权限同步守则节（§7）。
+
+    引擎可复用 workflow 顶层 permissions 新增条目时，消费方薄调用方必须同步放行，
+    否则 reusable-workflow 权限子集规则不满足 → startup_failure。
+    """
+    content = _load_onboarding()
+
+    # 必须存在权限同步守则章节
+    pattern = r"^##\s+\d+\.\s+.*(?:权限同步|permissions?.*sync|reusable.*workflow.*permissions).*"
+    match = re.search(pattern, content, re.MULTILINE | re.IGNORECASE)
+    assert match is not None, (
+        "consumer-onboarding.md must contain a section about reusable workflow permissions sync covenant"
+    )
+
+
+def test_onboarding_permission_sync_covenant_content():
+    """VAL-DS-036: 权限同步守则必须包含核心原则与实例。
+
+    核心原则：调用方授予集必须覆盖 callee 顶层声明集。
+    实例：infra-core v0.11.1 actions: read 事件。
+    """
+    content = _load_onboarding()
+
+    # 核心原则：caller 必须覆盖 callee 权限
+    assert re.search(
+        r"(?:调用方.*覆盖|caller.*cover|授予集.*覆盖|permissions.*子集|startup_failure)",
+        content,
+        re.IGNORECASE,
+    ), (
+        "Permission sync covenant must state that caller permissions must cover "
+        "callee top-level permissions to avoid startup_failure"
+    )
+
+    # 实例：actions: read
+    assert re.search(r"actions:\s*read", content), (
+        "Permission sync covenant must mention the actions: read instance from infra-core v0.11.1"
+    )
+
+    # 实操规则：升级引擎 pin 时核对
+    assert re.search(
+        r"(?:升级.*pin.*核对|upgrade.*pin.*check|升级.*infra-core.*核对)",
+        content,
+        re.IGNORECASE,
+    ), (
+        "Permission sync covenant must include the rule to verify caller permissions when upgrading infra-core pin"
+    )
