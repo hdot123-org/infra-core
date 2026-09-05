@@ -107,6 +107,46 @@ def test_onboarding_platform_behavior_limitation():
     )
 
 
+def test_onboarding_retry_window_clarification():
+    """M2 scrutiny 纠偏 3a：必须明确重试窗口仅限 run 内 15-30s（--retry 3），窗口级离线不重试不补发。"""
+    content = _load_onboarding()
+
+    # 必须提及 run 内有限重试（--retry 3 / 15-30s）
+    assert re.search(
+        r"(?:run\s+内.*有限.*重试|15-30s.*curl.*重试|--retry\s+3)",
+        content,
+        re.IGNORECASE,
+    ), (
+        "Must clarify retry window: run-level 15-30s curl retry (--retry 3), window-level offline not retried"
+    )
+
+
+def test_onboarding_dirty_tree_tracked_scope():
+    """M2 scrutiny 纠偏 3b：必须说明工作树脏检测仅覆盖 tracked 改动，untracked 不拦截。"""
+    content = _load_onboarding()
+
+    # 必须说明 dirty tree detection 仅覆盖 tracked 文件
+    assert re.search(
+        r"(?:工作树脏检测.*覆盖\s+tracked|untracked\s+文件不拦截|tracked.*改动.*untracked.*不拦截)",
+        content,
+        re.IGNORECASE,
+    ), "Must clarify dirty tree detection covers tracked changes only, untracked files not blocked"
+
+
+def test_onboarding_cloudflare_access_limitation():
+    """M2 scrutiny 纠偏 3c：必须说明公网公告当前被 Cloudflare Access 拦 302，Service Token 生效前兜底=手动 reconcile。"""
+    content = _load_onboarding()
+
+    # 必须提及 Cloudflare Access 302 与 Service Token
+    assert re.search(
+        r"(?:Cloudflare\s+Access.*302|Service\s+Token.*兜底|CF-Access-Client-Id)",
+        content,
+        re.IGNORECASE,
+    ), (
+        "Must mention Cloudflare Access 302 limitation and Service Token fallback to manual reconcile"
+    )
+
+
 def test_onboarding_no_exaggerated_claims():
     """文档不得含夸大措辞（"必达" / "保证送达" / "100%" 类关键词零命中）。"""
     content = _load_onboarding()

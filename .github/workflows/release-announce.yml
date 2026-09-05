@@ -37,6 +37,8 @@ jobs:
           BROADCAST_URL: ${{ secrets.RELEASE_BROADCAST_URL }}
           BROADCAST_TOKEN: ${{ secrets.RELEASE_BROADCAST_TOKEN }}
           POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           TAG: ${{ github.event.release.tag_name }}
           REPO: ${{ github.repository }}
           RELEASE_URL: ${{ github.event.release.html_url }}
@@ -60,12 +62,19 @@ jobs:
             --arg sha "$SHA" \
             '{repo:$repo, tag:$tag, release_url:$release_url, sha:$sha}')
 
+          # Cloudflare Access Service Token 头：secrets 已配置时注入，未配置时跳过（零行为变化）
+          CF_HEADER_ARGS=()
+          if [ -n "${CF_ACCESS_CLIENT_ID:-}" ] && [ -n "${CF_ACCESS_CLIENT_SECRET:-}" ]; then
+            CF_HEADER_ARGS=(-H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}")
+          fi
+
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             --retry 3 --retry-delay 5 --retry-all-errors \
             --max-time 30 \
             -X POST "$BROADCAST_URL" \
             -H "Content-Type: application/json" \
             -H "X-Release-Token: ${BROADCAST_TOKEN}" \
+            "${CF_HEADER_ARGS[@]+"${CF_HEADER_ARGS[@]}"}" \
             -d "$PAYLOAD") || HTTP_CODE="000"
 
           if ! echo "$HTTP_CODE" | grep -qE '^2[0-9]{2}$'; then
