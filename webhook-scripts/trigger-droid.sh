@@ -329,7 +329,7 @@ write_linear_comment() {
     log "Writing comment to Linear issue $issue_uuid..."
     local tmpfile="/tmp/_linear_comment_$$.txt"
     echo "$body" > "$tmpfile"
-    /opt/homebrew/bin/python3 /Users/busiji/.factory/webhook/scripts/write_comment.py \
+    /opt/homebrew/bin/python3 "${SCRIPT_DIR}/write_comment.py" \
         "$issue_uuid" "$LINEAR_API_KEY" "$tmpfile" >> "$LOG_FILE" 2>&1
     local rc=$?
     rm -f "$tmpfile"
