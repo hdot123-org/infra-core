@@ -17,6 +17,18 @@ infra-core 是从 memory-core 抽离的组织级共享引擎，提供：
 
 要求 Python 3.12（`requires-python = "==3.12.*"` 锁定）。
 
+### 获取 Python 3.12
+
+```bash
+# 方式一：Homebrew
+brew install python@3.12
+
+# 方式二：uv（推荐的 Python 版本管理器）
+uv python install 3.12
+```
+
+### 安装 infra-core
+
 ```bash
 # 从源码安装（开发模式）
 pip install -e .
@@ -39,7 +51,7 @@ infra-cli --help
 # 扫描仓库（只读模式，不创建 issue）
 infra-cli scan --report-only --repo-root /path/to/repo
 
-# 审计
+# 审计（尚未实现，cli.py 当前固定 return 1）
 infra-cli audit --target /path/to/project
 
 # 版本同步
@@ -102,6 +114,22 @@ infra-core/
 ```
 
 ## 开发
+
+### 版本对齐说明
+
+CI 通过 `runner-tools.toml` 固定工具版本（见 `[tools]` 段）。本地开发建议与 CI 对齐：
+
+```bash
+# ruff：CI 钉 0.16.3，本地建议安装同版本
+pip install ruff==0.16.3
+
+# actionlint / shellcheck：CI 使用宿主二进制，本地需单独安装
+brew install actionlint shellcheck
+```
+
+版本不一致可能导致本地通过但 CI 失败（或反之），以 CI 为准。
+
+### 本地开发流程
 
 ```bash
 # 安装开发依赖

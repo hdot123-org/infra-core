@@ -263,6 +263,8 @@ gh api repos/hdot123-org/memory-core/hooks/632882064 -X PATCH \
 
 ## §7 域名切换 runbook（VAL-WPARITY-004）
 
+> **⚠️ 已废弃**：本仓已于 2026-09-03 将 webhook 入口移交 wangguan 网关（见上方 §6.7 移交说明）。本节内容仅作历史存档保留，其中的 wrangler deploy 等操作步骤**不应再执行**。如需恢复路由能力，请参见 wangguan 网关对应文档。
+
 > **✅ 域名切换已于 2026-09-02 执行完成（用户批准："直接把n8n域名切换，准备切断域名"）。**
 > 生产统一入口 `webhook.exa.edu.kg/*` 现由本 Worker 承接（CF Workers Route，zone exa.edu.kg）；
 > n8n 停收（execution 计数自 12:25:41Z 冻结），cloudflared tunnel 保持运行作为即时回滚通道。
@@ -411,6 +413,8 @@ gh api repos/hdot123-org/memory-core/hooks/632882064 -X PATCH \
 
 ### DNS 切换
 
+> **⚠️ 已废弃**：本仓 webhook 入口已移交 wangguan 网关，以下 DNS 切换步骤不再适用，保留作历史存档。
+
 > **注意：本里程碑不绑定生产域名。如需切换，需修改 wrangler.toml 并重新部署。**
 
 ```toml
@@ -452,6 +456,8 @@ npx wrangler deploy
    ```
 
 ### 回滚步骤
+
+> **⚠️ 已废弃**：本仓 webhook 入口已移交 wangguan 网关，以下回滚步骤不再适用，保留作历史存档。如需回滚，请参见 wangguan 网关对应文档。
 
 1. **恢复 DNS 指向 n8n**
    ```bash
