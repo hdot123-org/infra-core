@@ -352,7 +352,7 @@ class TestGateNeverTriggersSync:
             # Skip pure variable assignments where the value is just a path
             # (e.g., SYNC_SCRIPT="${REPO_ROOT}/webhook-scripts/sync-webhook-scripts.sh")
             # These set the variable, they don't invoke it.
-            if re.match(r'^[A-Z_]+=', stripped) and "(" not in stripped:
+            if re.match(r"^[A-Z_]+=", stripped) and "(" not in stripped:
                 continue
             # Check for actual invocations of $SYNC_SCRIPT
             # Must catch:
@@ -363,19 +363,19 @@ class TestGateNeverTriggersSync:
             #   - File tests: [[ -f "$SYNC_SCRIPT" ]]
             #   - Error messages: gate_invalid "...", log "..."
             #   - Variable assignments: SYNC_SCRIPT="..."
-            
+
             # Check for command invocation patterns
             is_invocation = (
-                re.search(r'\b(bash|sh)\s+"\$SYNC_SCRIPT"', line) or  # bash "$SYNC_SCRIPT"
-                re.search(r'^\s*"\$SYNC_SCRIPT"', line) or  # "$SYNC_SCRIPT" at start
-                re.search(r'\$\(\s*(bash|sh)?\s*"\$SYNC_SCRIPT"', line)  # $(bash "$SYNC_SCRIPT"
+                re.search(r'\b(bash|sh)\s+"\$SYNC_SCRIPT"', line)  # bash "$SYNC_SCRIPT"
+                or re.search(r'^\s*"\$SYNC_SCRIPT"', line)  # "$SYNC_SCRIPT" at start
+                or re.search(r'\$\(\s*(bash|sh)?\s*"\$SYNC_SCRIPT"', line)  # $(bash "$SYNC_SCRIPT"
             )
-            
+
             if is_invocation:
                 assert "--check" in line, (
                     f"drift-gate.sh:{i} invokes $SYNC_SCRIPT without --check: {line!r}"
                 )
-            
+
             # Also check for sync-webhook-scripts.sh invocations (not in assignments or messages)
             if re.search(r"\bsync-webhook-scripts\.sh\b", line):
                 # Skip if it's a variable assignment
@@ -384,7 +384,7 @@ class TestGateNeverTriggersSync:
                 # Skip if it's inside quotes (likely an error message)
                 if re.search(r'["\'].*sync-webhook-scripts\.sh.*["\']', line):
                     # Check if there's an actual invocation before the quoted part
-                    if not re.search(r'\b(bash|sh)\s+.*sync-webhook-scripts\.sh', line):
+                    if not re.search(r"\b(bash|sh)\s+.*sync-webhook-scripts\.sh", line):
                         continue
                 assert "--check" in line, (
                     f"drift-gate.sh:{i} invokes sync-webhook-scripts.sh without --check: {line!r}"
