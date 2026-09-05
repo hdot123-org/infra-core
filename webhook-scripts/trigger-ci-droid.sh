@@ -822,7 +822,7 @@ except Exception as e:
     exit 0
 fi
 
-# Update fingerprint lock with resolved session_id
+# Build fingerprint key from resolved session_id (log-only; lock file already acquired above)
 FINGERPRINT_KEY="${SESSION_ID}:${PR_NUMBER}"
 log "Final fingerprint key: $FINGERPRINT_KEY (SESSION_ID=$SESSION_ID)"
 

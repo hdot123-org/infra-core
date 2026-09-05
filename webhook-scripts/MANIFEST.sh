@@ -38,6 +38,7 @@ MANAGED_FILES=(
     "ci-failed.sh"
     "webhook-hygiene.sh"
     "local_branch_cleanup.sh"
+    "write_comment.py"
 )
 
 # lib/ 子目录下的受管文件（source 依赖，非独立脚本）
