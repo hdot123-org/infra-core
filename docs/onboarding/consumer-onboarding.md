@@ -185,7 +185,36 @@ release-please 还是人工发布、无论 minor 还是 patch）。
 **工作树脏检测范围**：仅覆盖 tracked 改动（git status --porcelain 检测已跟踪文件的修改/删除），
 untracked 文件不拦截派发（会话层保护兜底，session 8c635f22 实证无害）。
 
-## 7. 验证接入
+## 7. 权限同步守则（Reusable Workflow Permissions）
+
+消费仓若通过 thin-caller workflow 调用 infra-core 的 reusable workflow（如
+`auto-merge-pipeline.yml`、`evolution-scan-pipeline.yml` 等），必须遵守以下权限同步原则：
+
+**原则**：调用方（consumer thin-caller）授予的权限集合必须**覆盖**被调用的可复用 workflow（callee）
+顶层声明的全部权限。GitHub Actions 要求 reusable workflow 的权限必须是 caller 权限的子集，
+否则会导致 `startup_failure`（0-1s 零 job）。
+
+**实操规则**：
+1. 当 infra-core 可复用 workflow 顶层新增 `permissions` 条目时，消费方薄调用方必须同步放行对应权限
+2. 调用方的 job-level permissions 同样需要覆盖 callee 所需集合
+3. 升级 infra-core pin 版本时，必须核对 callee 顶层权限 vs 调用方授予集
+
+**实例**：infra-core v0.11.1 在 `auto-merge-pipeline.yml` 顶层新增 `permissions: actions: read`，
+memory 仓的 `auto-merge.yml` 调用方 job 权限原为 `contents: write / pull-requests: write / checks: read`，
+缺少 `actions: read`，导致 main 上 Auto Merge 自 2026-09-04T23:20:46Z 起连续 `startup_failure`。
+修复：memory `auto-merge.yml` 顶层块与 job 级 permissions 均补 `actions: read`。
+
+**检查方法**：升级 infra-core pin 后，执行：
+```bash
+# 查看 callee 顶层 permissions
+gh api repos/hdot123-org/infra-core/contents/.github/workflows/<callee>.yml \
+  --jq '.content' | base64 -d | grep -A 10 "^permissions:"
+
+# 对比 caller 的 job-level permissions
+grep -A 10 "permissions:" .github/workflows/<caller>.yml
+```
+
+## 8. 验证接入
 
 ```bash
 # 模板静态检查
