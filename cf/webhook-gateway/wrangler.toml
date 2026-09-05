@@ -15,11 +15,12 @@ account_id = "97d8129421b7b8e445718ff9891be1d9"
 # ===========================================================================
 
 # 2026-09-02 域名切换（用户批准）：统一入口 webhook.exa.edu.kg/* 由本 Worker 承接。
-# 回滚 = 删除本 routes 块并重新 deploy（流量立即回到 cloudflared tunnel → n8n）。
 # [2026-09-03 存档标注] 上述切换已被 wangguan 网关接管取代，本 routes 块为历史记录。
-routes = [
-  { pattern = "webhook.exa.edu.kg/*", zone_name = "exa.edu.kg" }
-]
+# [2026-09-06 去激活] routes 块已注释化，禁止直接 deploy 本目录。
+# 如需恢复流量见 DEPLOYMENT.md 存档说明，禁止直接 deploy 本目录。
+# routes = [
+#   { pattern = "webhook.exa.edu.kg/*", zone_name = "exa.edu.kg" }
+# ]
 workers_dev = true  # 保留 workers.dev 直连端点（A/B 差分与旁路探针用）
 
 # Cron: every 10 minutes — repository_dispatch 兜底 + 心跳
