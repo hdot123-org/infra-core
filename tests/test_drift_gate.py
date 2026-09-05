@@ -113,7 +113,17 @@ def fixture_repo(tmp_path):
     eng.mkdir(parents=True)
     (eng / "extract_anchor.py").write_text("# engine source A\n")
 
-    # Initial commit
+    # Initial commit (set user config — CI runners may lack global defaults)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "test@example.com"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.name", "Test"],
+        check=True,
+        capture_output=True,
+    )
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True, capture_output=True)
     subprocess.run(
         ["git", "-C", str(repo), "commit", "-m", "initial"], check=True, capture_output=True
@@ -200,6 +210,16 @@ class TestGateInvalid:
         subprocess.run(["git", "clone", str(bare), str(temp)], check=True, capture_output=True)
         subprocess.run(
             ["git", "-C", str(temp), "checkout", "main"], check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "-C", str(temp), "config", "user.email", "test@example.com"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(temp), "config", "user.name", "Test"],
+            check=True,
+            capture_output=True,
         )
         (temp / "marker.txt").write_text("new commit on remote")
         subprocess.run(["git", "-C", str(temp), "add", "."], check=True, capture_output=True)
