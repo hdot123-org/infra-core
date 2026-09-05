@@ -130,10 +130,34 @@ def load_findings_files(pattern: str) -> list[dict[str, Any]]:
     return all_findings
 
 
+def _parse_paginated_json(output: str) -> list[dict[str, Any]]:
+    """Parse gh api --paginate output, which may be one or more JSON arrays.
+
+    gh --paginate concatenates page outputs. For list endpoints each page
+    is a JSON array; the combined output is either a single array or
+    multiple arrays on separate lines. This helper handles both forms.
+    """
+    items: list[dict[str, Any]] = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, list):
+            items.extend(parsed)
+        elif isinstance(parsed, dict):
+            items.append(parsed)
+    return items
+
+
 def find_existing_summary_comment(pr_number: int, repository: str) -> int | None:
     """
     Retrieve existing PR comments and find one containing the SUMMARY_MARKER.
 
+    Uses --paginate to fetch all pages (GitHub defaults to 30 per page).
     Returns the comment ID if found, None otherwise.
     This enables cross-run dedup: reruns skip posting if marker already exists.
     """
@@ -143,11 +167,12 @@ def find_existing_summary_comment(pr_number: int, repository: str) -> int | None
                 "gh",
                 "api",
                 f"repos/{repository}/issues/{pr_number}/comments",
+                "--paginate",
             ],
             capture_output=True,
             check=True,
         )
-        comments = json.loads(result.stdout.decode())
+        comments = _parse_paginated_json(result.stdout.decode())
         for comment in comments:
             body = comment.get("body", "")
             if SUMMARY_MARKER in body:
@@ -170,6 +195,7 @@ def find_existing_inline_comments(pr_number: int, repository: str) -> set[tuple[
     """
     Retrieve existing PR review comments and return set of (path, line) tuples.
 
+    Uses --paginate to fetch all pages (GitHub defaults to 30 per page).
     This enables cross-run dedup: reruns skip posting if same location already commented.
     """
     existing = set()
@@ -179,11 +205,12 @@ def find_existing_inline_comments(pr_number: int, repository: str) -> set[tuple[
                 "gh",
                 "api",
                 f"repos/{repository}/pulls/{pr_number}/comments",
+                "--paginate",
             ],
             capture_output=True,
             check=True,
         )
-        comments = json.loads(result.stdout.decode())
+        comments = _parse_paginated_json(result.stdout.decode())
         for comment in comments:
             path = comment.get("path")
             line = comment.get("line")

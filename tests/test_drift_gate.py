@@ -332,27 +332,60 @@ class TestGateNeverTriggersSync:
     """VAL-GATE-002: Gate must NEVER call sync without --check."""
 
     def test_no_sync_call_in_script(self):
-        """The script source must not invoke sync-webhook-scripts.sh without --check."""
+        """The script source must not invoke sync-webhook-scripts.sh without --check.
+
+        VAL-GATE-002: Gate must NEVER call sync without --check.
+        Scans every non-comment, non-pure-assignment line of drift-gate.sh
+        for $SYNC_SCRIPT usage and asserts --check is present.
+
+        This catches both direct invocations (bash "$SYNC_SCRIPT" ...)
+        and command substitutions (VAR="$(bash "$SYNC_SCRIPT" ...)").
+        """
         text = DRIFT_GATE_PATH.read_text(encoding="utf-8")
         import re
 
         for i, line in enumerate(text.splitlines(), 1):
-            # Skip comments
-            if line.strip().startswith("#"):
-                continue
-            # Skip variable assignments (SYNC_SCRIPT=...)
-            if "=" in line and not line.strip().startswith(("bash", "$", '"$')):
-                continue
-            # Only check actual invocations: lines starting with bash/exec/source
-            # or lines that run $SYNC_SCRIPT as a command (not in [[ ]] tests)
             stripped = line.strip()
-            if stripped.startswith(("bash ", "exec ", "source ")):
-                if re.search(r"\$SYNC_SCRIPT|sync-webhook-scripts\.sh", line):
-                    assert "--check" in line, (
-                        f"drift-gate.sh line {i} invokes sync without --check: {line!r}"
-                    )
-            # Also catch direct invocation like: "$SYNC_SCRIPT" --check
-            elif re.search(r'^(bash\s+)?"\$SYNC_SCRIPT"', stripped):
+            # Skip comments
+            if stripped.startswith("#"):
+                continue
+            # Skip pure variable assignments where the value is just a path
+            # (e.g., SYNC_SCRIPT="${REPO_ROOT}/webhook-scripts/sync-webhook-scripts.sh")
+            # These set the variable, they don't invoke it.
+            if re.match(r"^[A-Z_]+=", stripped) and "(" not in stripped:
+                continue
+            # Check for actual invocations of $SYNC_SCRIPT
+            # Must catch:
+            #   - bash "$SYNC_SCRIPT" --check ...
+            #   - "$SYNC_SCRIPT" --check ...
+            #   - VAR="$(bash "$SYNC_SCRIPT" ...)" (was previously missed!)
+            # Must NOT catch:
+            #   - File tests: [[ -f "$SYNC_SCRIPT" ]]
+            #   - Error messages: gate_invalid "...", log "..."
+            #   - Variable assignments: SYNC_SCRIPT="..."
+
+            # Check for command invocation patterns
+            is_invocation = (
+                re.search(r'\b(bash|sh)\s+"\$SYNC_SCRIPT"', line)  # bash "$SYNC_SCRIPT"
+                or re.search(r'^\s*"\$SYNC_SCRIPT"', line)  # "$SYNC_SCRIPT" at start
+                or re.search(r'\$\(\s*(bash|sh)?\s*"\$SYNC_SCRIPT"', line)  # $(bash "$SYNC_SCRIPT"
+            )
+
+            if is_invocation:
                 assert "--check" in line, (
-                    f"drift-gate.sh line {i} invokes sync without --check: {line!r}"
+                    f"drift-gate.sh:{i} invokes $SYNC_SCRIPT without --check: {line!r}"
+                )
+
+            # Also check for sync-webhook-scripts.sh invocations (not in assignments or messages)
+            if re.search(r"\bsync-webhook-scripts\.sh\b", line):
+                # Skip if it's a variable assignment
+                if re.match(r"^[A-Z_]+=", stripped):
+                    continue
+                # Skip if it's inside quotes (likely an error message)
+                if re.search(r'["\'].*sync-webhook-scripts\.sh.*["\']', line):
+                    # Check if there's an actual invocation before the quoted part
+                    if not re.search(r"\b(bash|sh)\s+.*sync-webhook-scripts\.sh", line):
+                        continue
+                assert "--check" in line, (
+                    f"drift-gate.sh:{i} invokes sync-webhook-scripts.sh without --check: {line!r}"
                 )

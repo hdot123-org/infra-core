@@ -62,32 +62,32 @@
     },
     {
       "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
-      "location": "actions/droid-review-aggregate/publish_findings.py::L201 <-> src/infra_core/engine/droid_re.b8a8ab10",
+      "location": "actions/droid-review-aggregate/publish_findings.py::L228 <-> src/infra_core/engine/droid_re.21ff75a9",
       "expires": "2099-12-31"
     },
     {
       "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
-      "location": "src/infra_core/engine/droid_review/publish_findings.py::L201 <-> actions/droid-review-aggre.bb909a0f",
+      "location": "src/infra_core/engine/droid_review/publish_findings.py::L228 <-> actions/droid-review-aggre.4f4ed11a",
       "expires": "2099-12-31"
     },
     {
       "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
-      "location": "actions/droid-review-aggregate/publish_findings.py::L256 <-> src/infra_core/engine/droid_re.904c1bec",
+      "location": "actions/droid-review-aggregate/publish_findings.py::L283 <-> src/infra_core/engine/droid_re.952715f0",
       "expires": "2099-12-31"
     },
     {
       "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
-      "location": "src/infra_core/engine/droid_review/publish_findings.py::L256 <-> actions/droid-review-aggre.827d706d",
+      "location": "src/infra_core/engine/droid_review/publish_findings.py::L283 <-> actions/droid-review-aggre.10d75012",
       "expires": "2099-12-31"
     },
     {
       "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
-      "location": "actions/droid-review-aggregate/publish_findings.py::L347 <-> src/infra_core/engine/droid_re.1e453ecd",
+      "location": "actions/droid-review-aggregate/publish_findings.py::L374 <-> src/infra_core/engine/droid_re.511908a4",
       "expires": "2099-12-31"
     },
     {
       "rule_id": "CODE_HYGIENE_DUPLICATE_BLOCK",
-      "location": "src/infra_core/engine/droid_review/publish_findings.py::L347 <-> actions/droid-review-aggre.e0f3b521",
+      "location": "src/infra_core/engine/droid_review/publish_findings.py::L374 <-> actions/droid-review-aggre.38218559",
       "expires": "2099-12-31"
     },
     {

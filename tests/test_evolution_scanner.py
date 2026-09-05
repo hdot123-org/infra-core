@@ -683,15 +683,15 @@ def test_suppress_json_covers_inherent_layout_findings():
         # load_findings_files (L111)
         "actions/droid-review-aggregate/publish_findings.py::L111 <-> src/infra_core/engine/droid_re.06b22b7e",
         "src/infra_core/engine/droid_review/publish_findings.py::L111 <-> actions/droid-review-aggre.ca5ad03b",
-        # post_inline_comment (L201)
-        "actions/droid-review-aggregate/publish_findings.py::L201 <-> src/infra_core/engine/droid_re.b8a8ab10",
-        "src/infra_core/engine/droid_review/publish_findings.py::L201 <-> actions/droid-review-aggre.bb909a0f",
-        # post_summary_comment (L256)
-        "actions/droid-review-aggregate/publish_findings.py::L256 <-> src/infra_core/engine/droid_re.904c1bec",
-        "src/infra_core/engine/droid_review/publish_findings.py::L256 <-> actions/droid-review-aggre.827d706d",
-        # main (L347)
-        "actions/droid-review-aggregate/publish_findings.py::L347 <-> src/infra_core/engine/droid_re.1e453ecd",
-        "src/infra_core/engine/droid_review/publish_findings.py::L347 <-> actions/droid-review-aggre.e0f3b521",
+        # post_inline_comment (L228)
+        "actions/droid-review-aggregate/publish_findings.py::L228 <-> src/infra_core/engine/droid_re.21ff75a9",
+        "src/infra_core/engine/droid_review/publish_findings.py::L228 <-> actions/droid-review-aggre.4f4ed11a",
+        # post_summary_comment (L283)
+        "actions/droid-review-aggregate/publish_findings.py::L283 <-> src/infra_core/engine/droid_re.952715f0",
+        "src/infra_core/engine/droid_review/publish_findings.py::L283 <-> actions/droid-review-aggre.10d75012",
+        # main (L374)
+        "actions/droid-review-aggregate/publish_findings.py::L374 <-> src/infra_core/engine/droid_re.511908a4",
+        "src/infra_core/engine/droid_review/publish_findings.py::L374 <-> actions/droid-review-aggre.38218559",
         # governance _match_any（判定等价契约 TestActionScriptEquivalence 锁定，两文件行号不同）
         "actions/governance-check/governance_check.py::L35 <-> src/infra_core/governance.py::L42",
         "src/infra_core/governance.py::L42 <-> actions/governance-check/governance_check.py::L35",
