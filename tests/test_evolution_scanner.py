@@ -668,30 +668,30 @@ def test_suppress_json_covers_inherent_layout_findings():
     }
     # INFRA-691: 8 个 publish_findings 同名函数 pair × 2 遍历顺序 + governance 1 pair × 2
     dup_block_pairs = {
-        # validate_findings (L26)
-        "actions/droid-review-aggregate/publish_findings.py::L26 <-> src/infra_core/engine/droid_rev.c334ed19",
-        "src/infra_core/engine/droid_review/publish_findings.py::L26 <-> actions/droid-review-aggreg.286a7b8e",
-        # deduplicate_findings (L74)
-        "actions/droid-review-aggregate/publish_findings.py::L74 <-> src/infra_core/engine/droid_rev.45339d82",
-        "src/infra_core/engine/droid_review/publish_findings.py::L74 <-> actions/droid-review-aggreg.5266013d",
-        # group_by_shard (L88)
-        "actions/droid-review-aggregate/publish_findings.py::L88 <-> src/infra_core/engine/droid_rev.f44ed6ac",
-        "src/infra_core/engine/droid_review/publish_findings.py::L88 <-> actions/droid-review-aggreg.3fd811a0",
-        # count_by_severity (L97)
-        "actions/droid-review-aggregate/publish_findings.py::L97 <-> src/infra_core/engine/droid_rev.58cb6392",
-        "src/infra_core/engine/droid_review/publish_findings.py::L97 <-> actions/droid-review-aggreg.c83bbd9a",
-        # load_findings_files (L107)
-        "actions/droid-review-aggregate/publish_findings.py::L107 <-> src/infra_core/engine/droid_re.03afc965",
-        "src/infra_core/engine/droid_review/publish_findings.py::L107 <-> actions/droid-review-aggre.9300ca94",
-        # post_inline_comment (L129)
-        "actions/droid-review-aggregate/publish_findings.py::L129 <-> src/infra_core/engine/droid_re.407ce098",
-        "src/infra_core/engine/droid_review/publish_findings.py::L129 <-> actions/droid-review-aggre.5a892367",
-        # post_summary_comment (L176)
-        "actions/droid-review-aggregate/publish_findings.py::L176 <-> src/infra_core/engine/droid_re.70cbb575",
-        "src/infra_core/engine/droid_review/publish_findings.py::L176 <-> actions/droid-review-aggre.ba9a0b23",
-        # main (L259)
-        "actions/droid-review-aggregate/publish_findings.py::L259 <-> src/infra_core/engine/droid_re.88136774",
-        "src/infra_core/engine/droid_review/publish_findings.py::L259 <-> actions/droid-review-aggre.471b6ca6",
+        # validate_findings (L30)
+        "actions/droid-review-aggregate/publish_findings.py::L30 <-> src/infra_core/engine/droid_rev.b7e706c7",
+        "src/infra_core/engine/droid_review/publish_findings.py::L30 <-> actions/droid-review-aggreg.5c5d5458",
+        # deduplicate_findings (L78)
+        "actions/droid-review-aggregate/publish_findings.py::L78 <-> src/infra_core/engine/droid_rev.42c0cf1d",
+        "src/infra_core/engine/droid_review/publish_findings.py::L78 <-> actions/droid-review-aggreg.f07157f1",
+        # group_by_shard (L92)
+        "actions/droid-review-aggregate/publish_findings.py::L92 <-> src/infra_core/engine/droid_rev.f81afa06",
+        "src/infra_core/engine/droid_review/publish_findings.py::L92 <-> actions/droid-review-aggreg.fa6a4539",
+        # count_by_severity (L101)
+        "actions/droid-review-aggregate/publish_findings.py::L101 <-> src/infra_core/engine/droid_re.0bdd6c62",
+        "src/infra_core/engine/droid_review/publish_findings.py::L101 <-> actions/droid-review-aggre.05f2d407",
+        # load_findings_files (L111)
+        "actions/droid-review-aggregate/publish_findings.py::L111 <-> src/infra_core/engine/droid_re.06b22b7e",
+        "src/infra_core/engine/droid_review/publish_findings.py::L111 <-> actions/droid-review-aggre.ca5ad03b",
+        # post_inline_comment (L201)
+        "actions/droid-review-aggregate/publish_findings.py::L201 <-> src/infra_core/engine/droid_re.b8a8ab10",
+        "src/infra_core/engine/droid_review/publish_findings.py::L201 <-> actions/droid-review-aggre.bb909a0f",
+        # post_summary_comment (L256)
+        "actions/droid-review-aggregate/publish_findings.py::L256 <-> src/infra_core/engine/droid_re.904c1bec",
+        "src/infra_core/engine/droid_review/publish_findings.py::L256 <-> actions/droid-review-aggre.827d706d",
+        # main (L347)
+        "actions/droid-review-aggregate/publish_findings.py::L347 <-> src/infra_core/engine/droid_re.1e453ecd",
+        "src/infra_core/engine/droid_review/publish_findings.py::L347 <-> actions/droid-review-aggre.e0f3b521",
         # governance _match_any（判定等价契约 TestActionScriptEquivalence 锁定，两文件行号不同）
         "actions/governance-check/governance_check.py::L35 <-> src/infra_core/governance.py::L42",
         "src/infra_core/governance.py::L42 <-> actions/governance-check/governance_check.py::L35",
