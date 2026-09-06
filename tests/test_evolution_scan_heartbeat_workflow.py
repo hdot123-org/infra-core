@@ -183,9 +183,7 @@ def test_scan_ref_chain_exact_and_no_banned_properties():
             # 跳过行内尾注释部分
             code_part = re.split(r"\s+#", line, maxsplit=1)[0]
             for prop in banned:
-                assert prop not in code_part, (
-                    f"禁用属性 {prop} 出现在表达式中: {line.strip()}"
-                )
+                assert prop not in code_part, f"禁用属性 {prop} 出现在表达式中: {line.strip()}"
 
 
 def test_scan_provenance_assert_uses_commit_id_key():
@@ -267,12 +265,13 @@ def test_guard_sentinels_use_github_workflows_dir():
     assert len(shards_matches) == 2, (
         f"droid-review-shards: 应有 2 处哨兵探针，实际 {len(shards_matches)}"
     )
-    assert len(am_matches) == 1, (
-        f"auto-merge-pipeline: 应有 1 处哨兵探针，实际 {len(am_matches)}"
-    )
+    assert len(am_matches) == 1, f"auto-merge-pipeline: 应有 1 处哨兵探针，实际 {len(am_matches)}"
 
     # 所有探针均为 .github/workflows
-    for name, matches in [("droid-review-shards", shards_matches), ("auto-merge-pipeline", am_matches)]:
+    for name, matches in [
+        ("droid-review-shards", shards_matches),
+        ("auto-merge-pipeline", am_matches),
+    ]:
         for m in matches:
             assert m == ".github/workflows", f"{name}: 哨兵探针应为 .github/workflows，实际为 {m}"
 
