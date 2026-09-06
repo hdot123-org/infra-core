@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.14.0](https://github.com/hdot123-org/infra-core/compare/v0.13.0...v0.14.0) (2026-09-06)
+
+
+### Features
+
+* **webhook-scripts:** 漂移门禁三态实现与单测 ([#228](https://github.com/hdot123-org/infra-core/issues/228)) ([af754ae](https://github.com/hdot123-org/infra-core/commit/af754aec13c9155c035f268bbc8598dd70eaad84))
+
+
+### Bug Fixes
+
+* **cf:** 存档技术性去激活 routes 块 + 契约测试升级 (VAL-CF-001) ([#230](https://github.com/hdot123-org/infra-core/issues/230)) ([d91e0ae](https://github.com/hdot123-org/infra-core/commit/d91e0ae9c6d3661bc8f17cb98ffd785558883b68))
+* **engine:** add cross-run dedup to publish_findings (VAL-DEDUP-001) ([#229](https://github.com/hdot123-org/infra-core/issues/229)) ([abeb68c](https://github.com/hdot123-org/infra-core/commit/abeb68c0899fe26cbb00a2e676d9e9a31e148600))
+* **engine:** treat jsonl empty stdout at exit 0 as zero findings ([#241](https://github.com/hdot123-org/infra-core/issues/241)) ([8b010aa](https://github.com/hdot123-org/infra-core/commit/8b010aac7524364ee80bcb24dd0d8a56e5810650))
+* **gate:** 修复分页守卫死代码 + 归因勘误落地 (M3 scrutiny 非阻塞项收口) ([#231](https://github.com/hdot123-org/infra-core/issues/231)) ([6ffed5a](https://github.com/hdot123-org/infra-core/commit/6ffed5aa14eeb8424996edd6546e8bb229a0c02e))
+* **test:** 修复测试参数 bug + 扩充分页场景测试至 31+ 条 ([#235](https://github.com/hdot123-org/infra-core/issues/235)) ([848ab5f](https://github.com/hdot123-org/infra-core/commit/848ab5f0c5d2e797e8584f706a5011c918bc261f))
+* **workflow:** 修正两处失实 pin 注释 v0.13.0 → post-v0.13.0 (INFRA-778) ([#236](https://github.com/hdot123-org/infra-core/issues/236)) ([2b43b97](https://github.com/hdot123-org/infra-core/commit/2b43b974c621170e2cceee06713243f2b79e7063))
+
+
+### Documentation
+
+* 完善 README 开发文档 + 修正裁决文档证据归属 + 标记废弃章节 ([#240](https://github.com/hdot123-org/infra-core/issues/240)) ([6c8b14a](https://github.com/hdot123-org/infra-core/commit/6c8b14a78822470e932007d9a3feb7a4a7a88ad1))
+
 ## [0.13.0](https://github.com/hdot123-org/infra-core/compare/v0.12.0...v0.13.0) (2026-09-05)
 
 
