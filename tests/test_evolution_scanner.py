@@ -130,7 +130,11 @@ def test_run_audit_tool_jsonl_empty_stdout_exit_zero():
     an adapter failure ("Warning: 1/3 adapter(s) failed") on every freshly
     onboarded consumer repo with zero error patterns.
     """
-    tool = {"name": "error_patterns", "command": "infra-error-patterns --json", "output_format": "jsonl"}
+    tool = {
+        "name": "error_patterns",
+        "command": "infra-error-patterns --json",
+        "output_format": "jsonl",
+    }
 
     with patch("evolution_scanner.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -140,7 +144,11 @@ def test_run_audit_tool_jsonl_empty_stdout_exit_zero():
 
 def test_run_audit_tool_jsonl_empty_stdout_exit_nonzero():
     """jsonl tool: exit != 0 + empty stdout remains a genuine failure (None)."""
-    tool = {"name": "error_patterns", "command": "infra-error-patterns --json", "output_format": "jsonl"}
+    tool = {
+        "name": "error_patterns",
+        "command": "infra-error-patterns --json",
+        "output_format": "jsonl",
+    }
 
     with patch("evolution_scanner.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="boom")
