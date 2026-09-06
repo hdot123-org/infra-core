@@ -3,8 +3,11 @@
 把组织级演进引擎（scanner / 审计 / 门禁）接入一个新仓库，只需要三件事：
 复制 thin-caller workflow 模板、声明 `.evolution/config.yml`、配置 secrets。
 执行体全部由 `hdot123-org/infra-core` 的 reusable workflows / composite actions
-承载，消费仓**零 pip 安装、零脚本副本**（引擎版本由消费仓 `pip install -e .`
-连带安装的 `infra-core` 依赖决定，见 §5）。
+承载，消费仓**零脚本副本**。引擎版本由 workflow 引用（SHA 级真源）决定——
+`job.workflow_sha` 解析当前 reusable workflow 文件所在 commit，经
+`pip install git+https://…infra-core.git@<ref>` 直接交付，PEP 610
+`direct_url.json` `commit_id` 双断言防漂移。Python 消费仓的 `pyproject.toml`
+pin 仅决定本地 CLI 面版本（齐步走义务保留），见 §5。
 
 模板目录：[`docs/onboarding/templates/`](./templates/)（可整目录复制）。
 
@@ -82,6 +85,20 @@ snapshot_limit: 100
   `source_file`）是 memory-core dogfood 特有覆盖；一般消费仓直接用 pack
   默认（stdout jsonl）即可。
 
+### suppress.json（抑制已知 findings）
+
+消费仓可在 `.evolution/suppress.json` 声明需抑制的 finding 列表（非 Python 消费仓
+首次接入时建议创建空结构以避免 EVOLUTION_SUPPRESS_MISSING critical finding）：
+
+```json
+{
+  "suppressed": []
+}
+```
+
+scanner 读取该文件后会跳过 `suppressed` 列表中的 finding（按 rule+path 匹配），
+不创建 GitHub issue。适用于已确认但不需立即修复的 legacy findings 或误报。
+
 ## 4. Secrets 清单
 
 | Secret | 用途 | 哪些模板需要 |
@@ -101,18 +118,29 @@ Repo **variables**（`gh api repos/<org>/<repo>/actions/variables`）按需配�
 `BRANCH_AGE_ORPHAN_HOURS`（branch-cleanup 阈值）、`LINEAR_PROJECT_<REPO>_ID`
 （Linear 项目同步）、droid-review 预算组（`SHARD_MAX_FILES` 等，缺省回退内置默认值）。
 
-## 5. 引擎版本（pip 依赖）
+## 5. 引擎版本（SHA 真源 + provenance）
 
-消费仓若安装 memory-core 协议栈，`pyproject.toml` 以 **tag 锁定** 引擎版本：
+**workflow 引用（`@tag`）是引擎版本的唯一主真源**（SHA 级）。消费仓在 thin-caller 的
+`uses:` 行引用 infra-core reusable workflow（如
+`hdot123-org/infra-core/.github/workflows/evolution-scan.yml@v0.15.0`），
+reusable workflow 内部通过 `job.workflow_sha`（定义当前 job 的 workflow 文件 commit，
+官方文档语义）解析出引擎 commit SHA，经 `pip install git+https://…infra-core.git@<ref>`
+直接交付。PEP 610 `direct_url.json` 的 `vcs_info.commit_id` 双断言防 pip 同版本静默跳过。
+
+**Python 消费仓**的 `pyproject.toml` pin 仅决定本地 CLI 面版本（齐步走义务保留）：
 
 ```toml
 dependencies = [
-    "infra-core @ git+https://github.com/hdot123-org/infra-core.git@v0.6.0",
+    "infra-core @ git+https://github.com/hdot123-org/infra-core.git@v0.15.0",
 ]
 ```
 
-公开仓免认证拉取（实测 ~40s）。升级 = bump tag 字符串。workflow_call
-inputs/secrets 一律 **snake_case**（如 `dispatch_token`、`shard_max_files`）。
+**非 Python 消费仓**无 `pyproject.toml`，CI 中 `Install package` 步会检测并跳过
+（`no pyproject.toml, skip consumer install`），引擎完全由 workflow 引用交付。
+
+`workflow_call` inputs 支持 `engine_ref`（optional string，default ''）用于灰度/回滚；
+不传时默认走 `job.workflow_sha`。inputs/secrets 一律 **snake_case**
+（如 `dispatch_token`、`shard_max_files`）。
 
 ## 6. 升级分发（公告规则）
 
@@ -221,10 +249,29 @@ grep -A 10 "permissions:" .github/workflows/<caller>.yml
 ```bash
 # 模板静态检查
 actionlint .github/workflows/*.yml
-# 本地报告模式试扫（不写 GitHub）
+# 本地报告模式试扫（不写 GitHub）——Python 消费仓
 pip install -e '.[dev]'
 infra-cli scan --report-only --repo-root . --output /tmp/scan.json
 ```
+
+### 非 Python 消费仓本地验证
+
+非 Python 消费仓（如 Node/Rust）无 `pip install -e .`，本地验证引擎 CLI
+需使用引擎仓自身的 venv：
+
+```bash
+# 在引擎仓（infra-core）宿主执行
+cd /path/to/infra-core
+python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+# 版本核对：确认安装的版本与消费仓 workflow 引用的 tag 一致
+.venv/bin/infra-cli --version
+# 报告模式试扫目标消费仓
+.venv/bin/infra-cli scan --report-only --repo-root /path/to/consumer-repo --output /tmp/scan.json
+```
+
+> 注意：本地验证使用宿主引擎 venv，版本可能与 CI 中 workflow 引用交付的版本不同。
+> CI 中的版本由 `job.workflow_sha`（reusable workflow 文件 commit）决定，
+> 本地验证仅用于规则包逻辑验证，不作为版本一致性断言。
 
 首次 PR 触发 `Evolution Governance`（若接入该门禁）与 scan 定时器后，
 在 Actions 页确认 workflow 注册名与本表一致。

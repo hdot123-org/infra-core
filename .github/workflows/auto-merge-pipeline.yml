@@ -137,10 +137,10 @@ jobs:
           # 借此检测并清除工作区 sparse 残留——checkout 自带的 sparse-checkout
           # disable 实证无法恢复被裁剪的工作树（仍缺关键文件）。本步检测残留
           # 并删除 .git 强制全新克隆；必须内联 run——工作树残缺时本地
-          # composite action 同样无法解析。探针用 pyproject.toml（消费仓共有）。
+          # composite action 同样无法解析。探针用 .github/workflows（语言中立）。
           if [ -e "$GITHUB_WORKSPACE/.git" ]; then
             SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
-            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/pyproject.toml" ]; then
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -d "$GITHUB_WORKSPACE/.github/workflows" ]; then
               echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
               rm -rf "$GITHUB_WORKSPACE/.git"
             fi

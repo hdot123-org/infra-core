@@ -11,11 +11,33 @@
 # thin caller（heartbeat 探活按本文件名解析 run 历史），故本文件自带
 # schedule 恢复引擎仓自扫心跳定时面（M2 HOTFIX 禁 cron 后漏建，13h 空窗
 # 告警根因，见 evolution-scan.yml 文件头注释）。消费仓不受影响。
+#
+# 引擎来源（v0.15.0 解耦后）：
+# - 条件性消费仓安装（Install package 步）：pyproject.toml 守卫，Python 仓保留
+#   inline audit_tools 契约（memory-* scripts），非 Python 仓跳过
+# - 独立引擎安装步（Install engine）：pip install git+https://...infra-core.git@<ref>
+#   ref 解析链：inputs.engine_ref || job.workflow_sha || github.sha
+#   （job.workflow_sha = 定义当前 job 的 workflow 文件 commit；reusable 场景 =
+#   caller uses 解析出的 reusable 文件 commit；直触场景 = 本仓 commit）
+# - provenance 断言步：importlib.metadata 版本 + direct_url.json vcs_info.commit_id
+#   （PEP 610 键名）40-hex 强比对，堵 pip 同版本静默跳过
+#
+# 弃用属性教训（防回归，三轮审查定案）：
+# - github.action_ref：仅定义于 step 执行 action，reusable 场景未文档化（v1 教训）
+# - github.job_workflow_sha：不存在的属性（文档 bug 遗留、OIDC claim only、恒空串；
+#   actions/runner#2417 GitHub 员工定论 + 2026-04-23 Actions Team 官宣四属性表）
+# - github.ref_name 兜底：workflow_call 下 = caller 分支名 → 静默漂移，禁止（v1 教训）
 
 name: Evolution Heartbeat Reusable
 
 on:
   workflow_call:
+    inputs:
+      engine_ref:
+        required: false
+        type: string
+        default: ''
+        description: 'infra-core ref (tag/branch/SHA); default = this workflow file commit (job.workflow_sha)'
     # 双形态键声明（CONSUMER-GATE-DEADLOCK 修复 2026-08-30）：GitHub 对 caller
     # secrets: 传键做声明面严格校验——caller 传了未声明键 → run 级
     # startup_failure（零 job）。hyphen 变体 required: false，env 层熔合
@@ -56,7 +78,40 @@ jobs:
           python3.12 -m venv "$RUNNER_TEMP/venv"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
       - name: Install package
-        run: pip install -e .
+        run: |
+          set -euo pipefail
+          if [ -f pyproject.toml ]; then
+            pip install -e .
+          else
+            echo "no pyproject.toml, skip consumer install"
+          fi
+      - name: Install engine (same commit as this reusable workflow)
+        env:
+          ENGINE_REF: ${{ inputs.engine_ref || job.workflow_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test -n "$ENGINE_REF"
+          if [[ ! "$ENGINE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::warning::non-SHA engine ref (${ENGINE_REF})"
+          fi
+          echo "ENGINE_REF=${ENGINE_REF} job.workflow_sha=${{ job.workflow_sha }} github.sha=${{ github.sha }}"
+          pip install "git+https://github.com/hdot123-org/infra-core.git@${ENGINE_REF}"
+      - name: Assert engine version and provenance
+        env:
+          ENGINE_REF: ${{ inputs.engine_ref || job.workflow_sha || github.sha }}
+        run: |
+          python - <<'PY'
+          import importlib.metadata as m, json, os
+          d = m.distribution("infra-core")
+          print("infra-core", d.version)
+          du = json.loads(d.read_text("direct_url.json") or "{}")
+          vi = du.get("vcs_info") or {}
+          commit = vi.get("commit_id", "")
+          print("engine commit", commit)
+          ref = os.environ["ENGINE_REF"]
+          if len(ref) == 40 and ref.lower() != commit.lower():
+              raise SystemExit(f"installed engine commit {commit} != requested {ref}")
+          PY
       - name: Ensure labels exist
         env:
           GH_TOKEN: ${{ secrets.dispatch_token || secrets['dispatch-token'] }}

@@ -1,6 +1,6 @@
 # infra-core 架构
 
-infra-core 是组织级演进引擎的宿主仓库：自进化（scanner）、审计（audit packs）、门禁（governance / droid-review）体系的共享基础设施。消费仓（第一个是 memory-core）通过 pip 依赖 + thin caller 工作流接入，依赖方向单一：`消费仓 → infra-core`。
+infra-core 是组织级演进引擎的宿主仓库：自进化（scanner）、审计（audit packs）、门禁（governance / droid-review）体系的共享基础设施。消费仓（第一个是 memory-core）通过 reusable workflow 引用 + thin caller 工作流接入，引擎版本由 workflow 引用（SHA 级真源 `job.workflow_sha`）决定，经 `pip install git+https://…infra-core.git@<ref>` 直接交付，PEP 610 `commit_id` 断言防漂移，依赖方向单一：`消费仓 → infra-core`。
 
 ## 1. 分层
 
