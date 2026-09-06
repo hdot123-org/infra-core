@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   scan:
-    uses: hdot123-org/infra-core/.github/workflows/evolution-scan.yml@v0.7.2
+    uses: hdot123-org/infra-core/.github/workflows/evolution-scan.yml@v0.14.0
     permissions:
       contents: read
       issues: write

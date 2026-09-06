@@ -227,12 +227,12 @@ jobs:
         run: |
           set -euo pipefail
           # 2026-08-28 污染事故运行时排毒：共享持久 _work 工作区的 sparse 残留
-          # 使 checkout 无法恢复被裁剪的工作树。reusable 版探针用 pyproject.toml
-          # （两仓及一般消费仓共有；用本仓特有路径做探针会造成消费仓
+          # 使 checkout 无法恢复被裁剪的工作树。reusable 版探针用 .github/workflows
+          # （语言中立的共有目录；用本仓特有路径做探针会造成消费仓
           # 每 run 全量重克隆）。
           if [ -e "$GITHUB_WORKSPACE/.git" ]; then
             SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
-            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/pyproject.toml" ]; then
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -d "$GITHUB_WORKSPACE/.github/workflows" ]; then
               echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
               rm -rf "$GITHUB_WORKSPACE/.git"
             fi
@@ -335,10 +335,10 @@ jobs:
       - name: Workspace guard (sparse residue detox)
         run: |
           set -euo pipefail
-          # 2026-08-28 污染事故运行时排毒（探针同 plan-shards：pyproject.toml）
+          # 2026-08-28 污染事故运行时排毒（探针同 plan-shards：.github/workflows）
           if [ -e "$GITHUB_WORKSPACE/.git" ]; then
             SPARSE_FLAG=$(git -C "$GITHUB_WORKSPACE" config --type=bool --get core.sparseCheckout 2>/dev/null || echo false)
-            if [ "$SPARSE_FLAG" = "true" ] || [ ! -f "$GITHUB_WORKSPACE/pyproject.toml" ]; then
+            if [ "$SPARSE_FLAG" = "true" ] || [ ! -d "$GITHUB_WORKSPACE/.github/workflows" ]; then
               echo "::warning::Workspace has sparse/prune residue; removing .git for a clean re-clone"
               rm -rf "$GITHUB_WORKSPACE/.git"
             fi

@@ -79,7 +79,7 @@ audit_tools:
 
 ### 消费仓接入
 
-新仓库接入引擎只需三件事：复制 thin-caller workflow 模板、声明 `.evolution/config.yml`、配置 secrets，消费仓零 pip 安装、零脚本副本。详见[消费仓接入指南](docs/onboarding/consumer-onboarding.md)，thin-caller 模板位于 `docs/onboarding/templates/`。
+新仓库接入引擎只需三件事：复制 thin-caller workflow 模板、声明 `.evolution/config.yml`、配置 secrets，引擎版本由 workflow 引用（SHA 级真源 job.workflow_sha）决定，经 pip install git+ 直接交付，非 Python 仓通过条件安装守卫自动跳过。详见[消费仓接入指南](docs/onboarding/consumer-onboarding.md)，thin-caller 模板位于 `docs/onboarding/templates/`。
 
 
 ## 发版公告与下游自动接单

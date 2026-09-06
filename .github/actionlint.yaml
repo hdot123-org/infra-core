@@ -5,3 +5,11 @@ self-hosted-runner:
   labels:
     - pve-linux
     - memory-core-upgrade
+
+paths:
+  .github/workflows/evolution-scan.yml:
+    ignore:
+      - 'property "workflow_sha" is not defined in object type'  # rhysd/actionlint#647
+  .github/workflows/evolution-heartbeat.yml:
+    ignore:
+      - 'property "workflow_sha" is not defined in object type'  # rhysd/actionlint#647
