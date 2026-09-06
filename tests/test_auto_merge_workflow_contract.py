@@ -342,11 +342,11 @@ class TestReusablePipelineTemplateContract:
             )
 
     def test_workspace_guard_probe_uses_consumer_agnostic_file(self) -> None:
-        """reusable 版 guard 探针必须用 pyproject.toml（消费仓共有文件，
-        不用本仓特有 .github/actions/setup-venv 路径——droid-review-shards 先例）。"""
+        """reusable 版 guard 探针必须用 .github/workflows（语言中立目录，
+        非 Python 消费仓无 pyproject.toml 时会每 run 全量重克隆——v0.15.0 改）。"""
         steps = _load_doc(AUTO_MERGE_PIPELINE_YML)["jobs"]["auto-merge"]["steps"]
         guard_run = str(steps[0].get("run", ""))
-        assert "pyproject.toml" in guard_run
+        assert ".github/workflows" in guard_run
         assert ".github/actions/setup-venv" not in guard_run
 
 

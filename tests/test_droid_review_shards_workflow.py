@@ -367,11 +367,11 @@ class TestDocsOnlyDetection:
 
 
 class TestWorkspaceGuardProbe:
-    """reusable 版 workspace guard 探针用 pyproject.toml（消费仓无关 setup-venv）"""
+    """reusable 版 workspace guard 探针用 .github/workflows（语言中立目录，v0.15.0 改）"""
 
-    def test_probe_is_pyproject_toml(self, shards_data):
+    def test_probe_is_dot_github_workflows(self, shards_data):
         raw = WORKFLOW_PATH.read_text()
-        assert raw.count("pyproject.toml") >= 2, "workspace guard 探针应为 pyproject.toml"
+        assert raw.count(".github/workflows") >= 2, "workspace guard 探针应为 .github/workflows"
         assert ".github/actions/setup-venv" not in raw
 
 

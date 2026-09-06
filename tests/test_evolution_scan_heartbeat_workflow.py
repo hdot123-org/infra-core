@@ -195,7 +195,6 @@ def test_scan_provenance_assert_uses_commit_id_key():
     assert 'vi.get("commit_id"' in run or "vi.get('commit_id'" in run
     # 不应使用错误键名 commit（v2.1 阻断教训）
     # 但注释中可能出现，需排除行首注释
-    import re
     for line in run.splitlines():
         stripped = line.strip()
         if stripped.startswith("#"):
