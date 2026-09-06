@@ -159,32 +159,31 @@ def test_scan_engine_ref_input_declared():
     eng = inputs["engine_ref"]
     assert eng.get("required") is False
     assert eng.get("type") == "string"
-    assert eng.get("default") == "" or eng.get("default") == "''" or eng.get("default") is None
+    assert eng.get("default") == ""
 
 
 def test_scan_ref_chain_exact_and_no_banned_properties():
     """VAL-ENGINE-002：解析链精确为 engine_ref || job.workflow_sha || github.sha；
-    表达式级无 github.job_workflow_sha / ref_name 用法（注释提及允许）。"""
+    表达式级无 github.job_workflow_sha / github.action_ref / ref_name 用法（注释提及允许）。"""
     raw_scan = _SCAN.read_text()
     raw_hb = _HEARTBEAT.read_text()
     chain = "inputs.engine_ref || job.workflow_sha || github.sha"
     assert chain in raw_scan, "scan: 解析链缺失或变形"
     assert chain in raw_hb, "heartbeat: 解析链缺失或变形"
-    # 表达式级禁用属性（排除 # 注释行）
+    # 表达式级禁用属性（排除 # 注释行）——三个禁用属性全覆盖
     import re
 
+    banned = ["github.job_workflow_sha", "github.action_ref", "ref_name"]
     for raw in (raw_scan, raw_hb):
         lines = raw.splitlines()
         for line in lines:
             # 跳过纯注释行
             if re.match(r"^\s*#", line):
                 continue
-            assert "github.job_workflow_sha" not in line, (
-                f"禁用属性 github.job_workflow_sha 出现在表达式中: {line.strip()}"
-            )
-            # ref_name 在表达式中出现（非注释内）也禁
-            if "ref_name" in line and not re.search(r"#.*ref_name", line):
-                raise AssertionError(f"禁用属性 ref_name 出现在表达式中: {line.strip()}")
+            # 跳过行内尾注释部分
+            code_part = re.split(r"\s+#", line, maxsplit=1)[0]
+            for prop in banned:
+                assert prop not in code_part, f"禁用属性 {prop} 出现在表达式中: {line.strip()}"
 
 
 def test_scan_provenance_assert_uses_commit_id_key():
@@ -247,18 +246,32 @@ def test_actionlint_ignore_entries_exist():
 
 
 def test_guard_sentinels_use_github_workflows_dir():
-    """VAL-ENGINE-004：3 处哨兵探针为 .github/workflows，非 pyproject.toml。"""
+    """VAL-ENGINE-004：3 处哨兵探针为 .github/workflows，非 pyproject.toml。
+
+    哨兵使用目录探测 (`-d`)，正则锚定 `-d` 字面量。按文件计数：
+    droid-review-shards ×2、auto-merge-pipeline ×1，消除空转测试。
+    """
     shards = (_REPO_ROOT / ".github" / "workflows" / "droid-review-shards.yml").read_text()
     am = (_REPO_ROOT / ".github" / "workflows" / "auto-merge-pipeline.yml").read_text()
-    # 哨兵位探针应是 .github/workflows（不再是 pyproject.toml）
-    # droid-review-shards 两处 + auto-merge-pipeline 一处
-    # 检查哨兵块中的探针文件
     import re
 
-    # 找到所有 Workspace guard 块中的探针表达式
-    guard_pattern = r"\[ ! -f \"\$GITHUB_WORKSPACE/([^\"]+)\" \]"
-    for name, raw in [("droid-review-shards", shards), ("auto-merge-pipeline", am)]:
-        matches = re.findall(guard_pattern, raw)
+    # 哨兵块中的探针表达式（目录探测 `-d`）
+    guard_pattern = r'\[ ! -d "\$GITHUB_WORKSPACE/([^"]+)" \]'
+
+    shards_matches = re.findall(guard_pattern, shards)
+    am_matches = re.findall(guard_pattern, am)
+
+    # 按文件计数：droid-review-shards 应有 2 处，auto-merge-pipeline 应有 1 处
+    assert len(shards_matches) == 2, (
+        f"droid-review-shards: 应有 2 处哨兵探针，实际 {len(shards_matches)}"
+    )
+    assert len(am_matches) == 1, f"auto-merge-pipeline: 应有 1 处哨兵探针，实际 {len(am_matches)}"
+
+    # 所有探针均为 .github/workflows
+    for name, matches in [
+        ("droid-review-shards", shards_matches),
+        ("auto-merge-pipeline", am_matches),
+    ]:
         for m in matches:
             assert m == ".github/workflows", f"{name}: 哨兵探针应为 .github/workflows，实际为 {m}"
 
@@ -276,7 +289,7 @@ def test_file_header_contains_deprecated_chain_lessons():
 
 
 def test_invariants_regression():
-    """VAL-CROSS-003：改造不破坏既有契约（文件名/name/secrets/concurrency/schedule）。"""
+    """VAL-CROSS-003：改造不破坏既有契约（文件名/name/secrets/concurrency/schedule/permissions/python）。"""
     scan_data = _load(_SCAN)
     hb_data = _load(_HEARTBEAT)
     # (a) 文件名/name 字节级
@@ -299,6 +312,18 @@ def test_invariants_regression():
     assert scan_crons == ["17,47 * * * *"]
     hb_crons = [e["cron"] for e in _triggers(hb_data).get("schedule", [])]
     assert hb_crons == ["53 */2 * * *"]
+    # (e) 权限面不变量：顶层 permissions 与 job-level permissions 未扩权
+    assert scan_data["permissions"] == {"contents": "read"}
+    assert hb_data["permissions"] == {"contents": "read"}
+    scan_job = scan_data["jobs"]["scan"]
+    hb_job = hb_data["jobs"]["heartbeat"]
+    assert scan_job["permissions"] == {"contents": "read", "issues": "write"}
+    assert hb_job["permissions"] == {"contents": "read", "issues": "write"}
+    # (e) Python 版本钉死：两文件均硬编码 python3.12（venv 创建步）
+    scan_raw = _SCAN.read_text()
+    hb_raw = _HEARTBEAT.read_text()
+    assert "python3.12 -m venv" in scan_raw, "scan: Python 版本钉死值漂移"
+    assert "python3.12 -m venv" in hb_raw, "heartbeat: Python 版本钉死值漂移"
 
 
 def test_heartbeat_reusable_name_byte_exact():
