@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/hdot123-org/infra-core/compare/v0.14.0...v0.15.0) (2026-09-06)
+
+
+### Features
+
+* **engine:** decouple engine delivery from consumer language ([#243](https://github.com/hdot123-org/infra-core/issues/243)) ([24b3e4f](https://github.com/hdot123-org/infra-core/commit/24b3e4ff759879b2221b422ab6d5007b839ad1af))
+
 ## [0.14.0](https://github.com/hdot123-org/infra-core/compare/v0.13.0...v0.14.0) (2026-09-06)
 
 
