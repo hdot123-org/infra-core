@@ -143,8 +143,8 @@ def test_scan_engine_install_step_uses_git_plus_at_engine_ref():
     steps = _scan_steps(_load(_SCAN))
     engine_step = steps["Install engine (same commit as this reusable workflow)"]
     run = engine_step["run"]
-    assert 'git+https://github.com/hdot123-org/infra-core.git@${ENGINE_REF}' in run
-    assert 'pip install' in run
+    assert "git+https://github.com/hdot123-org/infra-core.git@${ENGINE_REF}" in run
+    assert "pip install" in run
     # 空断言 + 非 40-hex warning
     assert "test -n" in run
     assert "::warning::" in run
@@ -172,6 +172,7 @@ def test_scan_ref_chain_exact_and_no_banned_properties():
     assert chain in raw_hb, "heartbeat: 解析链缺失或变形"
     # 表达式级禁用属性（排除 # 注释行）
     import re
+
     for raw in (raw_scan, raw_hb):
         lines = raw.splitlines()
         for line in lines:
@@ -253,14 +254,13 @@ def test_guard_sentinels_use_github_workflows_dir():
     # droid-review-shards 两处 + auto-merge-pipeline 一处
     # 检查哨兵块中的探针文件
     import re
+
     # 找到所有 Workspace guard 块中的探针表达式
     guard_pattern = r"\[ ! -f \"\$GITHUB_WORKSPACE/([^\"]+)\" \]"
     for name, raw in [("droid-review-shards", shards), ("auto-merge-pipeline", am)]:
         matches = re.findall(guard_pattern, raw)
         for m in matches:
-            assert m == ".github/workflows", (
-                f"{name}: 哨兵探针应为 .github/workflows，实际为 {m}"
-            )
+            assert m == ".github/workflows", f"{name}: 哨兵探针应为 .github/workflows，实际为 {m}"
 
 
 def test_file_header_contains_deprecated_chain_lessons():
@@ -272,9 +272,7 @@ def test_file_header_contains_deprecated_chain_lessons():
         assert "job_workflow_sha" in raw, f"{path.name}: 文件头缺 job_workflow_sha 弃用教训"
         assert "ref_name" in raw, f"{path.name}: 文件头缺 ref_name 弃用教训"
         # 旧引擎来源表述必须消除
-        assert "连带安装" not in raw, (
-            f"{path.name}: 旧表述「连带安装」仍存"
-        )
+        assert "连带安装" not in raw, f"{path.name}: 旧表述「连带安装」仍存"
 
 
 def test_invariants_regression():
