@@ -128,13 +128,18 @@ class TestErrorPatternsOutputFormat:
         assert len(result) == 1
         assert result[0]["rule_id"] == "ERROR_PATTERN_TIMEOUT"
 
-    def test_run_audit_tool_jsonl_empty_stdout_returns_none(self):
-        """0 条模式：空 stdout 维持引擎既有语义（tool failure，非 []）。"""
+    def test_run_audit_tool_jsonl_empty_stdout_returns_empty_list(self):
+        """0 条模式：exit 0 + 空 stdout = 合法零发现（[]），不再是 tool failure。
+
+        pack ToolSpec 契约明示 "JSONL 0/1/N 行皆可能"；旧语义（空 stdout → None）
+        把每个零错误模式的新消费仓试扫都误报为 "Warning: 1/3 adapter(s) failed"。
+        全 malformed 输出仍维持 tool failure（见下一条）。
+        """
         tool = {"name": "error_patterns", "output_format": "jsonl", "command": "echo"}
         with patch("infra_core.engine.evolution_scanner.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             result = run_audit_tool(tool)
-        assert result is None
+        assert result == []
 
     def test_run_audit_tool_jsonl_all_malformed_returns_none(self):
         """全 malformed JSONL → tool failure（None），不得伪造 findings。"""
