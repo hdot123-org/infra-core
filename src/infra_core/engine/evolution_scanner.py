@@ -139,6 +139,8 @@ def run_audit_tool(
     output_format="jsonl" tools (e.g. error_patterns --json) emit one JSON
     object per line; a single json.loads would crash on 2+ entries ("Extra
     data"), so each line is parsed with the same tolerance as registry_jsonl.
+    For jsonl tools, exit 0 with zero output lines is a valid "no findings"
+    result ([]) — the pack contract allows 0/1/N lines.
     """
     from evolution_adapters import ADAPTER_MAP
 
@@ -199,8 +201,14 @@ def run_audit_tool(
             stderr = result.stderr.strip()
             if stderr:
                 print(f"[evolution] Warning: {tool['name']} exited {result.returncode}: {stderr}")
-        # If no stdout at all, tool genuinely failed (not just "found problems")
+        # If no stdout at all, tool genuinely failed (not just "found problems") —
+        # except jsonl tools, where zero output lines is a documented valid
+        # outcome (pack.py ToolSpec: "0/1/N 行皆可能"): exit 0 + empty stdout
+        # means "no findings" ([]), not failure. exit != 0 + empty stdout is
+        # still a genuine failure (crash before emitting anything).
         if not result.stdout.strip():
+            if tool.get("output_format") == "jsonl" and result.returncode == 0:
+                return []
             return None
         # JSONL stdout: one JSON object per line (pack error_patterns --json).
         # Malformed lines are skipped with a warning; all-malformed output is a
