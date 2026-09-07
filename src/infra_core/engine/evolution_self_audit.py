@@ -53,7 +53,7 @@ REPOSITORIES_YML = FACTORY_HOME / "config" / "repositories.yml"
 REPO_NAME = (
     os.environ.get("EVOLUTION_AUDIT_REPO")
     or os.environ.get("GITHUB_REPOSITORY")
-    or "hdot123-org/memory",
+    or "hdot123-org/memory"
 )
 # GitHub Issue 创建后超过此分钟数仍无 linear-linkback 视为同步失败
 GAP_A_AUDIT_THRESHOLD_MIN = 30
