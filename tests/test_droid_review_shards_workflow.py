@@ -62,13 +62,18 @@ class TestWorkflowCallSurface:
             assert name in inputs, f"workflow_call 缺少 input: {name}"
 
     def test_input_defaults_match_budget_layers(self, workflow_call):
-        """预算层默认值与 VAL-SHARD-011 一致（caller 未转发时兜底）"""
+        """预算层默认值与 VAL-SHARD-011 一致（caller 未转发时兜底）。
+
+        engine_ref 默认空（R1'-B 债1）：SHA 真源模型——默认空时 ref 解析链
+        落到 job.workflow_sha（= caller uses@tag 解析的本文件 commit），
+        不再默认 main 浮动 checkout。
+        """
         inputs = workflow_call.get("inputs", {})
         assert inputs["shard_max_files"]["default"] == "25"
         assert inputs["shard_max_count"]["default"] == "6"
         assert inputs["shard_timeout_minutes"]["default"] == "45"
         assert inputs["shard_max_parallel"]["default"] == "3"
-        assert inputs["engine_ref"]["default"] == "main"
+        assert inputs["engine_ref"]["default"] == ""
 
     def test_secrets_declared(self, workflow_call):
         secrets = workflow_call.get("secrets", {})
@@ -120,7 +125,10 @@ class TestDualFormInputs:
     def test_fusion_expressions_at_every_consumption(self, shards_data):
         raw = WORKFLOW_PATH.read_text(encoding="utf-8")
         expected_fusions = (
-            "ref: ${{ inputs.engine_ref || inputs['engine-ref'] }}",
+            (
+                "ref: ${{ inputs.engine_ref || inputs['engine-ref']"
+                " || job.workflow_sha || github.sha }}"
+            ),
             "PR_NUMBER=\"${{ inputs.pr_number || inputs['pr-number'] }}\"",
             "HEAD_SHA=\"${{ inputs.head_sha || inputs['head-sha'] }}\"",
             "MAX_FILES: ${{ inputs.shard_max_files || inputs['shard-max-files'] }}",
@@ -227,7 +235,7 @@ class TestEngineSelfContainment:
             ]
             assert engine_steps, f"job {job_id} 缺少 infra-core 引擎 checkout"
             assert engine_steps[0]["with"].get("ref") == (
-                "${{ inputs.engine_ref || inputs['engine-ref'] }}"
+                "${{ inputs.engine_ref || inputs['engine-ref'] || job.workflow_sha || github.sha }}"
             )
 
     def test_review_shard_dual_checkout_of_consumer_repo(self, shards_data):

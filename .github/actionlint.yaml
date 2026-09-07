@@ -9,7 +9,13 @@ self-hosted-runner:
 paths:
   .github/workflows/evolution-scan.yml:
     ignore:
-      - 'property "workflow_sha" is not defined in object type'  # rhysd/actionlint#647
+      # rhysd/actionlint#647（跟踪：memory/inbox.md 记债条目；rhysd/actionlint#647 上游修复后删除本条目）
+      - 'property "workflow_sha" is not defined in object type'
   .github/workflows/evolution-heartbeat.yml:
     ignore:
-      - 'property "workflow_sha" is not defined in object type'  # rhysd/actionlint#647
+      # rhysd/actionlint#647（跟踪：memory/inbox.md 记债条目；rhysd/actionlint#647 上游修复后删除本条目）
+      - 'property "workflow_sha" is not defined in object type'
+  .github/workflows/droid-review-shards.yml:
+    ignore:
+      # rhysd/actionlint#647（跟踪：memory/inbox.md 记债条目；rhysd/actionlint#647 上游修复后删除本条目）
+      - 'property "workflow_sha" is not defined in object type'
