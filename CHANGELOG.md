@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/hdot123-org/infra-core/compare/v0.15.0...v0.15.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **engine:** shards 引擎 checkout 纳入 SHA 真源 + 审计仓默认链 + 删 CI 空转步 ([#246](https://github.com/hdot123-org/infra-core/issues/246)) ([227e974](https://github.com/hdot123-org/infra-core/commit/227e974301aeb8e80cce60f12298922305d40cf8))
+
 ## [0.15.0](https://github.com/hdot123-org/infra-core/compare/v0.14.0...v0.15.0) (2026-09-06)
 
 
