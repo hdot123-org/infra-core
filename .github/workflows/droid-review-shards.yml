@@ -15,7 +15,9 @@
 #   - 预算参数（SHARD_MAX_* / SHARD_TIMEOUT_MINUTES）由 caller 以 inputs 转发
 #     （vars context 在 caller 文件引用，显式传递避免隐式依赖）
 #   - 引擎脚本（plan_shards.py / run_shard.sh）checkout 自本仓
-#     src/infra_core/engine/droid_review/（engine_ref 输入，默认 main），
+#     src/infra_core/engine/droid_review/（engine_ref 输入，默认空 →
+#     job.workflow_sha 锚定 caller uses@tag 解析出的本文件 commit，SHA 真源
+#     模型与 evolution-scan.yml 引擎安装步一致，不再默认 main 浮动），
 #     不依赖消费仓本地 scripts/droid_review/ 副本（消除副本同步债）
 #   - 不引用仓库本地 venv composite（消费仓没有该文件；分片流水线
 #     仅依赖 python3 stdlib + jq + gh + droid CLI，无需 venv）
@@ -49,10 +51,10 @@ on:
     # 点号取值）。两步终态：memory 统一 snake-only 后本仓删全部 hyphen 变体。
     inputs:
       engine_ref:
-        description: 'infra-core ref for engine scripts (plan_shards.py / run_shard.sh)'
+        description: 'infra-core ref for engine scripts (plan_shards.py / run_shard.sh); default = empty → job.workflow_sha (caller pin anchor)'
         required: false
         type: string
-        default: 'main'
+        default: ''
       engine-ref:
         description: 'hyphen 过渡变体（与 engine_ref 等价）'
         required: false
@@ -242,7 +244,14 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: hdot123-org/infra-core
-          ref: ${{ inputs.engine_ref || inputs['engine-ref'] }}
+          # SHA 真源模型（与 evolution-scan.yml 引擎安装步同构）：job.workflow_sha
+          # 在 workflow_call 下恒有值且 = caller uses@tag 解析出的本 reusable 文件
+          # commit（硬证据：mencbo scan run 34065944470 日志三值 ENGINE_REF/
+          # job.workflow_sha 同为 b56c2c7…、github.sha=1920948 为消费仓 commit）；
+          # 末尾 github.sha 是响亮失败兜底——上游两值意外皆空时消费仓 commit 在
+          # infra-core 不存在 → checkout 硬错，防止 ref 空串 + 异仓 checkout
+          # 静默回落默认分支（= 又浮 main）。
+          ref: ${{ inputs.engine_ref || inputs['engine-ref'] || job.workflow_sha || github.sha }}
           fetch-depth: 1
           path: engine
 
@@ -361,7 +370,14 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: hdot123-org/infra-core
-          ref: ${{ inputs.engine_ref || inputs['engine-ref'] }}
+          # SHA 真源模型（与 evolution-scan.yml 引擎安装步同构）：job.workflow_sha
+          # 在 workflow_call 下恒有值且 = caller uses@tag 解析出的本 reusable 文件
+          # commit（硬证据：mencbo scan run 34065944470 日志三值 ENGINE_REF/
+          # job.workflow_sha 同为 b56c2c7…、github.sha=1920948 为消费仓 commit）；
+          # 末尾 github.sha 是响亮失败兜底——上游两值意外皆空时消费仓 commit 在
+          # infra-core 不存在 → checkout 硬错，防止 ref 空串 + 异仓 checkout
+          # 静默回落默认分支（= 又浮 main）。
+          ref: ${{ inputs.engine_ref || inputs['engine-ref'] || job.workflow_sha || github.sha }}
           fetch-depth: 1
           path: engine
 

@@ -127,16 +127,11 @@ jobs:
           if len(ref) == 40 and ref.lower() != commit.lower():
               raise SystemExit(f"installed engine commit {commit} != requested {ref}")
           PY
-      - name: Generate error patterns
-        run: infra-error-patterns --all-projects
-      - name: Validate registry.jsonl exists
-        run: |
-          set -euo pipefail
-          if [ ! -f "memory/kb/patterns/registry.jsonl" ]; then
-            echo "::warning::memory/kb/patterns/registry.jsonl not found - error_patterns adapter will have no input"
-          else
-            echo "✓ registry.jsonl exists"
-          fi
+      # R1'-B 债3：原「error patterns 生成步」与「registry.jsonl 存在性校验步」
+      # 已删——前者扫 runner 本机 ~/.memory-core 索引（CI 上不存在，纯空转），
+      # 且 pack 工具同 tick 已以 --repo-root 运行 error-patterns
+      # （src/infra_core/packs/memory/pack.py），系重复动作；后者仅输出 warning，
+      # 无阻断价值。
       - name: Cache evolution history
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -164,6 +159,10 @@ jobs:
           # P1-A: Prevent module poisoning — blocks automatic insertion of scripts/ into sys.path.
           # The scanner explicitly re-adds its own directory via sys.path.insert.
           PYTHONSAFEPATH: '1'
+          # R1'-B 债2（belt-and-braces）：审计目标仓显式注入——值 = GITHUB_REPOSITORY，
+          # 与 evolution_self_audit.py REPO_NAME 默认链同步，多消费仓 tick 不再
+          # 错仓审计 hdot123-org/memory。
+          EVOLUTION_AUDIT_REPO: ${{ github.repository }}
 # 并发治理归属 caller：reusable 本体禁止携带与 caller 同名的顶层 concurrency——
 # 实测（2026-08-29 memory #1071 切换首 tick）caller 顶层 group 与 callee
 # group 同名时 GitHub 判定自死锁并秒取消（"deadlock was detected for

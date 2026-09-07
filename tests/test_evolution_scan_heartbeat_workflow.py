@@ -94,18 +94,27 @@ def test_scan_reusable_runs_infra_core_engine_module():
     assert steps["Run evolution scanner"]["run"] == "python -m infra_core.engine.evolution_scanner"
 
 
-def test_scan_reusable_generates_error_patterns_via_infra_entry():
-    """'Generate error patterns' 步骤用 infra-core 入口（memory-error-patterns 随 M5 修剪）。"""
+def test_scan_reusable_all_projects_steps_removed():
+    """R1'-B 债3：「error patterns 生成步」与「registry.jsonl 存在性校验步」已删。
+
+    删除理由：生成步（infra-error-patterns --all-projects）读 runner 本机
+    ~/.memory-core 索引，CI 上不存在 → 纯空转；且 pack 工具同 tick 已以
+    --repo-root 运行 error-patterns（src/infra_core/packs/memory/pack.py），
+    系重复动作。校验步仅输出 warning，无阻断价值。本测试锁死防回归。
+    """
     steps = _scan_steps(_load(_SCAN))
-    gen = steps["Generate error patterns"]
-    assert gen["run"].strip() == "infra-error-patterns --all-projects"
+    assert "Generate error patterns" not in steps, "债3：--all-projects 空转步不得回归"
+    assert "Validate registry.jsonl exists" not in steps, "债3：仅 warning 的探测步不得回归"
+    assert "--all-projects" not in _SCAN.read_text(), "scan 模板不得残留 --all-projects 用法"
 
 
-def test_scan_reusable_step_order_generate_before_scan():
-    """Generate error patterns 必须先于 Run evolution scanner（INFRA-81，顺序契约）。"""
+def test_scan_reusable_step_order_engine_install_before_scan():
+    """顺序契约（债3 调整后）：引擎安装步先于 Run evolution scanner。"""
     data = _load(_SCAN)
     names = [s.get("name", s.get("uses", "")) for s in data["jobs"]["scan"]["steps"]]
-    assert names.index("Generate error patterns") < names.index("Run evolution scanner")
+    assert names.index("Install engine (same commit as this reusable workflow)") < names.index(
+        "Run evolution scanner"
+    )
 
 
 def test_scan_reusable_label_ensure_found_and_isolated():

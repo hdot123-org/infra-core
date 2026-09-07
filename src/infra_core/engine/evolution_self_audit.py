@@ -46,8 +46,15 @@ REPOSITORIES_YML = FACTORY_HOME / "config" / "repositories.yml"
 
 # GAP-A (INFRA-174): Linear 同步失败检测配置
 # 被审计的 GitHub 仓库（evolution-found 标签所在仓库）
+# 默认链（R1'-B 债2）：EVOLUTION_AUDIT_REPO 显式指定 → GITHUB_REPOSITORY
+# （CI 下 = 本仓，多消费仓语义自动正确；与 evolution_utils.gh_repo_args()
+# 口径对齐，INFRA-601）→ 兜底 hdot123-org/memory（本地行为不变）。
 # 2026-08-19 org 迁移：hdot123/memory → hdot123-org/memory
-REPO_NAME = os.environ.get("EVOLUTION_AUDIT_REPO", "hdot123-org/memory")
+REPO_NAME = (
+    os.environ.get("EVOLUTION_AUDIT_REPO")
+    or os.environ.get("GITHUB_REPOSITORY")
+    or "hdot123-org/memory",
+)
 # GitHub Issue 创建后超过此分钟数仍无 linear-linkback 视为同步失败
 GAP_A_AUDIT_THRESHOLD_MIN = 30
 
@@ -808,7 +815,10 @@ def check_reverse_closure() -> list[dict[str, Any]]:
                 "issue",
                 "list",
                 # INFRA-601: 审计目标仓库显式化（与 Check 6 的 --repo REPO_NAME 语义
-                # 一致），不用 GITHUB_REPOSITORY（self-audit 可能跨仓运行）
+                # 一致）。REPO_NAME 默认链：CI 下 GITHUB_REPOSITORY=本仓（多消费仓
+                # 语义自动正确，与 evolution_utils.gh_repo_args() 口径对齐）；跨仓/
+                # 本地场景用 EVOLUTION_AUDIT_REPO 显式指定；最后兜底
+                # hdot123-org/memory 保持本地行为不变
                 "--repo",
                 REPO_NAME,
                 "--label",

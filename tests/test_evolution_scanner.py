@@ -2403,21 +2403,21 @@ def test_check_isolation_does_not_swallow_unexpected_exceptions(tmp_path):
         check_isolation(findings, history_path, 3, "iso", "dedup")
 
 
-def test_workflow_generates_error_patterns():
-    """INFRA-81: CI workflow has a step generating registry.jsonl before scanning.
+def test_workflow_no_all_projects_error_patterns_step():
+    """R1'-B 债3：evolution-scan.yml 的 error patterns 生成步已删，锁死防回归。
 
-    M4: 步骤命令改 infra-core 入口（memory-error-patterns 随 M5 修剪），
-    顺序契约不变（Generate error patterns 先于 Run evolution scanner）。
+    该步（infra-error-patterns --all-projects）读 runner 本机 ~/.memory-core
+    索引，CI 上不存在 → 纯空转；且 pack 工具同 tick 已以 --repo-root 运行
+    error-patterns（src/infra_core/packs/memory/pack.py），系重复动作。
+    registry.jsonl 存在性校验步（仅 warning）同步删除。
     """
     workflow_path = Path(__file__).parent.parent / ".github" / "workflows" / "evolution-scan.yml"
     with workflow_path.open() as f:
         content = f.read()
 
-    assert "infra-error-patterns --all-projects" in content
-    # The generate step must come before the scan step
-    gen_idx = content.index("Generate error patterns")
-    scan_idx = content.index("Run evolution scanner")
-    assert gen_idx < scan_idx, "Generate error patterns step must precede Run evolution scanner"
+    assert "--all-projects" not in content, "债3：--all-projects 在 CI 空转，不得回归"
+    assert "Generate error patterns" not in content, "债3：与 pack 工具重复的生成步不得回归"
+    assert "Validate registry.jsonl exists" not in content, "债3：仅 warning 的探测步不得回归"
 
 
 def test_config_error_patterns_no_dead_command():
