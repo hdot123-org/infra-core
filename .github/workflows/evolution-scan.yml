@@ -17,7 +17,7 @@
 # 本 workflow 必须用 DISPATCH_TOKEN（PAT），不能用 GITHUB_TOKEN。
 # 原因：DISPATCH_TOKEN 属 @hdot123（OWNER），创建的 Issue author=hdot123，
 # 满足 CODEOWNERS 与 governance 检查。触发链：
-#   GitHub Issue (DISPATCH_TOKEN) → Linear 同步 → n8n → trigger-droid.sh
+#   GitHub Issue (DISPATCH_TOKEN) → Linear 同步 → webhook（CF Worker）→ trigger-droid.sh
 #   → droid exec --tag linear-gateway → PR → CI → 合并
 #
 # 引擎来源（v0.15.0 解耦后）：

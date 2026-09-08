@@ -540,16 +540,16 @@ jobs:
             "${{ github.event.pull_request.head.sha || github.sha }}" \
             "$GH_TOKEN"
 
-  # ─── notify-ci-complete: webhook → n8n → trigger-ci-droid.sh ───
+  # ─── notify-ci-complete: webhook (CF Worker) → trigger-ci-droid.sh ───
   # Mirrors memory repo ci.yml:318-377 (INFRA-569). Without this job,
-  # infra-core CI completion never notifies n8n, breaking the
+  # infra-core CI completion never notifies the webhook gateway, breaking the
   # trigger-ci-droid.sh injection chain for all infra-core PRs.
   #
   # NOTE: qa.yml's qa-ok is NOT covered by this job's needs (GitHub
   # cross-workflow dependencies are not supported). This matches the
   # memory repo's structural limitation.
   notify-ci-complete:
-    name: Notify CI complete to n8n
+    name: Notify CI complete to webhook gateway
     runs-on: [self-hosted, pve-linux]
     timeout-minutes: 10
     needs: ci-ok
@@ -580,6 +580,8 @@ jobs:
           BRANCH: ${{ github.head_ref || github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          GATEWAY_GW_TOKEN: ${{ secrets.GATEWAY_GW_TOKEN }}
+          WEBHOOK_NOTIFY_STRICT: ${{ vars.WEBHOOK_NOTIFY_STRICT }}
         run: |
           set -euo pipefail
           PAYLOAD=$(jq -n \
@@ -591,15 +593,23 @@ jobs:
             --arg run_url "$RUN_URL" \
             '{repo:$repo, pr_number:$pr_number, branch:$branch, sha:$sha, status:$status, run_url:$run_url}')
 
+          # 网关 gw 参数（2026-09-08 断链修复）：wangguan 网关对 webhook Worker 目标做来源白名单
+          # （GitHub hooks IP 段 / ?gw= 令牌 / X-API-Key）。Actions runner IP 不在 hooks 段，
+          # 必须带 gw 令牌过第一跳；第二跳由 webhook-gateway 的 X-CI-Token 四通道认证接管。
+          GW_SEP="?"
+          case "$WEBHOOK_URL" in *\?*) GW_SEP="&";; esac
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             --retry 3 --retry-delay 5 --retry-all-errors \
-            -X POST "$WEBHOOK_URL" \
+            -X POST "${WEBHOOK_URL}${GW_SEP}gw=${GATEWAY_GW_TOKEN}" \
             -H "Content-Type: application/json" \
             -H "X-CI-Token: ${N8N_CI_TOKEN}" \
             -d "$PAYLOAD") || HTTP_CODE="000"
 
           if [ "$HTTP_CODE" != "200" ]; then
-            echo "::warning::Webhook delivery failed (HTTP $HTTP_CODE)"
+            # 2026-09-08 断链复盘：Access 墙 302 曾以绿色 job + 黄色 warning 藏了 4 天，
+            # 且 POSTHOG_API_KEY 缺配导致升级通道从未执行。现在：红色 error 注解（绿 job 里也显眼），
+            # PostHog 事件（告警面），严格模式下直接失败（墙修复稳定后置 WEBHOOK_NOTIFY_STRICT=true）。
+            echo "::error::Webhook delivery failed (HTTP $HTTP_CODE) — 注入链断裂，CI 完成通知未送达"
             # Only send PostHog event if API key is configured
             if [ -n "$POSTHOG_API_KEY" ]; then
               PR_NUM="${{ github.event.pull_request.number || 0 }}"
@@ -608,7 +618,13 @@ jobs:
                 -H "Content-Type: application/json" \
                 -d "{\"api_key\":\"${POSTHOG_API_KEY}\",\"batch\":[{\"event\":\"ci_webhook_send_failed\",\"properties\":{\"error_type\":\"webhook_delivery_failed\",\"pr_number\":\"$PR_NUM\",\"stage\":\"github_actions\",\"workflow\":\"ci\",\"detail\":\"HTTP $HTTP_CODE\",\"distinct_id\":\"ci-webhook\"},\"timestamp\":\"$TIMESTAMP\"}]}" || true
             else
-              echo "::notice::POSTHOG_API_KEY not configured, skipping event reporting"
+              echo "::warning::POSTHOG_API_KEY not configured — 升级通道哑火，失败只留在本注解"
+            fi
+            # 严格模式：墙修复稳定后置仓库变量 WEBHOOK_NOTIFY_STRICT=true，
+            # 非送达即 CI 失败（假绿彻底消灭；翻转前 merge 管道不受影响）
+            if [ "${WEBHOOK_NOTIFY_STRICT:-false}" = "true" ]; then
+              echo "::error::strict mode: failing CI on undelivered webhook notification"
+              exit 1
             fi
           fi
           exit 0
