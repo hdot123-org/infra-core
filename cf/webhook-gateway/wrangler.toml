@@ -1,5 +1,5 @@
 # CF Worker — webhook-gateway
-# M4 基础层：承接 n8n CI webhook 能力（绿地新建，不占生产域名）
+# M4 基础层：承接 CI webhook 能力（2026-09-08 起为唯一入口，原自动化层已退役）
 # 本里程碑仅部署到 workers.dev 子域（生产统一域名，见 DEPLOYMENT.md §7）
 
 name = "webhook-gateway"

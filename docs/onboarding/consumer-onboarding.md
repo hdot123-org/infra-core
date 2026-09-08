@@ -107,8 +107,8 @@ scanner 读取该文件后会跳过 `suppressed` 列表中的 finding（按 rule
 | `FACTORY_API_KEY` | droid-review BYOM 调用 | droid-review 系 |
 | `NVIDIA_KONG_PROXY_KEY` | droid-review BYOM 内网代理 | droid-review 系 |
 | `LINEAR_API_KEY` | Linear 状态核验（auto_close_resolved fail-closed） | scan / branch-cleanup |
-| `N8N_CI_WEBHOOK_URL` | CI 完成后 n8n webhook 路由 | 仅宿主 webhook 子系统 |
-| `N8N_CI_TOKEN` | n8n webhook 认证 | 仅宿主 webhook 子系统 |
+| `N8N_CI_WEBHOOK_URL` | CI 完成后 webhook 网关（CF Worker）路由（secret 名为历史资产名，退役收尾时更名） | 仅宿主 webhook 子系统 |
+| `N8N_CI_TOKEN` | webhook 网关认证（历史资产名，同上） | 仅宿主 webhook 子系统 |
 
 > 前四个是消费仓接入演进引擎所需；后两个仅宿主 webhook 子系统使用。
 > Values 不落仓库、不落日志；`gh secret set <NAME>` 写入。
