@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/hdot123-org/infra-core/compare/v0.16.0...v0.16.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **branch-cleanup:** 退休 INFRA-893 追踪的四个 mencbo 保护分支 (INFRA-893) ([#266](https://github.com/hdot123-org/infra-core/issues/266)) ([38dcd88](https://github.com/hdot123-org/infra-core/commit/38dcd887dd7464ac1f521dfb1f8d5c4c5a757473))
+
 ## [0.16.0](https://github.com/hdot123-org/infra-core/compare/v0.15.2...v0.16.0) (2026-09-08)
 
 
