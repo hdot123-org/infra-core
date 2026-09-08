@@ -1,0 +1,244 @@
+# Droid Task Executor — 统一执行器（R1 mission）
+#
+# 从 repository_dispatch(droid-task) 触发，在 pve-linux Runner 上执行 droid exec。
+# BYOK-only（百炼 coding 端点 + BAILIAN_API_KEY），禁 factory_credits。
+# 支持两种任务类型：error-gateway（PostHog 错误）和 linear-gateway（Linear issue）。
+#
+# 设计依据：architecture.md + governance-decisions.md + design-basis.md payload 契约。
+name: Droid Task Executor
+
+on:
+  repository_dispatch:
+    types: [droid-task]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: droid-task-${{ github.event.client_payload.task_id }}
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    name: Execute droid task
+    runs-on: [self-hosted, pve-linux]
+    timeout-minutes: 60
+
+    steps:
+      - name: Validate payload
+        run: |
+          set -euo pipefail
+          # 验证 client_payload 必需字段
+          KIND="${{ github.event.client_payload.kind }}"
+          TASK_ID="${{ github.event.client_payload.task_id }}"
+          REPO="${{ github.event.client_payload.repo }}"
+
+          if [[ -z "$KIND" || -z "$TASK_ID" || -z "$REPO" ]]; then
+            echo "::error::Missing required payload fields (kind/task_id/repo)"
+            exit 1
+          fi
+
+          if [[ "$KIND" != "error-gateway" && "$KIND" != "linear-gateway" ]]; then
+            echo "::error::Invalid kind: $KIND (must be error-gateway or linear-gateway)"
+            exit 1
+          fi
+
+          # 验证 kind-specific context 字段
+          if [[ "$KIND" == "error-gateway" ]]; then
+            ERROR_TYPE="${{ github.event.client_payload.context.error_type }}"
+            METHOD="${{ github.event.client_payload.context.method }}"
+            FAILED_EVENT="${{ github.event.client_payload.context.failed_event }}"
+            if [[ -z "$ERROR_TYPE" || -z "$METHOD" || -z "$FAILED_EVENT" ]]; then
+              echo "::error::error-gateway requires context.error_type/method/failed_event"
+              exit 1
+            fi
+          elif [[ "$KIND" == "linear-gateway" ]]; then
+            IDENTIFIER="${{ github.event.client_payload.context.identifier }}"
+            TEAM_KEY="${{ github.event.client_payload.context.team_key }}"
+            if [[ -z "$IDENTIFIER" || -z "$TEAM_KEY" ]]; then
+              echo "::error::linear-gateway requires context.identifier/team_key"
+              exit 1
+            fi
+          fi
+
+          echo "✓ Payload validated: kind=$KIND task_id=$TASK_ID repo=$REPO"
+
+      - name: Checkout target repo
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: ${{ github.event.client_payload.repo }}
+          token: ${{ secrets.DISPATCH_TOKEN }}
+
+      - name: Setup Droid BYOK
+        uses: ./.github/actions/setup-droid-byok
+        with:
+          bailian-api-key: ${{ secrets.BAILIAN_API_KEY }}
+
+      - name: Build prompt (error-gateway)
+        if: github.event.client_payload.kind == 'error-gateway'
+        env:
+          P_ERROR_TYPE: ${{ github.event.client_payload.context.error_type }}
+          P_METHOD: ${{ github.event.client_payload.context.method }}
+          P_FAILED_EVENT: ${{ github.event.client_payload.context.failed_event }}
+          P_COUNT: ${{ github.event.client_payload.context.count }}
+          P_LAST_SEEN: ${{ github.event.client_payload.context.last_seen }}
+          P_TRIGGER_TYPE: ${{ github.event.client_payload.context.trigger_type }}
+          P_REPO: ${{ github.event.client_payload.repo }}
+          P_SOURCE: ${{ github.event.client_payload.source }}
+        run: |
+          set -euo pipefail
+          # 组装 error-gateway prompt（Issue-first 硬门禁）
+          printf '%s\n' \
+            "PostHog 错误门铃触发。请按 error-gateway skill 执行。" \
+            "" \
+            "## 错误上下文" \
+            "- **Error Type**: ${P_ERROR_TYPE}" \
+            "- **Method**: ${P_METHOD}" \
+            "- **Failed Event**: ${P_FAILED_EVENT}" \
+            "- **Count**: ${P_COUNT}" \
+            "- **Last Seen**: ${P_LAST_SEEN}" \
+            "- **GitHub Repo**: ${P_REPO}" \
+            "- **Trigger Source**: ${P_SOURCE}" \
+            "- **Trigger Type**: ${P_TRIGGER_TYPE}" \
+            "" \
+            "## ⚠️ 执行顺序要求（Issue-first 硬门禁）" \
+            "1. **先创建 GitHub Issue**（步骤 5），记录 Issue 编号" \
+            "   - 先幂等检查：gh issue list --label posthog-error-sync --state all --search \"${P_ERROR_TYPE}\"" \
+            "   - 若已存在同指纹 Issue → 跳过创建" \
+            "   - 若不存在 → 创建 Issue（labels: needs-triage,posthog-error-sync）" \
+            "2. **然后才定位和修复代码**（步骤 6-7）" \
+            "3. **创建 PR 时必须包含 Closes #<issue-number>**" \
+            "4. **禁止在 Issue 创建前开始代码修改**" \
+            "" \
+            "## ℹ️ Alert 触发说明" \
+            "如果 Trigger Type 为 alert，则 error_type 和 method 可能为空。" \
+            "请使用 PostHog MCP 查询 memory.error 事件的最新错误详情（步骤 2），" \
+            "根据查询结果确定具体的 error_type 和 method。" \
+            "" \
+            "## 重要约束" \
+            "- 所有 commit 消息使用中文" \
+            "- PR title 必须包含错误指纹（如 fix: ${P_ERROR_TYPE} in ${P_METHOD}）" \
+            "- PR body 必须包含 Closes #<issue-number>" \
+            > /tmp/droid-prompt.txt
+          echo "✓ Error-gateway prompt written to /tmp/droid-prompt.txt"
+
+      - name: Build prompt (linear-gateway)
+        if: github.event.client_payload.kind == 'linear-gateway'
+        env:
+          P_ACTION: ${{ github.event.client_payload.context.action }}
+          P_TYPE: ${{ github.event.client_payload.context.type }}
+          P_IDENTIFIER: ${{ github.event.client_payload.context.identifier }}
+          P_TEAM_KEY: ${{ github.event.client_payload.context.team_key }}
+          P_TITLE: ${{ github.event.client_payload.context.title }}
+          P_REPO: ${{ github.event.client_payload.repo }}
+          P_SOURCE: ${{ github.event.client_payload.source }}
+        run: |
+          set -euo pipefail
+          # 组装 linear-gateway prompt（Fixes REF 回写契约 + Gate A 幂等性）
+          printf '%s\n' \
+            "Linear 门铃触发。IssueRef=${P_IDENTIFIER}。Team=${P_TEAM_KEY}。请按 linear-gateway skill 执行。" \
+            "" \
+            "## Issue 上下文" \
+            "- **Issue**: ${P_IDENTIFIER}" \
+            "- **Title**: ${P_TITLE}" \
+            "- **Team**: ${P_TEAM_KEY}" \
+            "- **Action**: ${P_ACTION}" \
+            "- **Trigger**: ${P_TYPE}" \
+            "- **GitHub Repo**: ${P_REPO}" \
+            "- **Trigger Source**: ${P_SOURCE}" \
+            "" \
+            "## ⚠️ 执行前检查（Gate A 幂等性）" \
+            "1. 检查 Linear issue 当前状态（用 Linear API 查询）" \
+            "2. 若 issue state.type = completed（已 Done）→ 跳过执行（幂等防重复）" \
+            "3. 若 issue state.type ≠ completed → 继续执行" \
+            "" \
+            "## 执行要求" \
+            "1. 使用 Linear GraphQL API 拉取 Issue 完整详情（标题、描述、标签、评论）" \
+            "2. 创建 feature 分支（分支名包含 ${P_IDENTIFIER}）" \
+            "3. 执行代码变更" \
+            "4. 运行验证（测试/构建/lint）" \
+            "5. 提交并推送到 GitHub" \
+            "6. 创建 PR（标题包含 ${P_IDENTIFIER}，body 包含 Fixes ${P_IDENTIFIER}）" \
+            "" \
+            "## 重要约束" \
+            "- 所有 commit 消息使用中文" \
+            "- PR title 必须包含 ${P_IDENTIFIER}" \
+            "- PR body 必须包含 Fixes ${P_IDENTIFIER}" \
+            > /tmp/droid-prompt.txt
+          echo "✓ Linear-gateway prompt written to /tmp/droid-prompt.txt"
+
+      - name: Execute droid
+        id: execute
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          P_KIND: ${{ github.event.client_payload.kind }}
+          P_TASK_ID: ${{ github.event.client_payload.task_id }}
+          P_REPO: ${{ github.event.client_payload.repo }}
+        run: |
+          set -euo pipefail
+          PROMPT=$(cat /tmp/droid-prompt.txt)
+
+          # 组装 tag 元数据
+          TAG_JSON=$(jq -n \
+            --arg name "$P_KIND" \
+            --arg taskId "$P_TASK_ID" \
+            --arg repo "$P_REPO" \
+            '{name: $name, metadata: {taskId: $taskId, repo: $repo}}')
+
+          echo "Launching droid exec --auto high --tag ..."
+
+          # 执行 droid（auto high 模式，允许改仓）
+          droid exec \
+            --auto high \
+            --output-format json \
+            --tag "$TAG_JSON" \
+            "$PROMPT" \
+            | tee /tmp/droid-output.json
+
+          echo "✓ Droid execution completed"
+
+      - name: Failure fallback (create Issue)
+        if: failure() && steps.execute.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          P_KIND: ${{ github.event.client_payload.kind }}
+          P_TASK_ID: ${{ github.event.client_payload.task_id }}
+          P_REPO: ${{ github.event.client_payload.repo }}
+          P_SOURCE: ${{ github.event.client_payload.source }}
+          P_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # 幂等检查：避免重复创建 Issue
+          EXISTING=$(gh issue list --repo "$P_REPO" --label needs-triage \
+            --state all --search "droid-task failed for $P_TASK_ID" --limit 1 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            echo "SKIP: Failure Issue already exists for $P_TASK_ID"
+            exit 0
+          fi
+
+          # 创建失败 Issue
+          printf '%s\n' \
+            "## droid-task 执行失败" \
+            "" \
+            "**Task ID**: \`$P_TASK_ID\`" \
+            "**Kind**: $P_KIND" \
+            "**Repo**: $P_REPO" \
+            "**Source**: $P_SOURCE" \
+            "**Workflow Run**: $P_RUN_URL" \
+            "" \
+            "请查看 workflow run 日志确认失败原因。" \
+            "" \
+            "---" \
+            "此 Issue 由 droid-task.yml 自动创建（if: failure() 兜底）。" \
+            > /tmp/issue-body.txt
+
+          gh issue create \
+            --repo "$P_REPO" \
+            --title "droid-task 执行失败: $P_TASK_ID ($P_KIND)" \
+            --body-file /tmp/issue-body.txt \
+            --label "needs-triage" || {
+            echo "::warning::Failed to create failure Issue (gh may not be authenticated)"
+          }

@@ -1,0 +1,77 @@
+name: "Setup Droid BYOK"
+description: "Install Droid CLI + write minimal BYOK settings.json (Bailian coding endpoint). BYOK-only, zero factory_credits."
+
+inputs:
+  bailian-api-key:
+    description: "Bailian API key for BYOK (BAILIAN_API_KEY secret)"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Droid CLI
+      shell: bash
+      run: |
+        set -euo pipefail
+        # 官方安装命令（来源：droid-runner-pilot.yml）
+        curl -fsSL https://app.factory.ai/cli | sh
+
+        # CLI 安装路径未在文档钉死，探测常见位置
+        if ! command -v droid >/dev/null 2>&1; then
+          for dir in "$HOME/.factory/bin" "$HOME/.local/bin" /usr/local/bin; do
+            if [ -x "$dir/droid" ]; then
+              echo "$dir" >> "$GITHUB_PATH"
+              echo "droid found at: $dir/droid"
+              break
+            fi
+          done
+        fi
+
+        # 验证安装
+        command -v droid
+        droid --version
+
+    - name: Pre-check BYOK secret
+      shell: bash
+      env:
+        BAILIAN_API_KEY: ${{ inputs.bailian-api-key }}
+      run: |
+        set -euo pipefail
+        if [ -z "$BAILIAN_API_KEY" ]; then
+          echo "::error::BAILIAN_API_KEY is empty or not configured (repo or org)."
+          exit 1
+        fi
+        echo "✓ BAILIAN_API_KEY is present (length: ${#BAILIAN_API_KEY} chars)."
+
+    - name: Write minimal BYOK settings
+      shell: bash
+      env:
+        BAILIAN_API_KEY: ${{ inputs.bailian-api-key }}
+      run: |
+        set -euo pipefail
+        # jq 生成最小 settings.json：仅 customModels + 默认模型，
+        # 与 droid-runner-pilot.yml 字节级同构（BYOK-only，禁 factory_credits）
+        mkdir -p "$HOME/.factory"
+        jq -n --arg key "$BAILIAN_API_KEY" '{
+          customModels: [{
+            model: "qwen3.7-plus",
+            id: "custom:Bailian-Coding",
+            baseUrl: "https://coding.dashscope.aliyuncs.com/v1",
+            apiKey: $key,
+            displayName: "Bailian Coding BYOK",
+            provider: "generic-chat-completion-api",
+            noImageSupport: false
+          }],
+          sessionDefaultSettings: { model: "custom:Bailian-Coding" }
+        }' > "$HOME/.factory/settings.json"
+
+        # 验证 apiKey 已写入
+        jq -e '.customModels[0].apiKey | length > 0' "$HOME/.factory/settings.json" >/dev/null
+        echo "✓ settings.json written (custom model: qwen3.7-plus via coding endpoint)"
+
+        # BYOK-only 硬门禁：确认无 factory_credits 依赖
+        if jq -e '.factoryCredits' "$HOME/.factory/settings.json" >/dev/null 2>&1; then
+          echo "::error::settings.json must NOT contain factoryCredits (BYOK-only铁律)"
+          exit 1
+        fi
+        echo "✓ BYOK-only verified (no factoryCredits in settings.json)"
