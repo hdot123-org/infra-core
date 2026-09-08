@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.2](https://github.com/hdot123-org/infra-core/compare/v0.15.1...v0.15.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* **security:** fail-closed fork guard for droid-review chains ([#250](https://github.com/hdot123-org/infra-core/issues/250)) ([0d0bdca](https://github.com/hdot123-org/infra-core/commit/0d0bdca4e9b0c4fde3d5edad76ef4c8b489f5e47))
+
 ## [0.15.1](https://github.com/hdot123-org/infra-core/compare/v0.15.0...v0.15.1) (2026-09-07)
 
 
