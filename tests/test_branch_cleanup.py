@@ -2554,3 +2554,56 @@ def test_retirement_list_tracks_infra_737() -> None:
         "infra-737 owner-abandoned branch must be listed for retirement"
     )
     assert "INFRA-737" in content, "the infra-737 entry must carry its INFRA reference"
+
+
+# ============================================================================
+# VAL-BRANCH-042 (INFRA-893): retirement list ships with infra-893 entries
+# ============================================================================
+def test_retirement_list_tracks_infra_893() -> None:
+    """The checked-in retirement list also lists the four protected mencbo
+    branches flagged by tracking issue INFRA-893 (mirror mencbo#69) so the
+    tracker can drain once the scheduled cleanup deletes them.
+
+    Evidence chain (one entry per protected branch):
+    - chore/rename-to-engram: PR #2 (mencbo) closed unmerged; the engram
+      rename was superseded by PR #3 (mencbo, merged 2026-09-06T03:33:46Z)
+      which renamed the project to MenCbo (mencbo) instead — main contains
+      neither "memengine" nor "engram", the single unique commit a24fd3a is
+      the abandoned alternative naming.
+    - chore/v0.2.1-updater-e2e: PR #30 (mencbo) MERGED via squash d871692
+      (in main ancestry); git cherry marks the branch's single commit
+      27fcdb5 patch-equivalent to the squash, but main evolved the version
+      fields since (0.2.2 via #31, then 0.2.4), so the INFRA-383 merge-tree
+      containment check cannot prove containment on evolved main.
+    - feat/desktop-ci-foundation: PR #35 (mencbo) MERGED via squash 71cc94c
+      (in main ancestry); git cherry marks feat commit ff20264
+      patch-equivalent, the other unique commit eccc544 is a stale main
+      merge (no patch); main evolved past the branch tip (auto-merge.yml
+      workflow list gained "Droid Auto Review", infra-core pin v0.15.0 to
+      v0.15.2), so the INFRA-383 containment check fails on evolved main.
+    - val/ci002-engine-only: PR #43 (mencbo) closed; one-time validation
+      fixture whose PR body explicitly declares "will be closed, do not
+      merge" (VAL-CI-002, comment-only change), same class as the
+      validation-td fixtures of PR #921/#922.
+
+    First cross-repo retirement: the branches live in mencbo while the list
+    ships in infra-core, so deletion additionally requires an infra-core
+    release tag plus mencbo's pin bump before the hourly sweep can act on
+    these entries.
+
+    Mirrors VAL-BRANCH-029/031/032/033/037/038/039/040/041: the list is
+    the audit artifact, and adding or removing entries requires PR review.
+    """
+    retired = repo_root() / "src" / "infra_core" / "shell" / "branch_cleanup_retired.txt"
+    assert retired.is_file(), "src/infra_core/shell/branch_cleanup_retired.txt must exist"
+    content = retired.read_text()
+    for branch in (
+        "chore/rename-to-engram",
+        "chore/v0.2.1-updater-e2e",
+        "feat/desktop-ci-foundation",
+        "val/ci002-engine-only",
+    ):
+        assert branch in content, (
+            f"infra-893 protected mencbo branch {branch} must be listed for retirement"
+        )
+    assert "INFRA-893" in content, "the infra-893 entries must carry their INFRA reference"
