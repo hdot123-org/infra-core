@@ -1,0 +1,275 @@
+# Droid Autofix — CI 失败自动修复闭环（阶段三最小落地）
+#
+# 链路：CI 失败（PR 分支）→ 本 workflow（新 runner 上的 droid）→
+#   BYOK 模型分析失败日志并最小修复 → 脚本层 commit/push 回原 PR 分支 →
+#   CI + droid-review 自动重跑 → auto-merge 管道收尾。
+#
+# 依据与护栏（2026-09-08 会话裁定与实测）：
+# - 计费：仅 BYOK（百炼 coding 端点 + BAILIAN_API_KEY），禁 factory_credits
+#   （kb decision: runner-droid-byok-only-ruling）
+# - 权限：--auto medium（文件编辑/装包/build/test；不含 git push）——
+#   官方最佳实践 "commit/push in scripted steps"，推送一律脚本层完成
+# - PR 写操作凭证：DISPATCH_TOKEN（PAT，不受 GITHUB_TOKEN 递归抑制，
+#   确保 fix push 能触发新一轮 CI + droid-review）
+# - 防死循环：每 PR 最多 2 次自动修复（评论 sentinel 计数，超限交还人工）
+# - 串行化：全局 concurrency 单飞，防并发修复互踩与 sentinel 竞态
+# - droid exec 无 --timeout 旗标（官方文档核验）→ job 级 timeout-minutes 兜底
+# - 提示词注入面：失败日志摘录可能含 PR 作者可控文本，私有仓 + 内部
+#   消费者场景风险可控；公开仓复用本模板前需加输入净化
+#
+# 触发面：
+# - workflow_run：CI（workflow 名 "CI"）失败（仅 pull_request 事件触发的 run；
+#   main 直推失败不自动修）
+# - workflow_dispatch：手动指定 pr_number（演示/补跑入口）
+
+name: Droid Autofix
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "待修复的 PR 编号（演示/补跑入口）"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: droid-autofix
+  cancel-in-progress: false
+
+jobs:
+  autofix:
+    name: Auto-fix failing PR (BYOK)
+    # main 直推与非失败结论不进入修复（分支级再兜底一次）
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'pull_request' &&
+       github.event.workflow_run.conclusion == 'failure' &&
+       github.event.workflow_run.head_branch != 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # ---- 1. 解析 PR 上下文（workflow_run / dispatch 双入口归一） ----
+      - name: Resolve PR context
+        id: ctx
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          WR_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WR_SHA: ${{ github.event.workflow_run.head_sha }}
+          WR_RUN_ID: ${{ github.event.workflow_run.id }}
+          WR_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          INPUT_PR: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            PR="$INPUT_PR"
+            BRANCH=$(gh pr view "$PR" --json headRefName --jq .headRefName)
+            SHA=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
+            RUN_ID=$(gh run list --branch "$BRANCH" --workflow CI --limit 1 \
+              --json databaseId,conclusion --jq '.[] | select(.conclusion == "failure") | .databaseId' | head -1)
+            [ -z "$RUN_ID" ] && RUN_ID=$(gh run list --branch "$BRANCH" --workflow CI --limit 1 --json databaseId --jq '.[0].databaseId')
+          else
+            PR="$WR_PR_NUMBER"
+            BRANCH="$WR_BRANCH"
+            SHA="$WR_SHA"
+            RUN_ID="$WR_RUN_ID"
+            if [ -z "$PR" ]; then
+              PR=$(gh pr list --head "$BRANCH" --state open --limit 1 --json number --jq '.[0].number' || echo "")
+            fi
+            if [ -z "$PR" ]; then
+              echo "skip: 分支 $BRANCH 无 open PR，不修复"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          STATE=$(gh pr view "$PR" --json state --jq .state)
+          if [ "$STATE" != "OPEN" ]; then
+            echo "skip: PR #$PR 状态 $STATE 非 OPEN"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "pr=$PR"
+            echo "branch=$BRANCH"
+            echo "sha=$SHA"
+            echo "run_id=$RUN_ID"
+          } >> "$GITHUB_OUTPUT"
+          echo "target: PR #$PR branch=$BRANCH failed_run=$RUN_ID"
+
+      # ---- 2. 防死循环：sentinel 计数，每 PR 最多 2 次 ----
+      - name: Attempt cap guard (max 2 per PR)
+        id: cap
+        if: steps.ctx.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          PR: ${{ steps.ctx.outputs.pr }}
+        run: |
+          set -euo pipefail
+          N=$(gh pr view "$PR" --json comments \
+            --jq '[.comments[].body | select(contains("<!-- droid-autofix-attempt"))] | length')
+          echo "existing autofix attempts on PR #$PR: $N"
+          if [ "$N" -ge 2 ]; then
+            echo "::notice::PR #$PR 已达自动修复上限（2 次），交还人工处理"
+            echo "active=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "attempt=$((N + 1))" >> "$GITHUB_OUTPUT"
+            echo "active=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ---- 3. 检出 PR head ----
+      - name: Checkout PR head
+        if: steps.cap.outputs.active == 'true'
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ steps.ctx.outputs.branch }}
+          fetch-depth: 0
+
+      # ---- 4. 安装 Droid CLI（探测式，与 droid-runner-pilot 同款） ----
+      - name: Install Droid CLI
+        if: steps.cap.outputs.active == 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL https://app.factory.ai/cli | sh
+          if ! command -v droid >/dev/null 2>&1; then
+            for dir in "$HOME/.factory/bin" "$HOME/.local/bin" /usr/local/bin; do
+              if [ -x "$dir/droid" ]; then
+                echo "$dir" >> "$GITHUB_PATH"
+                echo "droid found at: $dir/droid"
+                break
+              fi
+            done
+          fi
+          command -v droid
+          droid --version
+
+      # ---- 5. BYOK settings 注入（与 pilot byok job 同构，裁定禁 factory_credits） ----
+      - name: Pre-check BYOK secret and write settings
+        if: steps.cap.outputs.active == 'true'
+        env:
+          BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BAILIAN_API_KEY" ]; then
+            echo "::error::BAILIAN_API_KEY secret is empty or not configured (repo or org)."
+            exit 1
+          fi
+          mkdir -p "$HOME/.factory"
+          jq -n --arg key "$BAILIAN_API_KEY" '{
+            customModels: [{
+              model: "qwen3.7-plus",
+              id: "custom:Bailian-Coding-Autofix",
+              baseUrl: "https://coding.dashscope.aliyuncs.com/v1",
+              apiKey: $key,
+              displayName: "Bailian Coding BYOK Autofix",
+              provider: "generic-chat-completion-api",
+              noImageSupport: false
+            }],
+            sessionDefaultSettings: { model: "custom:Bailian-Coding-Autofix" }
+          }' > "$HOME/.factory/settings.json"
+          jq -e '.customModels[0].apiKey | length > 0' "$HOME/.factory/settings.json" >/dev/null
+          echo "BYOK settings written (qwen3.7-plus via coding endpoint)"
+
+      # ---- 6. 失败日志摘录 + 提示词组装 ----
+      - name: Build autofix prompt
+        if: steps.cap.outputs.active == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.ctx.outputs.pr }}
+          BRANCH: ${{ steps.ctx.outputs.branch }}
+          SHA: ${{ steps.ctx.outputs.sha }}
+          RUN_ID: ${{ steps.ctx.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          # --log-failed 只含失败 job 的日志；截断防提示词爆炸
+          if [ -n "$RUN_ID" ]; then
+            gh run view "$RUN_ID" --log-failed 2>/dev/null | head -c 12000 > /tmp/failed.log || true
+          fi
+          [ -s /tmp/failed.log ] || echo "（失败日志不可得，仅凭 job 名修复）" > /tmp/failed.log
+          cat > /tmp/prompt.md <<'PROMPT_EOF'
+          你在 GitHub Runner 上执行「CI 失败自动修复」任务。
+
+          ## 要求
+          1. 阅读仓库根 AGENTS.md 的编码规范并遵守
+          2. 定位失败根因，做最小修复：不顺手重构、不改无关文件、不加无关依赖
+          3. 修复后运行最窄的相关测试验证（如 pytest 单文件/单测）；无法运行时说明原因
+          4. 禁止任何远程 git 操作（push/fetch 远端/开 PR）——推送由外层脚本完成
+          5. 最后用一段话总结：根因、修法、验证结果
+
+          ## 失败上下文
+          PROMPT_EOF
+          {
+            echo "- PR: #$PR  分支: $BRANCH  HEAD: $SHA"
+            [ -n "$RUN_ID" ] && echo "- 失败 run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/$RUN_ID"
+            echo ""
+            echo "## 失败日志摘录（截断）"
+            echo '```'
+            cat /tmp/failed.log
+            echo '```'
+          } >> /tmp/prompt.md
+          echo "prompt size: $(wc -c < /tmp/prompt.md) bytes"
+
+      # ---- 7. droid 修复执行（BYOK；rc 落输出，不在此步失败） ----
+      - name: Run droid autofix exec
+        id: exec
+        if: steps.cap.outputs.active == 'true'
+        run: |
+          set -euo pipefail
+          RC=0
+          droid exec --auto medium -o json -f /tmp/prompt.md | tee /tmp/droid-result.json || RC=$?
+          echo "rc=$RC" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      # ---- 8. 有 diff 则 commit + PAT 推回原分支（触发新一轮 CI） ----
+      - name: Commit and push fix
+        id: push
+        if: steps.cap.outputs.active == 'true' && steps.exec.outputs.rc == '0'
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          PR: ${{ steps.ctx.outputs.pr }}
+          BRANCH: ${{ steps.ctx.outputs.branch }}
+          ATTEMPT: ${{ steps.cap.outputs.attempt }}
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "no changes produced; nothing to push"
+            exit 0
+          fi
+          git config user.name "droid-autofix[bot]"
+          git config user.email "droid-autofix[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: droid autofix attempt ${ATTEMPT} for PR #${PR}"
+          # credential helper 走 GH_TOKEN（PAT），值不进命令行与日志
+          git -c credential.helper='!gh auth git-credential' push origin "HEAD:refs/heads/${BRANCH}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      # ---- 9. PR 评论终态报告（sentinel 随评论落库，供上限计数） ----
+      - name: Report to PR
+        if: steps.cap.outputs.active == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          PR: ${{ steps.ctx.outputs.pr }}
+          ATTEMPT: ${{ steps.cap.outputs.attempt }}
+          RC: ${{ steps.exec.outputs.rc }}
+          CHANGED: ${{ steps.push.outputs.changed }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ "$RC" != "0" ]; then
+            BODY="⚠️ droid autofix 第 ${ATTEMPT} 次尝试失败（exec 非零退出，不计改动）。日志：${RUN_URL}"
+          elif [ "$CHANGED" = "true" ]; then
+            SUMMARY=$(jq -r '.result // "（无摘要）"' /tmp/droid-result.json 2>/dev/null | head -c 600 || echo "（无摘要）")
+            BODY="🤖 droid autofix 第 ${ATTEMPT} 次修复已推送，CI 将自动重跑。摘要：${SUMMARY}
+
+          运行记录：${RUN_URL}"
+          else
+            BODY="🤖 droid autofix 第 ${ATTEMPT} 次分析完成但无代码改动（疑似 flaky 或需人工介入）。运行记录：${RUN_URL}"
+          fi
+          printf '%s\n\n<!-- droid-autofix-attempt-%s -->\n' "$BODY" "$ATTEMPT" > /tmp/comment.md
+          gh pr comment "$PR" --body-file /tmp/comment.md
