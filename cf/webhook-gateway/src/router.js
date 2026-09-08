@@ -1,7 +1,8 @@
 /**
  * Pure function routing — no side effects, fully testable.
  *
- * Aligned with n8n Unified Events Multiplexer (github-events-router-v3, 2026-09-02 upgrade).
+ * Aligned with github-events-router-v3 decisions (legacy unified multiplexer;
+ * superseded by this Worker — legacy automation layer retired 2026-09-08).
  * Classification matrix (9 categories):
  *
  * | Input                                               | Route           | Action        |

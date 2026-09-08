@@ -540,16 +540,16 @@ jobs:
             "${{ github.event.pull_request.head.sha || github.sha }}" \
             "$GH_TOKEN"
 
-  # ─── notify-ci-complete: webhook → n8n → trigger-ci-droid.sh ───
+  # ─── notify-ci-complete: webhook (CF Worker) → trigger-ci-droid.sh ───
   # Mirrors memory repo ci.yml:318-377 (INFRA-569). Without this job,
-  # infra-core CI completion never notifies n8n, breaking the
+  # infra-core CI completion never notifies the webhook gateway, breaking the
   # trigger-ci-droid.sh injection chain for all infra-core PRs.
   #
   # NOTE: qa.yml's qa-ok is NOT covered by this job's needs (GitHub
   # cross-workflow dependencies are not supported). This matches the
   # memory repo's structural limitation.
   notify-ci-complete:
-    name: Notify CI complete to n8n
+    name: Notify CI complete to webhook gateway
     runs-on: [self-hosted, pve-linux]
     timeout-minutes: 10
     needs: ci-ok
