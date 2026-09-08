@@ -37,6 +37,7 @@ on:
 
 permissions:
   contents: read
+  actions: read   # 步骤 6 gh run view --log-failed 需要（run 34201897176 教训）
 
 concurrency:
   group: droid-autofix
@@ -53,6 +54,11 @@ jobs:
        github.event.workflow_run.head_branch != 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # 关键修复（run 34201897176 根因）：checkout 前的步骤里 gh 会从本地
+      # .git 解析仓库名而崩溃（"not a git repository"）；GH_REPO 让全部
+      # gh 调用显式定仓，不依赖本地 git
+      GH_REPO: ${{ github.repository }}
     steps:
       # ---- 1. 解析 PR 上下文（workflow_run / dispatch 双入口归一） ----
       - name: Resolve PR context
