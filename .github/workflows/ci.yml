@@ -580,6 +580,7 @@ jobs:
           BRANCH: ${{ github.head_ref || github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          GATEWAY_GW_TOKEN: ${{ secrets.GATEWAY_GW_TOKEN }}
           WEBHOOK_NOTIFY_STRICT: ${{ vars.WEBHOOK_NOTIFY_STRICT }}
         run: |
           set -euo pipefail
@@ -592,9 +593,14 @@ jobs:
             --arg run_url "$RUN_URL" \
             '{repo:$repo, pr_number:$pr_number, branch:$branch, sha:$sha, status:$status, run_url:$run_url}')
 
+          # 网关 gw 参数（2026-09-08 断链修复）：wangguan 网关对 webhook Worker 目标做来源白名单
+          # （GitHub hooks IP 段 / ?gw= 令牌 / X-API-Key）。Actions runner IP 不在 hooks 段，
+          # 必须带 gw 令牌过第一跳；第二跳由 webhook-gateway 的 X-CI-Token 四通道认证接管。
+          GW_SEP="?"
+          case "$WEBHOOK_URL" in *\?*) GW_SEP="&";; esac
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             --retry 3 --retry-delay 5 --retry-all-errors \
-            -X POST "$WEBHOOK_URL" \
+            -X POST "${WEBHOOK_URL}${GW_SEP}gw=${GATEWAY_GW_TOKEN}" \
             -H "Content-Type: application/json" \
             -H "X-CI-Token: ${N8N_CI_TOKEN}" \
             -d "$PAYLOAD") || HTTP_CODE="000"
