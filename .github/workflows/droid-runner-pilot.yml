@@ -64,3 +64,72 @@ jobs:
           echo "runner: ${RUNNER_NAME:-unknown} @ $(hostname)"
           droid exec -o json "请输出一句：'阶段一测试通过，Droid 可在云端正常执行。'，不要修改任何文件。" \
             | tee /tmp/droid-smoke-output.json
+
+  # BYOK 路径：百炼 coding 端点（公网可达，与本机 node-01 内网路线解耦）。
+  # 2026-09-08 fresh-HOME 本机实测：coding.dashscope.aliyuncs.com/v1 服务
+  # qwen3.7-plus（另含 glm-5 / kimi-k2.5 / qwen3-coder* 等多厂牌池），
+  # 无 Factory 登录、无 FACTORY_API_KEY 亦可调用，factory_credits=0。
+  # secret 来源：org 级 BAILIAN_API_KEY（ALL repositories）+ repo 级同名。
+  byok-smoke-test:
+    name: BYOK smoke test (Bailian coding endpoint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install Droid CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://app.factory.ai/cli | sh
+          if ! command -v droid >/dev/null 2>&1; then
+            for dir in "$HOME/.factory/bin" "$HOME/.local/bin" /usr/local/bin; do
+              if [ -x "$dir/droid" ]; then
+                echo "$dir" >> "$GITHUB_PATH"
+                echo "droid found at: $dir/droid"
+                break
+              fi
+            done
+          fi
+          command -v droid
+          droid --version
+
+      - name: Pre-check BYOK secret
+        env:
+          BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BAILIAN_API_KEY" ]; then
+            echo "::error::BAILIAN_API_KEY secret is empty or not configured (repo or org)."
+            exit 1
+          fi
+          echo "Secret is present (length: ${#BAILIAN_API_KEY} chars)."
+
+      - name: Write minimal BYOK settings
+        env:
+          BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
+        run: |
+          set -euo pipefail
+          # jq 生成最小 settings.json：仅 customModels + 默认模型，
+          # 与 fresh-HOME 实测通过的注入方式字节级同构
+          mkdir -p "$HOME/.factory"
+          jq -n --arg key "$BAILIAN_API_KEY" '{
+            customModels: [{
+              model: "qwen3.7-plus",
+              id: "custom:Bailian-Coding-Test",
+              baseUrl: "https://coding.dashscope.aliyuncs.com/v1",
+              apiKey: $key,
+              displayName: "Bailian Coding BYOK Test",
+              provider: "generic-chat-completion-api",
+              noImageSupport: false
+            }],
+            sessionDefaultSettings: { model: "custom:Bailian-Coding-Test" }
+          }' > "$HOME/.factory/settings.json"
+          jq -e '.customModels[0].apiKey | length > 0' "$HOME/.factory/settings.json" >/dev/null
+          echo "settings.json written (custom model: qwen3.7-plus via coding endpoint)"
+
+      - name: BYOK smoke exec (no FACTORY_API_KEY)
+        run: |
+          set -euo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown} @ $(hostname)"
+          droid exec -o json "请输出一句：'BYOK(百炼coding端点) 云端测试通过。'，不要修改任何文件。" \
+            | tee /tmp/droid-byok-smoke.json
