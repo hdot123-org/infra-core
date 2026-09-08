@@ -175,3 +175,7 @@ python -m infra_core.governance --author hdot123 --files .evolution/config.yml
 ## License
 
 MIT
+
+## Fork PR 政策（droid-review）
+
+自 v0.15.2 起（PR #250），droid-review 链对 `pull_request_target` 事件做 fail-closed 身份检查：PR head 来自 fork（`head.repo` != 本仓）或 `head.repo` 缺失时，AI 审查直接失败退出，防止 fork 经 AGENTS.md 注入指令操纵审查。同仓分支 PR 不受影响；维护者可通过 `workflow_dispatch` 手动触发审查。
