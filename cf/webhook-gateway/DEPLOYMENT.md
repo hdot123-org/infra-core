@@ -1,6 +1,8 @@
 # DEPLOYMENT.md — webhook-gateway CF Worker
 
-> M4 基础层：CF Worker 承接 n8n CI webhook 能力。
+> **状态（2026-09-08 用户裁定）**：本 Worker 为唯一 webhook 入口，原自动化层正式退役，全系统口径统一为「webhook（CF 承接）」。本文档中指向原自动化层的双跑核对与 tunnel 回滚章节自此**作废**，仅作迁移史实保留；退役收尾清单见项目 inbox。
+>
+> M4 基础层：CF Worker 承接 CI webhook 能力。
 > 本里程碑只做代码+测试+文档（F1），不执行部署（F2）或域名切换。
 
 ---

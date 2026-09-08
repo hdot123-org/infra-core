@@ -1,8 +1,9 @@
 /**
  * Differential verification — VAL-WPARITY-001
  *
- * Compares CF Worker router.js decisions against production Unified Events Multiplexer
- * behavior for 9 categories of real captured payloads from n8n execution_data.
+ * Compares CF Worker router.js decisions against the legacy unified multiplexer
+ * baseline for 9 categories of real captured payloads from its execution_data
+ * (pre-migration captures; legacy automation layer retired 2026-09-08).
  *
  * Each category: capture real payload → run through router.js → compare with
  * expected production decision → assert match.
@@ -15,8 +16,8 @@ import assert from 'node:assert/strict';
 import { route, detectLinear } from '../src/router.js';
 
 /**
- * Production multiplexer expected decisions (from n8n Unified Events Multiplexer,
- * /opt/n8n-webhook/workflows/github-events-router-v3.json, upgraded 2026-09-02).
+ * Baseline expected decisions (from the legacy unified multiplexer's workflow
+ * export github-events-router-v3 on node-22, upgraded 2026-09-02, retired 2026-09-08).
  *
  * Format: { category, headers, body, expectedRoute, expectedAction }
  */
