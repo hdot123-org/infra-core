@@ -46,10 +46,15 @@ concurrency:
 jobs:
   autofix:
     name: Auto-fix failing PR (BYOK)
+    # 门禁（Fable 审查 C 项裁定）：自动开火默认关——本仓 PR 全部由活会话持有，
+    # 无守卫的自动模式必然与会话竞态（不对称修复风险）。守卫齐备后将仓库变量
+    # AUTOFIX_AUTO_ENABLED 置 true 启用；workflow_dispatch（显式派发）不受此门限制。
     # main 直推与非失败结论不进入修复（分支级再兜底一次）
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.event == 'pull_request' &&
+      (github.event_name == 'workflow_run' &&
+       vars.AUTOFIX_AUTO_ENABLED == 'true' &&
+       github.event.workflow_run.event == 'pull_request' &&
        github.event.workflow_run.conclusion == 'failure' &&
        github.event.workflow_run.head_branch != 'main')
     runs-on: ubuntu-latest
@@ -100,11 +105,44 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # --- ownership 三连守卫（Fable 审查 B-1/B-2，防双执行器抢活与不对称修复）---
+          # ① draft = 持有者声明 WIP，autofix 不接管（ready 即放开）
+          DRAFT=$(gh pr view "$PR" --json isDraft --jq .isDraft)
+          if [ "$DRAFT" = "true" ]; then
+            echo "skip: PR #$PR 为 draft（持有会话 WIP 中），autofix 让路"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # ② 失败 SHA 之后分支又动过 = 有活跃执行者，让路（无状态、跨仓可移植）
+          HEAD_NOW=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
+          if [ "$HEAD_NOW" != "$SHA" ]; then
+            echo "skip: 分支已从 ${SHA:0:7} 移动到 ${HEAD_NOW:0:7}（有活跃执行者），autofix 让路"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # ③ 静默期：最近提交 < 20 分钟 = 高频推送中（仅自动路径；显式 dispatch 视为发起者已确认无并发）
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            LAST_PUSH=$(gh pr view "$PR" --json commits --jq '.commits[-1].committedDate')
+            AGE=$(( $(date -u +%s) - $(date -u -d "$LAST_PUSH" +%s) ))
+            if [ "$AGE" -lt 1200 ]; then
+              echo "skip: 最近提交距今 ${AGE}s < 20min（活跃开发中），autofix 让路"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          # --- 上下文采集（缓解上下文不对称：意图注入，喂给步骤 6 提示词）---
+          TITLE=$(gh pr view "$PR" --json title --jq .title)
+          BODY_EXCERPT=$(gh pr view "$PR" --json body --jq '.body // ""' | head -c 800)
+          RECENT=$(gh pr view "$PR" --json commits \
+            --jq '[.commits[-5:][] | .messageHeadline] | join("\n- ")')
           {
             echo "pr=$PR"
             echo "branch=$BRANCH"
             echo "sha=$SHA"
             echo "run_id=$RUN_ID"
+            echo "title=$TITLE"
+            printf 'recent<<RECENT_EOF\n- %s\nRECENT_EOF\n' "$RECENT" >> "$GITHUB_OUTPUT"
+            printf 'body<<BODY_EOF\n%s\nBODY_EOF\n' "$BODY_EXCERPT" >> "$GITHUB_OUTPUT"
           } >> "$GITHUB_OUTPUT"
           echo "target: PR #$PR branch=$BRANCH failed_run=$RUN_ID"
 
@@ -128,12 +166,13 @@ jobs:
             echo "active=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # ---- 3. 检出 PR head ----
+      # ---- 3. 检出失败 SHA（不是运行时 tip：修复期间分支可能被持有者推进，
+      #          拿旧日志修新代码是正确性缺陷——Fable 审查盲区 3）----
       - name: Checkout PR head
         if: steps.cap.outputs.active == 'true'
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ steps.ctx.outputs.branch }}
+          ref: ${{ steps.ctx.outputs.sha }}
           fetch-depth: 0
           # 关键（run 34206424614 教训）：checkout 默认把 GITHUB_TOKEN 以
           # extraheader 形式持久化进 .git/config，直接覆盖 credential
@@ -186,7 +225,7 @@ jobs:
           jq -e '.customModels[0].apiKey | length > 0' "$HOME/.factory/settings.json" >/dev/null
           echo "BYOK settings written (qwen3.7-plus via coding endpoint)"
 
-      # ---- 6. 失败日志摘录 + 提示词组装 ----
+      # ---- 6. 失败日志摘录 + 提示词组装（含意图上下文，缓解上下文不对称）----
       - name: Build autofix prompt
         if: steps.cap.outputs.active == 'true'
         env:
@@ -195,6 +234,9 @@ jobs:
           BRANCH: ${{ steps.ctx.outputs.branch }}
           SHA: ${{ steps.ctx.outputs.sha }}
           RUN_ID: ${{ steps.ctx.outputs.run_id }}
+          PR_TITLE: ${{ steps.ctx.outputs.title }}
+          PR_BODY: ${{ steps.ctx.outputs.body }}
+          PR_RECENT: ${{ steps.ctx.outputs.recent }}
         run: |
           set -euo pipefail
           # --log-failed 只含失败 job 的日志；截断防提示词爆炸
@@ -211,11 +253,21 @@ jobs:
           3. 修复后运行最窄的相关测试验证（如 pytest 单文件/单测）；无法运行时说明原因
           4. 禁止任何远程 git 操作（push/fetch 远端/开 PR）——推送由外层脚本完成
           5. 最后用一段话总结：根因、修法、验证结果
+          6. 禁止通过修改测试断言、删除/跳过测试让失败变绿——那是作弊不是修复。
+             若你确信测试本身有误，输出「建议+理由」，不要动手改测试
+          7. 若失败呈现 WIP/半成品特征（大量相关文件同批改动、改名改到一半、
+             测试先行的 TDD 红），不要尝试修复——输出根因分析报告，交还持有者
 
-          ## 失败上下文
+          ## PR 意图上下文（判断修复方向用）
           PROMPT_EOF
           {
-            echo "- PR: #$PR  分支: $BRANCH  HEAD: $SHA"
+            echo "- PR 标题: ${PR_TITLE}"
+            echo "- PR 描述摘录: ${PR_BODY:0:600}"
+            echo "- 近期提交:"
+            while IFS= read -r line; do echo "  - ${line}"; done <<< "$PR_RECENT"
+            echo ""
+            echo "## 失败上下文"
+            echo "- PR: #$PR  分支: $BRANCH  失败 HEAD: $SHA"
             [ -n "$RUN_ID" ] && echo "- 失败 run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/$RUN_ID"
             echo ""
             echo "## 失败日志摘录（截断）"
@@ -236,7 +288,9 @@ jobs:
           echo "rc=$RC" >> "$GITHUB_OUTPUT"
           exit 0
 
-      # ---- 8. 有 diff 则 commit + PAT 推回原分支（触发新一轮 CI） ----
+      # ---- 8. 有 diff 则 commit + PAT 推回原分支（触发新一轮 CI）----
+      #     推送前三道结构闸：① 分支未被并发推进 ② 非纯测试改动（防「改断言变绿」）
+      #     ③ diff 规模上限（防回退式/大爆炸修复）——Fable 审查 C/E 项
       - name: Commit and push fix
         id: push
         if: steps.cap.outputs.active == 'true' && steps.exec.outputs.rc == '0'
@@ -244,6 +298,7 @@ jobs:
           GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
           PR: ${{ steps.ctx.outputs.pr }}
           BRANCH: ${{ steps.ctx.outputs.branch }}
+          SHA: ${{ steps.ctx.outputs.sha }}
           ATTEMPT: ${{ steps.cap.outputs.attempt }}
         run: |
           set -euo pipefail
@@ -251,10 +306,17 @@ jobs:
           # 也可能自己 commit 到本地（--auto medium 允许本地 commit）。
           # 只看 porcelain 会把「已本地 commit」误判为无改动而不推送。
           DIRTY=$(git status --porcelain)
-          AHEAD=$(git log --oneline "origin/${BRANCH}..HEAD" 2>/dev/null || true)
-          if [ -z "$DIRTY" ] && [ -z "$AHEAD" ]; then
+          if [ -z "$DIRTY" ] && [ -z "$(git log --oneline "origin/${BRANCH}..HEAD" 2>/dev/null)" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "no changes produced; nothing to push"
+            exit 0
+          fi
+          # 闸 1：修复期间分支被并发推进 → 放弃推送（让路活跃执行者）
+          git -c credential.helper='!gh auth git-credential' fetch origin "$BRANCH" --quiet
+          if [ "$(git rev-parse "origin/${BRANCH}")" != "$SHA" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "push_blocked=branch moved during fix" >> "$GITHUB_OUTPUT"
+            echo "::notice::分支在修复期间被推进，放弃本次推送"
             exit 0
           fi
           git config user.name "droid-autofix[bot]"
@@ -263,25 +325,50 @@ jobs:
             git add -A
             git commit -m "fix: droid autofix attempt ${ATTEMPT} for PR #${PR}"
           fi
-          echo "unpushed commits: ${AHEAD:-none}; working-tree dirty: ${DIRTY:+yes}"
+          # 闸 2：纯 tests/ 改动（疑似弱化测试换绿）→ 不推，只报告
+          NON_TEST=$(git diff --name-only "origin/${BRANCH}..HEAD" | grep -vc "^tests/" || true)
+          if [ "${NON_TEST:-1}" -eq 0 ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "push_blocked=diff touches only tests/" >> "$GITHUB_OUTPUT"
+            echo "::notice::diff 仅触及 tests/（疑似以改测试换绿），拒绝推送，仅报告根因"
+            exit 0
+          fi
+          # 闸 3：规模上限 → 不推（回退式/大爆炸修复特征）
+          FILES=$(git diff --name-only "origin/${BRANCH}..HEAD" | wc -l | tr -d ' ')
+          LINES=$(git diff "origin/${BRANCH}..HEAD" | wc -l | tr -d ' ')
+          if [ "$FILES" -gt 10 ] || [ "$LINES" -gt 300 ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "push_blocked=diff too large (${FILES} files / ${LINES} lines)" >> "$GITHUB_OUTPUT"
+            echo "::notice::diff 规模超限（${FILES} 文件 / ${LINES} 行），拒绝推送，仅报告"
+            exit 0
+          fi
+          echo "audit pass: ${FILES} files / ${NON_TEST} non-test files changed"
           # credential helper 走 GH_TOKEN（PAT），值不进命令行与日志
           git -c credential.helper='!gh auth git-credential' push origin "HEAD:refs/heads/${BRANCH}"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
-      # ---- 9. PR 评论终态报告（sentinel 随评论落库，供上限计数） ----
+      # ---- 9. PR 评论终态报告（sentinel 随评论落库，供上限计数）----
+      #     always()（Fable 审查 A/B 项）：push 步骤非零退出（竞态/审计拒推）时
+      #     也必须落 sentinel——否则争用场景下 cap 永不递增，恰在最需要时失效
       - name: Report to PR
-        if: steps.cap.outputs.active == 'true'
+        if: always() && steps.cap.outputs.active == 'true'
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
           PR: ${{ steps.ctx.outputs.pr }}
           ATTEMPT: ${{ steps.cap.outputs.attempt }}
           RC: ${{ steps.exec.outputs.rc }}
           CHANGED: ${{ steps.push.outputs.changed }}
+          BLOCKED: ${{ steps.push.outputs.push_blocked }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           if [ "$RC" != "0" ]; then
             BODY="⚠️ droid autofix 第 ${ATTEMPT} 次尝试失败（exec 非零退出，不计改动）。日志：${RUN_URL}"
+          elif [ -n "${BLOCKED:-}" ]; then
+            SUMMARY=$(jq -r '.result // "（无摘要）"' /tmp/droid-result.json 2>/dev/null | head -c 600 || echo "（无摘要）")
+            BODY="🛑 droid autofix 第 ${ATTEMPT} 次分析完成，但推送被结构闸拦下（${BLOCKED}）。根因摘要：${SUMMARY}
+
+          运行记录：${RUN_URL}"
           elif [ "$CHANGED" = "true" ]; then
             SUMMARY=$(jq -r '.result // "（无摘要）"' /tmp/droid-result.json 2>/dev/null | head -c 600 || echo "（无摘要）")
             BODY="🤖 droid autofix 第 ${ATTEMPT} 次修复已推送，CI 将自动重跑。摘要：${SUMMARY}
