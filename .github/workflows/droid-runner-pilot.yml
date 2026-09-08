@@ -1,0 +1,66 @@
+# Droid Runner Pilot — 阶段一：GitHub 官方 Runner 链路冒烟
+#
+# 多工作器并发方案（GitHub 调度 → Droid 执行 → PR 交付）的第一阶段验证：
+# 不动自建 runner 池，仅在 ubuntu-latest 上验证
+# "Actions 调度 → 动态安装 CLI → FACTORY_API_KEY 认证 → 模型调用成功" 全链路。
+# 阶段二（自建 runner 接入）在本链路验证通过后推进。
+#
+# 事实依据（2026-09-08 对照官方文档 + 本机 CLI 0.213.0 核验）：
+# - 安装命令 curl -fsSL https://app.factory.ai/cli | sh 为官方文档记载
+# - CLI 安装路径未在文档钉死 → 装后探测（command -v 优先，常见目录兜底）
+# - droid exec 默认只读模式；冒烟只需输出语句，无需 --auto 提权
+# - 退出码契约：0=成功，非零=失败（权限违规/工具错误/目标未达成）
+
+name: Droid Runner Pilot
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    name: Smoke test (official runner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install Droid CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://app.factory.ai/cli | sh
+          # 安装路径官方文档未钉死：command -v 命中即用，否则探测常见安装目录
+          if ! command -v droid >/dev/null 2>&1; then
+            for dir in "$HOME/.factory/bin" "$HOME/.local/bin" /usr/local/bin; do
+              if [ -x "$dir/droid" ]; then
+                echo "$dir" >> "$GITHUB_PATH"
+                echo "droid found at: $dir/droid"
+                break
+              fi
+            done
+          fi
+          command -v droid
+          droid --version
+
+      - name: Pre-check credentials
+        env:
+          FACTORY_API_KEY: ${{ secrets.FACTORY_API_KEY }}
+        run: |
+          set -euo pipefail
+          # 与 droid-review.yml 同款前置校验：secret 缺失 fail-fast
+          if [ -z "$FACTORY_API_KEY" ]; then
+            echo "::error::FACTORY_API_KEY secret is empty or not configured."
+            exit 1
+          fi
+          echo "Secret is present (length: ${#FACTORY_API_KEY} chars)."
+
+      - name: Smoke exec (read-only)
+        env:
+          FACTORY_API_KEY: ${{ secrets.FACTORY_API_KEY }}
+        run: |
+          set -euo pipefail
+          echo "runner: ${RUNNER_NAME:-unknown} @ $(hostname)"
+          droid exec -o json "请输出一句：'阶段一测试通过，Droid 可在云端正常执行。'，不要修改任何文件。" \
+            | tee /tmp/droid-smoke-output.json
