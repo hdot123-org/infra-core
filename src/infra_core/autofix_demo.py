@@ -13,6 +13,6 @@ def count_enabled(flags: list[bool]) -> int:
     """Return the number of enabled (True) flags."""
     total = 0
     for flag in flags:
-        if not flag:
+        if flag:
             total += 1
     return total
