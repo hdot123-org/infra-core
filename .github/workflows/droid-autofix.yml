@@ -135,6 +135,11 @@ jobs:
         with:
           ref: ${{ steps.ctx.outputs.branch }}
           fetch-depth: 0
+          # 关键（run 34206424614 教训）：checkout 默认把 GITHUB_TOKEN 以
+          # extraheader 形式持久化进 .git/config，直接覆盖 credential
+          # helper → 步骤 8 的 push 以 github-actions[bot] 身份 403。
+          # 关闭持久化后，push 走 gh credential helper（DISPATCH_TOKEN PAT）。
+          persist-credentials: false
 
       # ---- 4. 安装 Droid CLI（探测式，与 droid-runner-pilot 同款） ----
       - name: Install Droid CLI
