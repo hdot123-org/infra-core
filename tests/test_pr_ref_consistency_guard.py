@@ -224,3 +224,146 @@ def test_fetch_issue_comments_original_form_without_env(monkeypatch):
         "--jq",
         ".comments[].body",
     ]
+
+
+# ============================================================================
+# 跨仓 closing reference 解析（2026-09-08，PR #266 / INFRA-893 假阳性）
+# infra-core PR 写 "Fixes hdot123-org/mencbo#69" 时，guard 此前固定读当前仓
+# 同号 issue（infra-core#69 release PR，linkback INFRA-623），误判 linkback
+# ⊄ Fixes。修复：从 ref url 解析真实仓库后显式传给 gh issue view --repo。
+# ============================================================================
+
+
+def test_resolve_repo_from_issue_url_cross_repo():
+    """issue url → (owner, repo)；跨仓与同仓均可解析。"""
+    mod = load_script_module(SCRIPT_PATH, "check_pr_ref_cross_repo_url")
+    assert mod._resolve_repo_from_issue_url("https://github.com/hdot123-org/mencbo/issues/69") == (
+        "hdot123-org",
+        "mencbo",
+    )
+    assert mod._resolve_repo_from_issue_url(
+        "https://github.com/hdot123-org/infra-core/issues/123"
+    ) == ("hdot123-org", "infra-core")
+
+
+def test_resolve_repo_from_issue_url_invalid_returns_none():
+    """缺失/非 issue url → None（调用方回退当前仓）。"""
+    mod = load_script_module(SCRIPT_PATH, "check_pr_ref_cross_repo_url_bad")
+    assert mod._resolve_repo_from_issue_url("") is None
+    assert mod._resolve_repo_from_issue_url("https://example.com/x/issues/1") is None
+    assert mod._resolve_repo_from_issue_url("https://github.com/o/r/pull/5") is None
+
+
+def test_fetch_issue_comments_explicit_repo_wins_over_env(monkeypatch):
+    """显式 repo 参数优先于 GITHUB_REPOSITORY env 推断。"""
+    mod = load_script_module(SCRIPT_PATH, "check_pr_ref_cross_repo_cmd")
+    captured = {}
+
+    def fake_run(cmd, *args, **kwargs):
+        captured["cmd"] = list(cmd)
+        return type("Result", (), {"stdout": ""})()
+
+    monkeypatch.setenv("GITHUB_REPOSITORY", "hdot123-org/infra-core")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    mod.fetch_issue_comments(69, repo="hdot123-org/mencbo")
+    assert captured["cmd"] == [
+        "gh",
+        "issue",
+        "view",
+        "69",
+        "--repo",
+        "hdot123-org/mencbo",
+        "--json",
+        "comments",
+        "--jq",
+        ".comments[].body",
+    ]
+
+
+def test_main_cross_repo_ref_passes_when_linkback_in_fixes(monkeypatch):
+    """PR #266 事故回归：mencbo#69 linkback（INFRA-893）在 Fixes 集 → exit 0。
+
+    修复前：读 infra-core#69（release PR，linkback INFRA-623）→ 假阳性。
+    """
+    mod = load_script_module(SCRIPT_PATH, "check_pr_ref_cross_repo_main")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "hdot123-org/infra-core")
+
+    monkeypatch.setattr(
+        mod,
+        "fetch_pr_data",
+        lambda n: {
+            "body": "Fixes INFRA-893\n\nFixes hdot123-org/mencbo#69",
+            "closingIssuesReferences": [
+                {
+                    "number": 69,
+                    "title": "Branch cleanup tracking",
+                    "url": "https://github.com/hdot123-org/mencbo/issues/69",
+                }
+            ],
+        },
+    )
+    captured = {}
+
+    def fake_fetch_issue_comments(issue_number, repo=None):
+        captured["issue"] = issue_number
+        captured["repo"] = repo
+        return (
+            "<!-- linear-linkback -->\n"
+            '<p><a href="https://linear.app/jtoom/issue/INFRA-893">INFRA-893</a></p>'
+        )
+
+    monkeypatch.setattr(mod, "fetch_issue_comments", fake_fetch_issue_comments)
+    assert mod.main(["266"]) == 0
+    assert captured["issue"] == 69
+    assert captured["repo"] == "hdot123-org/mencbo"
+
+
+def test_main_cross_repo_ref_still_fails_on_real_mismatch(monkeypatch):
+    """linkback 确实不在 Fixes 集 → 仍 exit 1（防修复弱化门禁）。"""
+    mod = load_script_module(SCRIPT_PATH, "check_pr_ref_cross_repo_main_neg")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "hdot123-org/infra-core")
+
+    monkeypatch.setattr(
+        mod,
+        "fetch_pr_data",
+        lambda n: {
+            "body": "Fixes INFRA-100",
+            "closingIssuesReferences": [
+                {
+                    "number": 5,
+                    "title": "Other repo issue",
+                    "url": "https://github.com/hdot123-org/mencbo/issues/5",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        mod,
+        "fetch_issue_comments",
+        lambda issue_number, repo=None: "<!-- linear-linkback INFRA-200 -->",
+    )
+    assert mod.main(["266"]) == 1
+
+
+def test_main_missing_ref_url_falls_back_to_current_repo(monkeypatch):
+    """ref url 缺失 → 回退当前仓（GITHUB_REPOSITORY env 解析）。"""
+    mod = load_script_module(SCRIPT_PATH, "check_pr_ref_cross_repo_main_fb")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "hdot123-org/infra-core")
+
+    monkeypatch.setattr(
+        mod,
+        "fetch_pr_data",
+        lambda n: {
+            "body": "Fixes INFRA-100",
+            "closingIssuesReferences": [{"number": 7, "title": "No url node"}],
+        },
+    )
+    captured = {}
+
+    def fake_fetch_issue_comments(issue_number, repo=None):
+        captured["repo"] = repo
+        return ""
+
+    monkeypatch.setattr(mod, "fetch_issue_comments", fake_fetch_issue_comments)
+    assert mod.main(["266"]) == 0
+    assert captured["repo"] == "hdot123-org/infra-core"

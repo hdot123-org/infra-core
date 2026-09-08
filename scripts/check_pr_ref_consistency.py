@@ -6,6 +6,13 @@ fail-closed fix (any fetch/parse exception exits 1, not 0), graphql fallback
 chain (avoids gh version dependency on closingIssuesReferences field), and
 three-tier linkback extraction (HTML comment, href, anchor text).
 
+Cross-repo closing references (PR #266 incident, 2026-09-08): a PR body may
+close an issue in another repository (e.g. "Fixes hdot123-org/mencbo#69" on
+an infra-core PR). Each closing reference's repository is resolved from its
+issue URL so comments are read from the *referenced* repo, never from the
+same-numbered issue in the current repo (which produced a false INFRA-623
+linkback mismatch in CI run 34228063998).
+
 Checks that for a given PR, the set of Linear INFRA IDs extracted from
 linkback comments of all referenced GitHub issues is a subset of the
 INFRA IDs declared in the PR body's "Fixes INFRA-xxx" lines.
@@ -222,24 +229,56 @@ def fetch_pr_data(pr_number: int) -> dict[str, Any]:
     return cast(dict[str, Any], pr)
 
 
-def fetch_issue_comments(issue_number: int) -> str:
+def _resolve_repo_from_issue_url(url: str) -> tuple[str, str] | None:
+    """Resolve (owner, name) from a closing reference's issue URL.
+
+    closingIssuesReferences nodes may point at issues in other repositories
+    (cross-repo closing keyword syntax, e.g. "Fixes hdot123-org/mencbo#69").
+    Parsing owner/repo from the node URL lets the guard read comments from
+    the referenced repository instead of the same-numbered issue in the
+    current repository (PR #266 false-positive root cause).
+
+    Args:
+        url: The issue URL from the GraphQL closingIssuesReferences node
+
+    Returns:
+        Tuple of (owner, repo_name), or None if the URL is missing or not a
+        github.com issue URL (caller falls back to the current repository)
+    """
+    m = re.search(r"^https://github\.com/([^/\s]+/[^/\s]+)/issues/\d+", (url or "").strip())
+    if not m:
+        return None
+    owner, _, name = m.group(1).partition("/")
+    return (owner, name) if owner and name else None
+
+
+def fetch_issue_comments(issue_number: int, repo: str | None = None) -> str:
     """Fetch issue comments via gh CLI.
 
-    --repo 显式指定（2026-08-28）：自建 runner git insteadOf 镜像重写使
-    gh 无法从 remote 解析 host（PR #1060 实证）。仅当 GITHUB_REPOSITORY
-    env（Actions 默认注入）可解析时追加 --repo（CI 场景，绕开 remote
-    推断）；未设置时保持原命令形态（本地调试，依赖 origin remote）。
+    ``repo`` 显式指定（2026-09-08，PR #266）：closing reference 可跨仓
+    （infra-core PR 写 "Fixes hdot123-org/mencbo#69"）。此前固定按当前仓
+    解析同一编号的 issue，读到错误仓库的同号 issue（infra-core#69 release
+    PR 的 linkback INFRA-623），对 INFRA-893 PR 产生假阳性。调用方从 ref
+    url 解析出 owner/repo 后必须显式传入，显式值优先于一切环境推断。
+
+    ``repo`` 未指定时保持原行为（向后兼容，本地调试）：GITHUB_REPOSITORY
+    env（Actions 默认注入）可解析时追加 ``--repo``（CI 场景，绕开 remote
+    推断，2026-08-28 PR #1060 镜像重写教训）；未设置时保持原命令形态
+    （本地调试，依赖 origin remote）。
 
     Args:
         issue_number: GitHub issue number
+        repo: Explicit "owner/name" repository context for the issue
 
     Returns:
         Combined comment bodies as string
     """
     cmd: list[str] = ["gh", "issue", "view", str(issue_number)]
-    if os.environ.get("GITHUB_REPOSITORY", "").strip():
-        owner, repo = _resolve_repo_owner_name()
-        cmd += ["--repo", f"{owner}/{repo}"]
+    if repo is not None:
+        cmd += ["--repo", repo]
+    elif os.environ.get("GITHUB_REPOSITORY", "").strip():
+        owner, current_repo = _resolve_repo_owner_name()
+        cmd += ["--repo", f"{owner}/{current_repo}"]
     cmd += ["--json", "comments", "--jq", ".comments[].body"]
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
     return result.stdout
@@ -296,17 +335,33 @@ def main(args: list[str] | None = None) -> int:
     print(f"PR #{pr_number}: Checking {len(issue_numbers)} referenced issue(s): {issue_numbers}")
     print(f"PR #{pr_number}: Fixes set = {sorted(fixes_ids) if fixes_ids else '{}'}")
 
-    for issue_num in issue_numbers:
+    # Default repository context (used when a ref URL is missing/unparseable);
+    # fail-closed like every other fetch path.
+    try:
+        default_owner, default_name = _resolve_repo_owner_name()
+    except Exception as e:
+        print(f"Error: Failed to resolve repository context: {e}", file=sys.stderr)
+        return 1
+
+    for ref in closing_refs:
+        issue_num = ref["number"]
+        # Cross-repo closing refs (PR #266): resolve the issue's actual
+        # repository from its URL; never assume the current repo.
+        resolved = _resolve_repo_from_issue_url(ref.get("url", "") or "")
+        repo_ctx = f"{resolved[0]}/{resolved[1]}" if resolved else f"{default_owner}/{default_name}"
         try:
-            comments = fetch_issue_comments(issue_num)
+            comments = fetch_issue_comments(issue_num, repo=repo_ctx)
             linkback = extract_linkback_from_comments(comments)
             if linkback:
                 linkback_ids.add(linkback)
-                print(f"  Issue #{issue_num}: linkback = {linkback}")
+                print(f"  Issue #{issue_num} ({repo_ctx}): linkback = {linkback}")
             else:
-                print(f"  Issue #{issue_num}: no linkback (backward compat)")
+                print(f"  Issue #{issue_num} ({repo_ctx}): no linkback (backward compat)")
         except Exception as e:
-            print(f"Error: Failed to fetch comments for issue #{issue_num}: {e}", file=sys.stderr)
+            print(
+                f"Error: Failed to fetch comments for issue #{issue_num} ({repo_ctx}): {e}",
+                file=sys.stderr,
+            )
             return 1
 
     # Check subset condition: linkback ⊆ Fixes
