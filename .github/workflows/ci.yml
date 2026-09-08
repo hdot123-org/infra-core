@@ -580,6 +580,7 @@ jobs:
           BRANCH: ${{ github.head_ref || github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          WEBHOOK_NOTIFY_STRICT: ${{ vars.WEBHOOK_NOTIFY_STRICT }}
         run: |
           set -euo pipefail
           PAYLOAD=$(jq -n \
@@ -599,7 +600,10 @@ jobs:
             -d "$PAYLOAD") || HTTP_CODE="000"
 
           if [ "$HTTP_CODE" != "200" ]; then
-            echo "::warning::Webhook delivery failed (HTTP $HTTP_CODE)"
+            # 2026-09-08 断链复盘：Access 墙 302 曾以绿色 job + 黄色 warning 藏了 4 天，
+            # 且 POSTHOG_API_KEY 缺配导致升级通道从未执行。现在：红色 error 注解（绿 job 里也显眼），
+            # PostHog 事件（告警面），严格模式下直接失败（墙修复稳定后置 WEBHOOK_NOTIFY_STRICT=true）。
+            echo "::error::Webhook delivery failed (HTTP $HTTP_CODE) — 注入链断裂，CI 完成通知未送达"
             # Only send PostHog event if API key is configured
             if [ -n "$POSTHOG_API_KEY" ]; then
               PR_NUM="${{ github.event.pull_request.number || 0 }}"
@@ -608,7 +612,13 @@ jobs:
                 -H "Content-Type: application/json" \
                 -d "{\"api_key\":\"${POSTHOG_API_KEY}\",\"batch\":[{\"event\":\"ci_webhook_send_failed\",\"properties\":{\"error_type\":\"webhook_delivery_failed\",\"pr_number\":\"$PR_NUM\",\"stage\":\"github_actions\",\"workflow\":\"ci\",\"detail\":\"HTTP $HTTP_CODE\",\"distinct_id\":\"ci-webhook\"},\"timestamp\":\"$TIMESTAMP\"}]}" || true
             else
-              echo "::notice::POSTHOG_API_KEY not configured, skipping event reporting"
+              echo "::warning::POSTHOG_API_KEY not configured — 升级通道哑火，失败只留在本注解"
+            fi
+            # 严格模式：墙修复稳定后置仓库变量 WEBHOOK_NOTIFY_STRICT=true，
+            # 非送达即 CI 失败（假绿彻底消灭；翻转前 merge 管道不受影响）
+            if [ "${WEBHOOK_NOTIFY_STRICT:-false}" = "true" ]; then
+              echo "::error::strict mode: failing CI on undelivered webhook notification"
+              exit 1
             fi
           fi
           exit 0
