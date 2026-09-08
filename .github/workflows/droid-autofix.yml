@@ -247,15 +247,23 @@ jobs:
           ATTEMPT: ${{ steps.cap.outputs.attempt }}
         run: |
           set -euo pipefail
-          if [ -z "$(git status --porcelain)" ]; then
+          # 改动探测双通道（run 34208803783 教训）：droid 可能只改工作树，
+          # 也可能自己 commit 到本地（--auto medium 允许本地 commit）。
+          # 只看 porcelain 会把「已本地 commit」误判为无改动而不推送。
+          DIRTY=$(git status --porcelain)
+          AHEAD=$(git log --oneline "origin/${BRANCH}..HEAD" 2>/dev/null || true)
+          if [ -z "$DIRTY" ] && [ -z "$AHEAD" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "no changes produced; nothing to push"
             exit 0
           fi
           git config user.name "droid-autofix[bot]"
           git config user.email "droid-autofix[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "fix: droid autofix attempt ${ATTEMPT} for PR #${PR}"
+          if [ -n "$DIRTY" ]; then
+            git add -A
+            git commit -m "fix: droid autofix attempt ${ATTEMPT} for PR #${PR}"
+          fi
+          echo "unpushed commits: ${AHEAD:-none}; working-tree dirty: ${DIRTY:+yes}"
           # credential helper 走 GH_TOKEN（PAT），值不进命令行与日志
           git -c credential.helper='!gh auth git-credential' push origin "HEAD:refs/heads/${BRANCH}"
           echo "changed=true" >> "$GITHUB_OUTPUT"
