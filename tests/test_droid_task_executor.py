@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -88,12 +87,8 @@ class TestConcurrencyGuard:
         conc = data.get("concurrency")
         assert conc is not None, "droid-task.yml must have top-level concurrency"
         group = conc.get("group", "")
-        assert "droid-task-" in group, (
-            f"concurrency group must contain 'droid-task-', got: {group}"
-        )
-        assert "task_id" in group, (
-            f"concurrency group must reference task_id, got: {group}"
-        )
+        assert "droid-task-" in group, f"concurrency group must contain 'droid-task-', got: {group}"
+        assert "task_id" in group, f"concurrency group must reference task_id, got: {group}"
 
     def test_cancel_in_progress_is_false(self):
         """cancel-in-progress: false（不取消正在运行的同 task）"""
@@ -112,9 +107,7 @@ class TestCompositeByokOnly:
 
     def test_composite_action_file_exists(self):
         """.github/actions/setup-droid-byok/action.yml 存在"""
-        assert COMPOSITE.exists(), (
-            f"Composite action must exist at {COMPOSITE}"
-        )
+        assert COMPOSITE.exists(), f"Composite action must exist at {COMPOSITE}"
 
     def test_composite_uses_inputs_not_secrets(self):
         """composite 内不得直接引用 secrets.*，须经 inputs"""
@@ -134,9 +127,7 @@ class TestCompositeByokOnly:
         """inputs.bailian-api-key 声明"""
         data = _load(COMPOSITE)
         inputs = data.get("inputs", {})
-        assert "bailian-api-key" in inputs, (
-            "composite must declare bailian-api-key input"
-        )
+        assert "bailian-api-key" in inputs, "composite must declare bailian-api-key input"
         assert inputs["bailian-api-key"].get("required") is True
 
     def test_composite_is_composite_type(self):
@@ -191,18 +182,16 @@ class TestCompositeByokOnly:
     def test_composite_installs_droid_cli(self):
         """composite 安装 droid CLI"""
         raw = COMPOSITE.read_text(encoding="utf-8")
-        assert "app.factory.ai/cli" in raw, (
-            "composite must install droid CLI from official source"
-        )
-        assert "droid --version" in raw, (
-            "composite must verify droid installation"
-        )
+        assert "app.factory.ai/cli" in raw, "composite must install droid CLI from official source"
+        assert "droid --version" in raw, "composite must verify droid installation"
 
     def test_workflow_uses_composite_action(self):
         """droid-task.yml 使用 ./.github/actions/setup-droid-byok"""
         data = _load(WORKFLOW)
         steps = data["jobs"]["execute"]["steps"]
-        setup_steps = [s for s in steps if s.get("uses", "").startswith("./.github/actions/setup-droid-byok")]
+        setup_steps = [
+            s for s in steps if s.get("uses", "").startswith("./.github/actions/setup-droid-byok")
+        ]
         assert len(setup_steps) == 1, (
             f"workflow must use setup-droid-byok composite exactly once, found {len(setup_steps)}"
         )
@@ -268,12 +257,8 @@ class TestPromptTemplates:
         steps = _steps_by_name(data["jobs"]["execute"]["steps"])
         step = steps["Build prompt (linear-gateway)"]
         run = step["run"]
-        assert "Fixes" in run, (
-            "linear-gateway prompt must contain Fixes REF contract"
-        )
-        assert "P_IDENTIFIER" in run, (
-            "linear-gateway prompt must reference issue identifier"
-        )
+        assert "Fixes" in run, "linear-gateway prompt must contain Fixes REF contract"
+        assert "P_IDENTIFIER" in run, "linear-gateway prompt must reference issue identifier"
 
     def test_linear_gateway_prompt_has_gate_a_idempotency(self):
         """linear-gateway prompt 含 Gate A 幂等性检查"""
@@ -302,9 +287,7 @@ class TestPromptTemplates:
         for name in ("Build prompt (error-gateway)", "Build prompt (linear-gateway)"):
             step = steps[name]
             env = step.get("env", {})
-            assert len(env) > 0, (
-                f"{name} must use env: mapping to pass payload values"
-            )
+            assert len(env) > 0, f"{name} must use env: mapping to pass payload values"
 
 
 # ── VAL-EX-005: 失败兜底 ──────────────────────────────────────────────
@@ -318,7 +301,9 @@ class TestFailureFallback:
         data = _load(WORKFLOW)
         steps = _steps_by_name(data["jobs"]["execute"]["steps"])
         # 找到包含 failure fallback 的步骤
-        fallback_steps = {k: v for k, v in steps.items() if "failure" in k.lower() or "fallback" in k.lower()}
+        fallback_steps = {
+            k: v for k, v in steps.items() if "failure" in k.lower() or "fallback" in k.lower()
+        }
         assert len(fallback_steps) >= 1, (
             f"workflow must have a failure fallback step, found steps: {list(steps.keys())}"
         )
@@ -327,7 +312,11 @@ class TestFailureFallback:
         """failure fallback 步骤有 if: failure() 条件"""
         data = _load(WORKFLOW)
         steps = data["jobs"]["execute"]["steps"]
-        fallback = [s for s in steps if "failure" in s.get("name", "").lower() or "fallback" in s.get("name", "").lower()]
+        fallback = [
+            s
+            for s in steps
+            if "failure" in s.get("name", "").lower() or "fallback" in s.get("name", "").lower()
+        ]
         assert len(fallback) >= 1
         step = fallback[0]
         condition = step.get("if", "")
@@ -339,37 +328,43 @@ class TestFailureFallback:
         """failure fallback 步骤使用 gh issue create"""
         data = _load(WORKFLOW)
         steps = data["jobs"]["execute"]["steps"]
-        fallback = [s for s in steps if "failure" in s.get("name", "").lower() or "fallback" in s.get("name", "").lower()]
+        fallback = [
+            s
+            for s in steps
+            if "failure" in s.get("name", "").lower() or "fallback" in s.get("name", "").lower()
+        ]
         step = fallback[0]
         run = step["run"]
-        assert "gh issue create" in run, (
-            "failure fallback must create GitHub Issue via gh CLI"
-        )
+        assert "gh issue create" in run, "failure fallback must create GitHub Issue via gh CLI"
 
     def test_failure_fallback_has_needs_triage_label(self):
         """failure fallback 创建的 Issue 带 needs-triage label"""
         data = _load(WORKFLOW)
         steps = data["jobs"]["execute"]["steps"]
-        fallback = [s for s in steps if "failure" in s.get("name", "").lower() or "fallback" in s.get("name", "").lower()]
+        fallback = [
+            s
+            for s in steps
+            if "failure" in s.get("name", "").lower() or "fallback" in s.get("name", "").lower()
+        ]
         step = fallback[0]
         run = step["run"]
-        assert "needs-triage" in run, (
-            "failure fallback Issue must have needs-triage label"
-        )
+        assert "needs-triage" in run, "failure fallback Issue must have needs-triage label"
 
     def test_failure_fallback_has_idempotent_check(self):
         """failure fallback 有幂等检查（避免重复创建 Issue）"""
         data = _load(WORKFLOW)
         steps = data["jobs"]["execute"]["steps"]
-        fallback = [s for s in steps if "failure" in s.get("name", "").lower() or "fallback" in s.get("name", "").lower()]
+        fallback = [
+            s
+            for s in steps
+            if "failure" in s.get("name", "").lower() or "fallback" in s.get("name", "").lower()
+        ]
         step = fallback[0]
         run = step["run"]
         assert "gh issue list" in run, (
             "failure fallback must check for existing Issues before creating (idempotent)"
         )
-        assert "--state all" in run, (
-            "failure fallback idempotent check must use --state all"
-        )
+        assert "--state all" in run, "failure fallback idempotent check must use --state all"
 
 
 # ── VAL-EX-006: dry-run 结构前提 ──────────────────────────────────────
@@ -382,9 +377,7 @@ class TestDryRunPrerequisites:
         """workflow 有 droid exec 执行步骤"""
         data = _load(WORKFLOW)
         steps = _steps_by_name(data["jobs"]["execute"]["steps"])
-        assert "Execute droid" in steps, (
-            "workflow must have 'Execute droid' step"
-        )
+        assert "Execute droid" in steps, "workflow must have 'Execute droid' step"
 
     def test_execute_step_uses_auto_high(self):
         """droid exec 使用 --auto high 模式"""
@@ -392,9 +385,7 @@ class TestDryRunPrerequisites:
         steps = _steps_by_name(data["jobs"]["execute"]["steps"])
         step = steps["Execute droid"]
         run = step["run"]
-        assert "--auto high" in run, (
-            "droid exec must use --auto high mode"
-        )
+        assert "--auto high" in run, "droid exec must use --auto high mode"
 
     def test_execute_step_uses_tag_metadata(self):
         """droid exec 使用 --tag 传递元数据"""
@@ -402,17 +393,13 @@ class TestDryRunPrerequisites:
         steps = _steps_by_name(data["jobs"]["execute"]["steps"])
         step = steps["Execute droid"]
         run = step["run"]
-        assert "--tag" in run, (
-            "droid exec must pass --tag metadata"
-        )
+        assert "--tag" in run, "droid exec must pass --tag metadata"
 
     def test_workflow_permissions_include_contents_write(self):
         """workflow 顶层权限含 contents: write"""
         data = _load(WORKFLOW)
         perms = data.get("permissions", {})
-        assert perms.get("contents") == "write", (
-            f"workflow must have contents: write, got {perms}"
-        )
+        assert perms.get("contents") == "write", f"workflow must have contents: write, got {perms}"
 
     def test_workflow_permissions_include_issues_write(self):
         """workflow 顶层权限含 issues: write（失败兜底建 Issue 需要）"""
@@ -467,9 +454,7 @@ class TestWorkflowStructureRegression:
     def test_workflow_file_has_header_comment(self):
         """workflow 文件有头注释说明设计依据"""
         raw = WORKFLOW.read_text(encoding="utf-8")
-        assert "BYOK" in raw or "byok" in raw, (
-            "workflow file should mention BYOK in header or body"
-        )
+        assert "BYOK" in raw or "byok" in raw, "workflow file should mention BYOK in header or body"
 
     def test_checkout_step_uses_dispatch_token(self):
         """checkout 步骤使用 DISPATCH_TOKEN 凭证"""
@@ -478,9 +463,7 @@ class TestWorkflowStructureRegression:
         checkout = steps.get("Checkout target repo", {})
         with_block = checkout.get("with", {})
         token = with_block.get("token", "")
-        assert "DISPATCH_TOKEN" in token, (
-            f"checkout must use DISPATCH_TOKEN, got: {token}"
-        )
+        assert "DISPATCH_TOKEN" in token, f"checkout must use DISPATCH_TOKEN, got: {token}"
 
     def test_step_order_validate_before_setup_before_execute(self):
         """步骤顺序：Validate → Checkout → Setup BYOK → Build prompt → Execute"""
@@ -493,9 +476,7 @@ class TestWorkflowStructureRegression:
     def test_no_hardcoded_local_paths(self):
         """公开仓库不含本地绝对路径（/Users/... 等）"""
         raw = WORKFLOW.read_text(encoding="utf-8")
-        assert "/Users/" not in raw, (
-            "workflow must not contain hardcoded local paths (/Users/...)"
-        )
+        assert "/Users/" not in raw, "workflow must not contain hardcoded local paths (/Users/...)"
         raw_composite = COMPOSITE.read_text(encoding="utf-8")
         assert "/Users/" not in raw_composite, (
             "composite must not contain hardcoded local paths (/Users/...)"
