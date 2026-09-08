@@ -186,7 +186,7 @@ class TestNotifyCiComplete:
     """notify-ci-complete webhook 通知契约（INFRA-690）。
 
     INFRA-690 要求 payload 同时携带 CI status 与 run URL：status 供
-    trigger-ci-droid.sh 注入链判定绿红，run_url 供 n8n 下游自动化与
+    trigger-ci-droid.sh 注入链判定绿红，run_url 供 webhook 网关下游自动化与
     人工排查直达 CI 运行页。#137 已落地 job 骨架但 payload 缺 run_url，
     本契约锁定该字段不可回退。
     """

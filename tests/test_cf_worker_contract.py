@@ -4,7 +4,7 @@ CF Worker webhook-gateway contract test.
 This is the pytest collection entry point that drives node --test against
 the worker's native test suite. It covers:
 
-- VAL-CF-002: 5-class routing matrix (aligned with n8n github-events-router-v3)
+- VAL-CF-002: 5-class routing matrix (aligned with legacy github-events-router-v3)
 - VAL-CF-003: HMAC verification (fail-closed) + outbound headers + full passthrough
 - VAL-CF-004: Cron handler (repository_dispatch + idempotency)
 - VAL-CF-001/009/010: Artifact completeness + secret governance + migration matrix
