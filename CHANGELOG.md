@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.16.0](https://github.com/hdot123-org/infra-core/compare/v0.15.2...v0.16.0) (2026-09-08)
+
+
+### Features
+
+* **ci:** add BYOK smoke job (bailian coding endpoint) ([#253](https://github.com/hdot123-org/infra-core/issues/253)) ([07f5747](https://github.com/hdot123-org/infra-core/commit/07f57476bc39843c1bcfef8664b700798fd0b43b))
+* **ci:** add droid runner pilot phase-1 smoke workflow ([#252](https://github.com/hdot123-org/infra-core/issues/252)) ([5f6eb20](https://github.com/hdot123-org/infra-core/commit/5f6eb207afd0d7ab075486146f731c60f864033d))
+* **ci:** add droid-autofix workflow ([#256](https://github.com/hdot123-org/infra-core/issues/256)) ([732ae2d](https://github.com/hdot123-org/infra-core/commit/732ae2d236ea8f927b439a45dd358e6c31979c26))
+
+
+### Documentation
+
+* note fork-PR rejection policy in droid-review (v0.15.2) ([#255](https://github.com/hdot123-org/infra-core/issues/255)) ([5c31db2](https://github.com/hdot123-org/infra-core/commit/5c31db2043043ec754a0f95773cd53a4fe295d86))
+
 ## [0.15.2](https://github.com/hdot123-org/infra-core/compare/v0.15.1...v0.15.2) (2026-09-08)
 
 
