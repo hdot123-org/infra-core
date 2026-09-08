@@ -173,6 +173,17 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Fork guard (fail-closed): reject pull_request_target from forks.
+          # pull_request_target checks out PR head code on self-hosted runners
+          # with API keys in env — fork authors could manipulate review via
+          # malicious AGENTS.md. Empty head.repo also rejected (fail-closed).
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+            if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+              echo "::error::fork PR rejected by droid-review fork guard (head=${{ github.event.pull_request.head.repo.full_name }}, repo=${{ github.repository }})"
+              exit 1
+            fi
+          fi
+
           if [ "${{ github.event_name }}" = "pull_request_target" ]; then
             # pull_request_target trigger: use event context
             {
