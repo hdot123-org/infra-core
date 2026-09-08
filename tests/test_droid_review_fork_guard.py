@@ -42,9 +42,7 @@ class TestGuardPresence:
     def test_shards_setup_contains_guard(self, shards_workflow_data):
         """droid-review-shards.yml setup job must contain fork guard."""
         setup_job = shards_workflow_data["jobs"]["setup"]
-        resolve_step = next(
-            (s for s in setup_job["steps"] if s.get("id") == "resolve"), None
-        )
+        resolve_step = next((s for s in setup_job["steps"] if s.get("id") == "resolve"), None)
         assert resolve_step is not None, "setup job must have 'resolve' step"
         run_block = resolve_step["run"]
 
@@ -59,9 +57,7 @@ class TestGuardPresence:
     def test_self_workflow_setup_contains_guard(self, self_workflow_data):
         """droid-review.yml setup job must contain fork guard."""
         setup_job = self_workflow_data["jobs"]["setup"]
-        resolve_step = next(
-            (s for s in setup_job["steps"] if s.get("id") == "resolve"), None
-        )
+        resolve_step = next((s for s in setup_job["steps"] if s.get("id") == "resolve"), None)
         assert resolve_step is not None, "setup job must have 'resolve' step"
         run_block = resolve_step["run"]
 
