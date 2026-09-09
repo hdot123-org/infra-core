@@ -2,7 +2,7 @@
 
 本目录包含 org 级规则覆盖不到的残余面模板，用于新仓接入时的最小配置。
 
-**前置说明**：org 级规则（Layer 1）生效即自动覆盖 org 全部仓库（含新仓），无需逐仓动作。参见 `org-governance-spec.md` 与 `change-playbook.md` Layer 1。
+**前置说明**：org 级规则（Layer 1）生效即自动覆盖 org 全部仓库（含新仓），无需逐仓动作。参见 [`../org-governance-spec.md`](../org-governance-spec.md) 与 [`../change-playbook.md`](../change-playbook.md) Layer 1。残余面修正方案见 [`../correction-plan.md`](../correction-plan.md)。
 
 ---
 
@@ -36,7 +36,7 @@ rm <repo>-ruleset.json
 
 **适配要点**：
 - `rules[0].parameters.required_status_checks[].context`：替换为该仓库的实际 CI check 名（如 `ci-ok`、`qa-ok`、`Test (Node 22/24)` 等）
-- 删除 `integration_id` 字段（按仓自适应，GitHub 会自动填充）
+- 省略 `integration_id` 字段（模板从不含该字段；该字段为 infra-core 专属的 server-assigned 值，复制到其他仓库时不应出现）
 - `bypass_actors`：按需配置（默认空 = 无人可绕过）
 
 **验证**：
@@ -111,7 +111,7 @@ gh api /repos/hdot123-org/<repo>/contents/.github/dependabot.yml
 
 ## 参考
 
-- 治理规范：`org-governance-spec.md`
-- 分层变更 playbook：`change-playbook.md`（Layer 1 org 级最大化 / Layer 2 残余面×3 主仓 / Layer 3 仅 UI）
-- 差距矩阵：`memory/artifacts/2026-09-09-gap-matrix-org-first.md`（产物 C）
-- 能力普查：`memory/artifacts/2026-09-09-org-capability-census.md`
+- 治理规范：[`../org-governance-spec.md`](../org-governance-spec.md)
+- 分层变更 playbook：[`../change-playbook.md`](../change-playbook.md)（Layer 1 org 级最大化 / Layer 2 残余面×3 主仓 / Layer 3 仅 UI）
+- 差距矩阵：`../memory/artifacts/2026-09-09-gap-matrix-org-first.md`（产物 C；`memory/` 整目录被 .gitignore，仅本地工作区可达）
+- 能力普查：`../memory/artifacts/2026-09-09-org-capability-census.md`（`memory/` 整目录被 .gitignore，仅本地工作区可达）

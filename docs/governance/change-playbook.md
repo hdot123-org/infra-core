@@ -35,7 +35,7 @@
 
 **两条依赖不变式**：
 - **(A)** 全量 workflow SHA 化预备项（PB-00）先于 sha_pinning_required 开启项（PB-03）
-- **(B)** 在用第三方 action 盘点项（PB-00.5）先于 allowlist 收紧项（PB-02）
+- **(B)** 在用第三方 action 盘点项（PB-00.5）先于 allowlist 收紧项（PB-01/PB-02）
 
 ### 0.4 分批策略
 
@@ -94,7 +94,7 @@
 | ②现状→目标 | `allowed_actions: "all"` → `allowed_actions: "selected"` |
 | ③免费可用性 | 可用（2026-02-05 起 Free 解锁 allowlist） |
 | ④API 或 UI | `PUT /orgs/hdot123-org/actions/permissions`（`allowed_actions: "selected"`） |
-| ⑤前置条件 | PB-00.5（action 盘点）完成；PB-02（selected-actions 配置）同步执行 |
+| ⑤前置条件 | PB-00.5（action 盘点）完成 |
 | ⑥爆炸半径 | **对进行中 PR**：无影响（PR 已触发的 workflow 继续运行）；**对运行中 CI**：新 PR 触发时若引用未在 allowlist 的 action 会失败；**对引擎管线**：auto-merge/droid-review/release-please 等 bot 流程需确认其引用的 action 在 allowlist（infra-core 仓库级已收紧，已验证可行） |
 | ⑦回滚命令 | `gh api -X PUT /orgs/hdot123-org/actions/permissions -f allowed_actions=all` |
 | ⑧验证命令 | `gh api /orgs/hdot123-org/actions/permissions --jq '.allowed_actions'`（应输出 `selected`） |
@@ -312,7 +312,7 @@
 | ⑦回滚命令 | `git rm .github/CODEOWNERS` + commit + push |
 | ⑧验证命令 | `gh api /repos/hdot123-org/infra-core/contents/.github/CODEOWNERS` + `gh api /repos/hdot123-org/mencbo/contents/.github/CODEOWNERS`（应返回文件内容） |
 
-**org 覆盖不到论证**：CODEOWNERS 是仓库级内容文件，无 org 级 API 或规则可统一配置。
+**org 覆盖不到论证**：CODEOWNERS 是仓库级内容文件，无 org 级 API 或规则可统一配置（产物 A 附节「仅 repo 级载体证明行」行 1 CODEOWNERS：普查 §7.1/§7.2 十组命令面与 UI 清单均无 org 级 CODEOWNERS 项）。
 
 ### PB-15：POSTHOG_INGESTION_KEY 从 mencbo Actions variables 迁移 secrets
 
@@ -321,7 +321,7 @@
 | ①编号 | PB-15 |
 | ②现状→目标 | `POSTHOG_INGESTION_KEY` 明文存于 mencbo Actions variables → 迁移到 mencbo Actions secrets（或 org 级 secrets 按仓库访问控制限定 mencbo） |
 | ③免费可用性 | 可用 |
-| ④API 或 UI | 见下方四步并行期设计 |
+| ④API 或 UI | repo 级 secrets/variables API（`PUT /repos/{owner}/{repo}/actions/secrets/{secret_name}`）；具体四步并行期设计见下方，模板参考 `templates/`，修正方案见 `correction-plan.md` |
 | ⑤前置条件 | ① 获取 POSTHOG_INGESTION_KEY 当前值（从 variables 读取）② 改 workflow 引用 |
 | ⑥爆炸半径 | **对进行中 PR**：无影响；**对运行中 CI**：若 workflow 仍在读 variables 会失败（需并行期）；**对引擎管线**：无影响（mencbo 无引擎管线） |
 | ⑦回滚命令 | 并行期内：改回读 variables；并行期结束后：`DELETE /repos/hdot123-org/mencbo/actions/secrets/POSTHOG_INGESTION_KEY` + 重新创建 variable |
@@ -345,7 +345,7 @@
 | ②现状→目标 | `allow_merge_commit=true, allow_rebase_merge=true, allow_squash_merge=true, delete_branch_on_merge=false` → `allow_squash_merge=true, allow_merge_commit=false, allow_rebase_merge=false, delete_branch_on_merge=true`（squash-only + 自动删分支） |
 | ③免费可用性 | 可用（repo 级设置） |
 | ④API 或 UI | `PATCH /repos/hdot123-org/mencbo`（`allow_merge_commit: false, allow_rebase_merge: false, delete_branch_on_merge: true`） |
-| ⑤前置条件 | ① 盘点 mencbo 当前 open PR（`gh pr list -R hdot123-org/mencbo --state open`），确认待合并 PR 的合并方式 ② 配合 PB-15 的 ruleset 迁移一并设置 squash-only 约束 |
+| ⑤前置条件 | ① 盘点 mencbo 当前 open PR（`gh pr list -R hdot123-org/mencbo --state open`），确认待合并 PR 的合并方式 ② 配合 PB-13 的 ruleset 迁移一并设置 squash-only 约束 |
 | ⑥爆炸半径 | **对进行中 PR**：合并方式选项变化（仅剩 squash），待合并 PR 需确认合并按钮行为；**对运行中 CI**：无影响；**对引擎管线**：无影响（mencbo 无引擎管线） |
 | ⑦回滚命令 | `gh api -X PATCH /repos/hdot123-org/mencbo -F allow_merge_commit=true -F allow_rebase_merge=true -F delete_branch_on_merge=false` |
 | ⑧验证命令 | `gh api /repos/hdot123-org/mencbo --jq '{allow_merge_commit, allow_rebase_merge, allow_squash_merge, delete_branch_on_merge}'` |
@@ -367,7 +367,7 @@
 | ⑦回滚命令 | `git rm .github/dependabot.yml` + commit + push |
 | ⑧验证命令 | `gh api /repos/hdot123-org/infra-core/contents/.github/dependabot.yml` + `gh api /repos/hdot123-org/mencbo/contents/.github/dependabot.yml`（应返回文件内容） |
 
-**org 覆盖不到论证**：dependabot.yml 是仓库级内容文件；org 级 Dependabot version updates 集中 API 未确认（普查 §8 #6 保持未确认）。
+**org 覆盖不到论证**：dependabot.yml 是仓库级内容文件；org 级 Dependabot version updates 集中 API 未确认（产物 A 附节「仅 repo 级载体证明行」行 2 Dependabot version updates：实测 `GET /orgs/{org}/dependabot/version-updates` → 404，语义=未启用或不存在；普查 §8 #6 保持未确认）。
 
 ---
 
@@ -504,7 +504,7 @@
 ## 5. 参考索引
 
 - 治理规范：`org-governance-spec.md`
-- 差距矩阵：`memory/artifacts/2026-09-09-gap-matrix-org-first.md`（产物 C，相对路径，公开读者可从仓库根访问）
+- 差距矩阵：`memory/artifacts/2026-09-09-gap-matrix-org-first.md`（产物 C，相对路径，`memory/` 整目录被 .gitignore，仅本地工作区可达，公开读者不可访问）
 - 能力普查：`memory/artifacts/2026-09-09-org-capability-census.md`（相对路径）
 - 现状审计：`memory/artifacts/2026-09-09-org-state-audit.md`（相对路径）
 
