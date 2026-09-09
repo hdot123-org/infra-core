@@ -146,10 +146,50 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "target: PR #$PR branch=$BRANCH failed_run=$RUN_ID"
 
-      # ---- 2. 防死循环：sentinel 计数，每 PR 最多 2 次 ----
+      # ---- 2. 仅 notify 失败过滤（WEBHOOK_NOTIFY_STRICT=true 时送达失败使 CI 红，
+      #        非代码问题，autofix 不接管。混合失败不误伤，正常修复）----
+      - name: Filter notify-only failures
+        id: notify_filter
+        if: steps.ctx.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          PR: ${{ steps.ctx.outputs.pr }}
+          RUN_ID: ${{ steps.ctx.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RUN_ID" ]; then
+            echo "no run_id; skipping filter"
+            exit 0
+          fi
+          # 取失败 job 清单（conclusion=failure）
+          FAILED_JOBS=$(gh run view "$RUN_ID" --json jobs \
+            --jq '[.jobs[] | select(.conclusion == "failure") | .name]')
+          echo "failed jobs: $FAILED_JOBS"
+          # 空列表 = 无失败 job（不应到达此处，防御性放行）
+          if [ "$FAILED_JOBS" = "[]" ] || [ -z "$FAILED_JOBS" ]; then
+            echo "no failed jobs detected; proceeding normally"
+            exit 0
+          fi
+          # 判定：全部失败 job 是否都是 notify
+          NON_NOTIFY=$(echo "$FAILED_JOBS" | jq '[.[] | select(. != "Notify CI complete to webhook gateway")] | length')
+          TOTAL=$(echo "$FAILED_JOBS" | jq 'length')
+          echo "total failed: $TOTAL, non-notify: $NON_NOTIFY"
+          if [ "$NON_NOTIFY" -eq 0 ] && [ "$TOTAL" -gt 0 ]; then
+            echo "all failed jobs are notify-only; skipping autofix"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            gh pr comment "$PR" --body "🏗️ 基础设施送达失败（webhook gateway notify），非代码问题，autofix 不接管。
+
+          失败 run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}
+
+          <!-- droid-autofix-notify-skip -->"
+          else
+            echo "mixed failures (non-notify present); autofix takes over"
+          fi
+
+      # ---- 3. 防死循环：sentinel 计数，每 PR 最多 2 次 ----
       - name: Attempt cap guard (max 2 per PR)
         id: cap
-        if: steps.ctx.outputs.skip != 'true'
+        if: steps.ctx.outputs.skip != 'true' && steps.notify_filter.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
           PR: ${{ steps.ctx.outputs.pr }}
