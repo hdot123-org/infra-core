@@ -46,6 +46,7 @@ MANAGED_FILES=(
 MANAGED_LIB_FILES=(
     "lib/posthog.sh"
     "lib/op-mcp.sh"
+    "lib/p0a-guard.sh"
 )
 
 # ============================================================================
