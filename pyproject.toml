@@ -62,6 +62,7 @@ markers = [
     "integration: 集成测试（CLI 入口、跨模块交互、drift_watch、suppression、tick_budget）",
     "e2e: 端到端测试（scanner 全流程、heartbeat、webhook_anchor、CLI 冒烟）",
     "business_policy: 业务策略与守卫契约测试（governance、naming contract、guard contracts、delivery policy）",
+    "timeout: 测试超时控制（pytest-timeout 插件）",
 ]
 
 [tool.ruff]
