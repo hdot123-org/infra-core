@@ -177,6 +177,7 @@ jobs:
 
       - name: Execute droid
         id: execute
+        working-directory: target-repo
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
           P_KIND: ${{ github.event.client_payload.kind }}

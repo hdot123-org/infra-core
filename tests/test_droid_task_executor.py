@@ -476,7 +476,7 @@ class TestWorkflowStructureRegression:
 
     def test_step_order_self_checkout_before_setup_before_target_checkout(self):
         """步骤顺序：Validate → Self checkout → Setup BYOK → Target checkout → Build prompt → Execute
-        
+
         VAL-RTR-002 新语义（2026-09-10 用户裁定 U6）：执行面集中 infra-core，
         droid-task.yml 必须先 checkout 本仓（composite 可用）再 checkout 目标仓。
         """
@@ -487,6 +487,20 @@ class TestWorkflowStructureRegression:
         assert names.index("Checkout executor host repo (self)") < names.index("Setup Droid BYOK")
         assert names.index("Setup Droid BYOK") < names.index("Checkout target repo")
         assert names.index("Checkout target repo") < names.index("Execute droid")
+
+    def test_execute_droid_runs_in_target_repo_subdirectory(self):
+        """Execute droid 步骤含 working-directory: target-repo（VAL-RTR-002）。
+
+        目标仓检出至子目录 target-repo 后，droid 必须在该子目录内执行，
+        否则 payload.repo 语义被违背（droid 会在 infra-core 工作区而非目标仓运行）。
+        """
+        data = _load(WORKFLOW)
+        steps = _steps_by_name(data["jobs"]["execute"]["steps"])
+        step = steps["Execute droid"]
+        assert step.get("working-directory") == "target-repo", (
+            f"Execute droid must run in target-repo subdirectory, "
+            f"got working-directory={step.get('working-directory')!r}"
+        )
 
     def test_no_hardcoded_local_paths(self):
         """公开仓库不含本地绝对路径（/Users/... 等）"""
