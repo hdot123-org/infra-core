@@ -26,6 +26,8 @@ mkdir -p "$LOG_DIR" 2>/dev/null
 LOG_FILE="${LOG_DIR}/ci-timeout-watchdog-posthog.log"
 # shellcheck source=/dev/null
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/posthog.sh"
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/p0a-guard.sh"
 
 # Cross-platform mtime (macOS stat -f %m / GNU stat -c %Y)
 # Conditional assignment avoids GNU stdout leak into $() capture
@@ -255,11 +257,25 @@ except Exception as e:
         echo "Phase B: PR #$PR_NUMBER query returned UNKNOWN (gh pr view failed), alerting only — no spawn"
         send_posthog_event "ci_pr_status_unknown" "$PR_NUMBER" "watchdog_phase_b" "gh_pr_view_failed,repo=${PR_REPO:-none}"
       else
-        # OPEN or other non-merged state — injection was lost, spawn fallback
-        echo "PR #$PR_NUMBER not merged (state: $PR_MERGED), spawning fallback"
-        send_posthog_event "ci_injection_lost" "$PR_NUMBER" "watchdog_phase_b" "injected=${INJECTED_AGE_MINUTES}min, not consumed"
-        spawn_fallback "$PR_NUMBER" "injection_lost" "$CWD"
-        rm -f "$pending_file"
+        # P0-A 源感知守卫：开枪前三查（runner 静默 / sentinel 让路 / autofix 降级）
+        # SOURCE 已在循环开头解析，直接使用
+        _p0a_guard_run "$PR_NUMBER" "$SOURCE" "$PR_REPO"
+        if [ "$P0A_GUARD_RESULT" = "silent_runner" ]; then
+          echo "Phase B: PR #$PR_NUMBER skipped (runner source, silent)"
+          rm -f "$pending_file"
+        elif [ "$P0A_GUARD_RESULT" = "yield_sentinel" ]; then
+          echo "Phase B: PR #$PR_NUMBER skipped (autofix sentinel found, yielding)"
+          rm -f "$pending_file"
+        elif [ "$P0A_GUARD_RESULT" = "alert_only" ]; then
+          echo "Phase B: PR #$PR_NUMBER degraded to warning (autofix active, not spawning)"
+          rm -f "$pending_file"
+        else
+          # OPEN or other non-merged state — injection was lost, spawn fallback
+          echo "PR #$PR_NUMBER not merged (state: $PR_MERGED), spawning fallback"
+          send_posthog_event "ci_injection_lost" "$PR_NUMBER" "watchdog_phase_b" "injected=${INJECTED_AGE_MINUTES}min, not consumed"
+          spawn_fallback "$PR_NUMBER" "injection_lost" "$CWD"
+          rm -f "$pending_file"
+        fi
       fi
     fi
     
@@ -277,6 +293,31 @@ except Exception as e:
       rm -f "$pending_file"
       continue
     fi
+    
+    # P0-A 源感知守卫：开枪前三查（runner 静默 / sentinel 让路 / autofix 降级）
+    # 调用 lib/p0a-guard.sh 的 _p0a_guard_run，结果写入全局变量 P0A_GUARD_RESULT
+    _p0a_guard_run "$PR_NUMBER" "$SOURCE" ""
+    case "$P0A_GUARD_RESULT" in
+      silent_runner)
+        echo "Phase A: PR #$PR_NUMBER skipped (source=runner, silent cleanup)"
+        rm -f "$pending_file"
+        continue
+        ;;
+      yield_sentinel)
+        echo "Phase A: PR #$PR_NUMBER skipped (autofix sentinel found, yielding to autofix)"
+        rm -f "$pending_file"
+        continue
+        ;;
+      alert_only)
+        echo "Phase A: PR #$PR_NUMBER degraded to warning (AUTOFIX_AUTO_ENABLED=true, not spawning fallback)"
+        send_posthog_event "p0a_autofix_degraded" "$PR_NUMBER" "watchdog_phase_a" "autofix_active,source=${SOURCE:-unknown}"
+        rm -f "$pending_file"
+        continue
+        ;;
+      proceed|*)
+        # 继续原有逻辑：发送 PostHog 事件并触发 fallback
+        ;;
+    esac
     
     # Send PostHog timeout event
     send_posthog_event "ci_notification_timeout" "$PR_NUMBER" "watchdog_phase_a" "age=${AGE_MINUTES}min, not injected"

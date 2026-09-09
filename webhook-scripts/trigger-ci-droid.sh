@@ -13,6 +13,8 @@ POSTHOG_EVENT_NAME="ci_webhook_failure"
 POSTHOG_DISTINCT_ID="ci-webhook"
 # shellcheck source=/dev/null
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/posthog.sh"
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/p0a-guard.sh"
 
 # === 参数 ===
 PR_NUMBER="${1:-}"
@@ -152,6 +154,35 @@ spawn_fallback() {
   local pr_num="$1"
   local ci_status="$2"
   local repo_path="${3:-$SCRIPT_CWD}"
+
+  # P0-A 源感知守卫：开枪前三查
+  # ① PR 评论含 <!-- droid-autofix-attempt-N --> sentinel → 让路
+  # ② pending-ci source=runner → 静默通过（runner 自己管）
+  # ③ AUTOFIX_AUTO_ENABLED=true 且非 runner → 降级为告警不开枪
+  local source=""
+  local pending_file="${LOCK_DIR}/pending-ci-${pr_num}.json"
+  if [ -f "$pending_file" ]; then
+    source=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('source',''))" "$pending_file" 2>/dev/null || echo "")
+  fi
+
+  _p0a_guard_run "$pr_num" "$source" "$REPO_SLUG_ARG"
+  case "$P0A_GUARD_RESULT" in
+    silent_runner)
+      log "P0-A 守卫：PR #${pr_num} source=runner，静默通过（runner 自己管）"
+      return 0
+      ;;
+    yield_sentinel)
+      log "P0-A 守卫：PR #${pr_num} 检测到 autofix sentinel，让路不开枪"
+      return 0
+      ;;
+    alert_only)
+      log "P0-A 守卫：PR #${pr_num} AUTOFIX_AUTO_ENABLED=true 且非 runner，降级为告警"
+      return 0
+      ;;
+    proceed)
+      # 继续执行 fallback 逻辑
+      ;;
+  esac
 
   # F3 VAL-INJ-005: Fallback prompt includes gh pr view step for context retrieval
   # This ensures the fallback session fetches PR state/checks before acting,

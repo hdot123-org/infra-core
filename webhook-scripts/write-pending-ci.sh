@@ -67,11 +67,12 @@ OUTPUT_FILE="$LOCKS_DIR/pending-ci-${PR_NUMBER}.json"
 
 # source 合法性校验（fail-fast 先于写入，VAL-REG-004）
 # 空字符串视为非法（VAL-REG-004: --source "" 必须 fail-fast）
+# R1-P0A: 扩展 runner 值（runner 来源静默通过 watchdog）
 if [[ "$SOURCE_PROVIDED" == "true" ]]; then
   case "$SOURCE" in
-    session|scanner) ;;
+    session|scanner|runner) ;;
     *)
-      echo "ERROR: Invalid source '$SOURCE' (must be 'session' or 'scanner')" >&2
+      echo "ERROR: Invalid source '$SOURCE' (must be 'session', 'scanner', or 'runner')" >&2
       exit 1
       ;;
   esac
