@@ -33,6 +33,7 @@ DOC_CATEGORIES = {
     "onboarding": "docs/onboarding/",
     "roadmap": "docs/roadmap/",
     "security": "docs/security/",
+    "governance": "docs/governance/",
 }
 
 # 例外目录（允许存在但不属于上述分类）
