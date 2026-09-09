@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.0](https://github.com/hdot123-org/infra-core/compare/v0.17.0...v0.18.0) (2026-09-09)
+
+
+### Features
+
+* add governance-playbook feature ([#277](https://github.com/hdot123-org/infra-core/issues/277)) ([7e73a41](https://github.com/hdot123-org/infra-core/commit/7e73a413d0f60dddb39639892116850417eeb598))
+* **governance:** add residual as-code templates and 3-repo correction plan ([#278](https://github.com/hdot123-org/infra-core/issues/278)) ([4ca5e66](https://github.com/hdot123-org/infra-core/commit/4ca5e6635c9da93def180318b2acb478fbdb0d2e))
+
+
+### Bug Fixes
+
+* **governance:** M2 scrutiny round 1 blocking + mechanical fixes ([#279](https://github.com/hdot123-org/infra-core/issues/279)) ([ca81bab](https://github.com/hdot123-org/infra-core/commit/ca81babc9d42bd3330768cae5eaa23f939e3f91d))
+* **governance:** VAL-SPEC-016 双侧修复 + 非阻断文档缺陷修复 ([#280](https://github.com/hdot123-org/infra-core/issues/280)) ([a48f0f1](https://github.com/hdot123-org/infra-core/commit/a48f0f15cd2515cb4ce7f305348094607c95319c))
+
 ## [0.17.0](https://github.com/hdot123-org/infra-core/compare/v0.16.1...v0.17.0) (2026-09-09)
 
 
