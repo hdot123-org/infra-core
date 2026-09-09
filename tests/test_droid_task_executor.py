@@ -456,8 +456,17 @@ class TestWorkflowStructureRegression:
         raw = WORKFLOW.read_text(encoding="utf-8")
         assert "BYOK" in raw or "byok" in raw, "workflow file should mention BYOK in header or body"
 
+    def test_self_checkout_step_exists_and_uses_dispatch_token(self):
+        """Checkout executor host repo (self) 步骤存在且使用 DISPATCH_TOKEN"""
+        data = _load(WORKFLOW)
+        steps = _steps_by_name(data["jobs"]["execute"]["steps"])
+        checkout = steps.get("Checkout executor host repo (self)", {})
+        with_block = checkout.get("with", {})
+        token = with_block.get("token", "")
+        assert "DISPATCH_TOKEN" in token, f"self-checkout must use DISPATCH_TOKEN, got: {token}"
+
     def test_checkout_step_uses_dispatch_token(self):
-        """checkout 步骤使用 DISPATCH_TOKEN 凭证"""
+        """checkout target repo 步骤使用 DISPATCH_TOKEN 凭证"""
         data = _load(WORKFLOW)
         steps = _steps_by_name(data["jobs"]["execute"]["steps"])
         checkout = steps.get("Checkout target repo", {})
@@ -465,13 +474,19 @@ class TestWorkflowStructureRegression:
         token = with_block.get("token", "")
         assert "DISPATCH_TOKEN" in token, f"checkout must use DISPATCH_TOKEN, got: {token}"
 
-    def test_step_order_validate_before_setup_before_execute(self):
-        """步骤顺序：Validate → Checkout → Setup BYOK → Build prompt → Execute"""
+    def test_step_order_self_checkout_before_setup_before_target_checkout(self):
+        """步骤顺序：Validate → Self checkout → Setup BYOK → Target checkout → Build prompt → Execute
+        
+        VAL-RTR-002 新语义（2026-09-10 用户裁定 U6）：执行面集中 infra-core，
+        droid-task.yml 必须先 checkout 本仓（composite 可用）再 checkout 目标仓。
+        """
         data = _load(WORKFLOW)
         names = [s.get("name", "") for s in data["jobs"]["execute"]["steps"]]
-        assert names.index("Validate payload") < names.index("Checkout target repo")
-        assert names.index("Checkout target repo") < names.index("Setup Droid BYOK")
-        assert names.index("Setup Droid BYOK") < names.index("Execute droid")
+        # 核心断言：self-checkout → setup → target checkout 顺序
+        assert names.index("Validate payload") < names.index("Checkout executor host repo (self)")
+        assert names.index("Checkout executor host repo (self)") < names.index("Setup Droid BYOK")
+        assert names.index("Setup Droid BYOK") < names.index("Checkout target repo")
+        assert names.index("Checkout target repo") < names.index("Execute droid")
 
     def test_no_hardcoded_local_paths(self):
         """公开仓库不含本地绝对路径（/Users/... 等）"""
