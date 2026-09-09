@@ -13,11 +13,11 @@
 
 | 层 | 覆盖范围 | 内容 | 变更项数 |
 |---|---|---|---|
-| **Layer 1：org 级最大化** | 全部 9 仓库自动继承 | 普查 §7.1 第 1–9 组 org 级 API 命令 | 20 项 |
-| **Layer 2：残余面最小集** | 仅 3 主仓 | org 规则在 Free plan 覆盖不到的仓库级变更 | 5 项 |
-| **Layer 3：仅 UI 层** | 全部 9 仓库自动继承 | 普查 §7.2 仅 UI 可配项 | 3 项 |
+| **Layer 1：org 级最大化** | 全部 9 仓库自动继承 | 普查 §7.1 第 1–9 组 org 级 API 命令（Batch A 预备 PB-00/PB-00.5 + Batch B Actions 策略 PB-01~PB-06.5 + Batch C 安全默认 PB-07~PB-09 + Batch D 成员特权 PB-10~PB-11 + Batch E runner 治理 PB-12） | 16 项 |
+| **Layer 2：残余面最小集** | 仅 3 主仓 | org 规则在 Free plan 覆盖不到的仓库级变更（Batch F PB-13~PB-17） | 5 项 |
+| **Layer 3：仅 UI 层** | 全部 9 仓库自动继承 | 普查 §7.2 仅 UI 可配项（Batch G PB-18~PB-20） | 3 项 |
 
-**升级 Team 评估**：独立章节（不在此 playbook 执行）。
+**升级 Team 评估**：独立章节（不在此 playbook 执行）。secret_scanning / secret_scanning_push_protection 的 org 级 enable_all 端点不在普查 §7.1 十组白名单内（census §7.3 标记为 Free 不可用/需 Team），已迁移至「升级 Team 评估」章节。
 
 ### 0.2 每个变更项八要素
 
@@ -41,12 +41,12 @@
 
 **批次单调递增**，每项可独立批准-执行-验证-回滚：
 - **Batch A（预备）**：PB-00, PB-00.5（SHA 化 + 盘点，无副作用）
-- **Batch B（Actions 策略）**：PB-01 ~ PB-06（org 级 Actions 收紧）
-- **Batch C（安全默认）**：PB-07 ~ PB-11（enable_all 族）
-- **Batch D（成员特权）**：PB-12 ~ PB-13（PATCH /orgs 族）
-- **Batch E（runner 治理）**：PB-14（runner-groups）
-- **Batch F（残余面）**：PB-15 ~ PB-19（Layer 2 仓库级变更）
-- **Batch G（仅 UI）**：PB-20 ~ PB-22（Layer 3 人工操作）
+- **Batch B（Actions 策略）**：PB-01 ~ PB-06.5（org 级 Actions 收紧）
+- **Batch C（安全默认）**：PB-07 ~ PB-09（enable_all 族）
+- **Batch D（成员特权）**：PB-10 ~ PB-11（PATCH /orgs 族）
+- **Batch E（runner 治理）**：PB-12（runner-groups）
+- **Batch F（残余面）**：PB-13 ~ PB-17（Layer 2 仓库级变更）
+- **Batch G（仅 UI）**：PB-18 ~ PB-20（Layer 3 人工操作）
 
 ---
 
@@ -233,41 +233,15 @@
 | ⑦回滚命令 | `gh api -X POST /orgs/hdot123-org/dependabot_security_updates/disable_all` + `gh api -X PATCH /orgs/hdot123-org -f dependabot_security_updates_enabled_for_new_repositories=false` |
 | ⑧验证命令 | `gh api /orgs/hdot123-org --jq '.dependabot_security_updates_enabled_for_new_repositories'`（应输出 `true`） |
 
-### PB-10：secret_scanning org 级 enable_all（公库侧）
-
-| 要素 | 值 |
-|---|---|
-| ①编号 | PB-10 |
-| ②现状→目标 | 公库侧：新仓默认=false + org 级 enable_all=未执行 → 新仓默认=true + 执行 enable_all；**私库侧进升级 Team 评估** |
-| ③免费可用性 | 公库可用（免费自动）；**私库不可用（需 Team+ Secret Protection）** |
-| ④API 或 UI | `POST /orgs/hdot123-org/secret_scanning/enable_all`（如 Free 支持）+ `PATCH /orgs/hdot123-org`（新仓默认） |
-| ⑤前置条件 | 确认 Free org 的 `secret_scanning/enable_all` 端点对公库可用（公库免费，但 org 级 enable_all API 是否区分公私未确认——**待实测确认**） |
-| ⑥爆炸半径 | **对公库（3 主仓）**：配置统一（公库已自动享有 secret scanning）；**对私库（5 辅助仓）**：无影响（需 Team+）；**对引擎管线**：无影响 |
-| ⑦回滚命令 | `gh api -X POST /orgs/hdot123-org/secret_scanning/disable_all` + `gh api -X PATCH /orgs/hdot123-org -f secret_scanning_enabled_for_new_repositories=false` |
-| ⑧验证命令 | `gh api /orgs/hdot123-org --jq '.secret_scanning_enabled_for_new_repositories'`（应输出 `true`） |
-
-### PB-11：secret_scanning_push_protection org 级 enable_all（公库侧）
-
-| 要素 | 值 |
-|---|---|
-| ①编号 | PB-11 |
-| ②现状→目标 | 公库侧：新仓默认=false → 新仓默认=true + 执行 enable_all；**私库侧进升级 Team 评估** |
-| ③免费可用性 | 同 PB-10 |
-| ④API 或 UI | 同 PB-10 |
-| ⑤前置条件 | 同 PB-10 |
-| ⑥爆炸半径 | 同 PB-10 |
-| ⑦回滚命令 | `gh api -X POST /orgs/hdot123-org/secret_scanning_push_protection/disable_all` + `gh api -X PATCH /orgs/hdot123-org -f secret_scanning_push_protection_enabled_for_new_repositories=false` |
-| ⑧验证命令 | `gh api /orgs/hdot123-org --jq '.secret_scanning_push_protection_enabled_for_new_repositories'`（应输出 `true`） |
-
 ---
 
 ## Batch D：成员特权（org 级）
 
-### PB-12：default_repository_permission 收紧
+### PB-10：default_repository_permission 收紧
 
 | 要素 | 值 |
 |---|---|
-| ①编号 | PB-12 |
+| ①编号 | PB-10 |
 | ②现状→目标 | `default_repository_permission: "read"` → `default_repository_permission: "none"` |
 | ③免费可用性 | 可用 |
 | ④API 或 UI | `PATCH /orgs/hdot123-org`（`default_repository_permission: "none"`） |
@@ -276,11 +250,11 @@
 | ⑦回滚命令 | `gh api -X PATCH /orgs/hdot123-org -f default_repository_permission=read` |
 | ⑧验证命令 | `gh api /orgs/hdot123-org --jq '.default_repository_permission'`（应输出 `none`） |
 
-### PB-13：members_can_create_public_repositories 关闭
+### PB-11：members_can_create_public_repositories 关闭
 
 | 要素 | 值 |
 |---|---|
-| ①编号 | PB-13 |
+| ①编号 | PB-11 |
 | ②现状→目标 | `members_can_create_public_repositories: true` → `members_can_create_public_repositories: false` |
 | ③免费可用性 | 可用 |
 | ④API 或 UI | `PATCH /orgs/hdot123-org`（`members_can_create_public_repositories: false`） |
@@ -293,14 +267,14 @@
 
 ## Batch E：runner 治理（org 级）
 
-### PB-14：runner-groups 收编
+### PB-12：runner-groups 收编
 
 | 要素 | 值 |
 |---|---|
-| ①编号 | PB-14 |
+| ①编号 | PB-12 |
 | ②现状→目标 | 2 组（Default=all, memory-runnerz=selected）→ 1 个核心组（core-runners），限定 3 主仓 |
 | ③免费可用性 | 可用（self-hosted runners 无分钟费） |
-| ④API 或 UI | `POST /orgs/hdot123-org/actions/runner-groups`（建组）+ `PUT .../runner-groups/{id}/repositories`（绑定仓库）+ `PUT .../runner-groups/{id}/runner`（迁移 runner） |
+| ④API 或 UI | `POST /orgs/hdot123-org/actions/runner-groups`（建组）+ `PUT .../runner-groups/{id}/repositories`（绑定仓库）+ `PUT .../runner-groups/{id}/runners/{runner_id}`（迁移 runner） |
 | ⑤前置条件 | 盘点 5 台 runner 当前分布（哪台在哪个组），确认迁移不影响运行中 workflow |
 | ⑥爆炸半径 | **对进行中 PR**：无影响；**对运行中 CI**：若迁移期间 runner 不可用，workflow 会等待；**对引擎管线**：需确保 3 主仓仍在 runner 组授权列表 |
 | ⑦回滚命令 | `gh api -X DELETE /orgs/hdot123-org/actions/runner-groups/{NEW_GROUP_ID}`（删新组，runner 自动回 Default 组） |
@@ -310,11 +284,11 @@
 
 ## Batch F：Layer 2 残余面（仅 3 主仓）
 
-### PB-15：memory / mencbo 分支保护 classic → rulesets 迁移
+### PB-13：memory / mencbo 分支保护 classic → rulesets 迁移
 
 | 要素 | 值 |
 |---|---|
-| ①编号 | PB-15 |
+| ①编号 | PB-13 |
 | ②现状→目标 | memory / mencbo 用 classic branch protection → 迁移到 repo 级 rulesets（同构复制 infra-core 的 `main-branch-protection`） |
 | ③免费可用性 | 可用（repo 级 rulesets 所有 plan 可用） |
 | ④API 或 UI | `POST /repos/hdot123-org/memory/rulesets` + `POST /repos/hdot123-org/mencbo/rulesets`（JSON 模板见 as-code 模板） |
@@ -325,11 +299,11 @@
 
 **org 覆盖不到论证**：org 级 rulesets 需 Team+（产物 A §8.1：`GET /orgs/hdot123-org/rulesets` → 403），Free plan 只能 repo 级 rulesets。
 
-### PB-16：CODEOWNERS 缺失（infra-core / mencbo）
+### PB-14：CODEOWNERS 缺失（infra-core / mencbo）
 
 | 要素 | 值 |
 |---|---|
-| ①编号 | PB-16 |
+| ①编号 | PB-14 |
 | ②现状→目标 | 仅 memory 有 `.github/CODEOWNERS` → infra-core / mencbo 各创建 `.github/CODEOWNERS`（至少 `* @hdot123`） |
 | ③免费可用性 | 可用（仓库内容文件，无 plan 限制） |
 | ④API 或 UI | 仓库内容文件（git commit + push） |
@@ -340,11 +314,11 @@
 
 **org 覆盖不到论证**：CODEOWNERS 是仓库级内容文件，无 org 级 API 或规则可统一配置。
 
-### PB-17：POSTHOG_INGESTION_KEY 从 mencbo Actions variables 迁移 secrets
+### PB-15：POSTHOG_INGESTION_KEY 从 mencbo Actions variables 迁移 secrets
 
 | 要素 | 值 |
 |---|---|
-| ①编号 | PB-17 |
+| ①编号 | PB-15 |
 | ②现状→目标 | `POSTHOG_INGESTION_KEY` 明文存于 mencbo Actions variables → 迁移到 mencbo Actions secrets（或 org 级 secrets 按仓库访问控制限定 mencbo） |
 | ③免费可用性 | 可用 |
 | ④API 或 UI | 见下方四步并行期设计 |
@@ -363,11 +337,11 @@
 
 **并行期回滚**：改回读 variables（`variables.POSTHOG_INGESTION_KEY`）。
 
-### PB-18：mencbo 合并策略统一
+### PB-16：mencbo 合并策略统一
 
 | 要素 | 值 |
 |---|---|
-| ①编号 | PB-18 |
+| ①编号 | PB-16 |
 | ②现状→目标 | `allow_merge_commit=true, allow_rebase_merge=true, allow_squash_merge=true, delete_branch_on_merge=false` → `allow_squash_merge=true, allow_merge_commit=false, allow_rebase_merge=false, delete_branch_on_merge=true`（squash-only + 自动删分支） |
 | ③免费可用性 | 可用（repo 级设置） |
 | ④API 或 UI | `PATCH /repos/hdot123-org/mencbo`（`allow_merge_commit: false, allow_rebase_merge: false, delete_branch_on_merge: true`） |
@@ -380,11 +354,11 @@
 
 **open PR 盘点命令**：`gh pr list -R hdot123-org/mencbo --state open --json number,title,mergeable`
 
-### PB-19：dependabot.yml 缺失（infra-core / mencbo）
+### PB-17：dependabot.yml 缺失（infra-core / mencbo）
 
 | 要素 | 值 |
 |---|---|
-| ①编号 | PB-19 |
+| ①编号 | PB-17 |
 | ②现状→目标 | 仅 memory 有 `.github/dependabot.yml` → infra-core / mencbo 各创建 `.github/dependabot.yml`（至少 `version: 2` + `package-ecosystem: github-actions`） |
 | ③免费可用性 | 可用（仓库内容文件，无 plan 限制） |
 | ④API 或 UI | 仓库内容文件（git commit + push） |
@@ -399,11 +373,11 @@
 
 ## Batch G：Layer 3 仅 UI 层（人工操作）
 
-### PB-20：2FA 强制开启
+### PB-18：2FA 强制开启
 
 | 要素 | 值 |
 |---|---|
-| ①编号 | PB-20 |
+| ①编号 | PB-18 |
 | ②现状→目标 | `two_factor_requirement_enabled: false` → `two_factor_requirement_enabled: true` |
 | ③免费可用性 | 可用 |
 | ④API 或 UI | **仅 UI**——Settings > Authentication security > Two-factor authentication > Require 2FA for everyone in the organization |
@@ -412,11 +386,11 @@
 | ⑦回滚命令 | UI 关闭路径：Settings > Authentication security > 取消勾选 Require 2FA |
 | ⑧验证命令 | `gh api /orgs/hdot123-org --jq '.two_factor_requirement_enabled'`（应输出 `true`） |
 
-### PB-21：OAuth App 访问限制开启
+### PB-19：OAuth App 访问限制开启
 
 | 要素 | 值 |
 |---|---|
-| ①编号 | PB-21 |
+| ①编号 | PB-19 |
 | ②现状→目标 | 未开启 → 开启（拦截未批准 OAuth App 访问 org 资源） |
 | ③免费可用性 | 可用 |
 | ④API 或 UI | **仅 UI**——Settings > Integrations > OAuth applications > Approve or disallow third-party applications |
@@ -425,11 +399,11 @@
 | ⑦回滚命令 | UI 关闭路径：Settings > Integrations > OAuth applications > 取消限制 |
 | ⑧验证命令 | 无 REST 端点（仅 UI 可读） |
 
-### PB-22：fine-grained PAT 审批制开启
+### PB-20：fine-grained PAT 审批制开启
 
 | 要素 | 值 |
 |---|---|
-| ①编号 | PB-22 |
+| ①编号 | PB-20 |
 | ②现状→目标 | 未开启审批制 → 开启审批制（成员用 fgPAT 访问 org 前需 owner 审批） |
 | ③免费可用性 | 可用 |
 | ④API 或 UI | **仅 UI**——Settings > Integrations > Personal access tokens > Require approval for all members |
@@ -440,17 +414,46 @@
 
 ---
 
+## 升级 Team 评估（不可执行项）
+
+> 普查 §7.3 不可用能力——需升级 plan 或购买产品。本章节**不含可执行变更项**，仅逐项给出升级依据与解锁收益。
+
+### secret_scanning / secret_scanning_push_protection 的 org 级 enable_all
+
+**原可执行主体位置**：Batch C（安全默认 enable_all 族，原 PB-10/PB-11）。
+
+**移出原因**：`POST /orgs/{org}/secret_scanning/enable_all` 与 `POST /orgs/{org}/secret_scanning_push_protection/enable_all` 不在普查 §7.1 十组白名单内（census §7.3 标记为 Free 不可用/需 Team），禁止留在可执行主体中。"如 Free 支持"类对冲表述不得留在可执行项。
+
+**升级依据**：
+- secret_scanning：2025-04-01 起 Team plan 可单独购买 Secret Protection（公库免费自动，3 主仓已自动享有）
+- secret_scanning_push_protection：同上（公库免费自动，3 主仓已自动享有）
+- 私库侧：需 Team + Secret Protection 解锁
+
+**解锁收益**：
+- 私库（5 辅助仓）自动扫描/拦截泄露密钥（公库免费自动，3 主仓已享有）
+- org 级统一配置新仓默认（私库侧目前无统一开关）
+
+**repo 级公库替代路径**：3 主仓（public）已自动享有 secret scanning + push protection（公库免费特性），无需 org 级 enable_all 解锁。新仓若为公库，需手动在仓库 Settings 开启或由 org 新仓默认配置（`secret_scanning_enabled_for_new_repositories` 为 PATCH /orgs 级字段，与 enable_all 端点分离）。
+
+**参考**：治理规范 `org-governance-spec.md` §5「升级 Team 评估」章节。
+
+### 其余升级 Team 评估项
+
+参见治理规范 `org-governance-spec.md` §5（逐项给出升级依据与解锁收益，含 org 级 rulesets / merge queue 私库 / environments 私库 / code scanning 私库 / required workflows / SAML / Codespaces 策略 / Copilot 策略 / 私库 Pages）。
+
+---
+
 ## 1. 执行顺序总结
 
 | 批次 | 变更项 | 性质 | 依赖 |
 |---|---|---|---|
 | Batch A | PB-00, PB-00.5 | 预备（SHA 化 + 盘点） | 无 |
 | Batch B | PB-01 ~ PB-06.5 | Actions 策略收紧 | PB-00, PB-00.5 |
-| Batch C | PB-07 ~ PB-11 | 安全默认 enable_all | 无 |
-| Batch D | PB-12 ~ PB-13 | 成员特权收紧 | 无 |
-| Batch E | PB-14 | runner 治理 | 无 |
-| Batch F | PB-15 ~ PB-19 | Layer 2 残余面 | PB-15 先于 PB-18（ruleset 迁移配合合并策略） |
-| Batch G | PB-20 ~ PB-22 | Layer 3 仅 UI | 无 |
+| Batch C | PB-07 ~ PB-09 | 安全默认 enable_all（dependency_graph/dependabot_alerts/dependabot_security_updates） | 无 |
+| Batch D | PB-10 ~ PB-11 | 成员特权收紧 | 无 |
+| Batch E | PB-12 | runner 治理 | 无 |
+| Batch F | PB-13 ~ PB-17 | Layer 2 残余面 | PB-13 先于 PB-16（ruleset 迁移配合合并策略） |
+| Batch G | PB-18 ~ PB-20 | Layer 3 仅 UI | 无 |
 
 **顺序安全不变式**：
 - PB-00（SHA 化）< PB-03（sha_pinning_required 开启）✓
@@ -462,16 +465,16 @@
 
 | 变更项 | 对进行中 PR 影响 | 对运行中 CI 影响 | 对引擎管线影响 |
 |---|---|---|---|
-| PB-01/PB-02（allowlist） | 无 | 新 PR 若引用未在 allowlist 的 action 会失败 | auto-merge/droid-review/release-please 需确认 action 在 allowlist |
+| PB-02/PB-01（allowlist） | 无 | 新 PR 若引用未在 allowlist 的 action 会失败 | auto-merge/droid-review/release-please 需确认 action 在 allowlist |
 | PB-03（SHA pinning） | 无 | 新 PR 若 action 引用非 SHA 形式会失败 | infra-core 已完成，memory/mencbo 需先 PB-00 |
 | PB-04（default permissions read） | 无 | 需显式 `permissions: write` 的 job 会失败 | auto-merge/branch-cleanup/release-please 需显式声明 |
 | PB-05（can_approve=false） | 无 | workflow 无法自动批准 PR | droid-review 提交 review 但不批准，无影响 |
 | PB-06（fork PR 审批） | 无 | fork PR workflow 需 maintainer 批准 | 无影响（当前无 fork PR） |
-| PB-12（default permission none） | 无 | 无 | 无（仅影响未来新增成员） |
-| PB-14（runner 组） | 无 | 迁移期间 runner 不可用会等待 | 需确保 3 主仓在 runner 组授权列表 |
-| PB-15（rulesets 迁移） | 无 | 无 | 无 |
-| PB-17（POSTHOG 迁移） | 无 | 并行期内若 workflow 仍读 variables 会失败 | 无影响（mencbo 无引擎管线） |
-| PB-18（合并策略） | 合并方式选项变化 | 无 | 无 |
+| PB-10（default permission none） | 无 | 无 | 无（仅影响未来新增成员） |
+| PB-12（runner 组） | 无 | 迁移期间 runner 不可用会等待 | 需确保 3 主仓在 runner 组授权列表 |
+| PB-13（rulesets 迁移） | 无 | 无 | 无 |
+| PB-15（POSTHOG 迁移） | 无 | 并行期内若 workflow 仍读 variables 会失败 | 无影响（mencbo 无引擎管线） |
+| PB-16（合并策略） | 合并方式选项变化 | 无 | 无 |
 
 ---
 
@@ -501,9 +504,11 @@
 ## 5. 参考索引
 
 - 治理规范：`org-governance-spec.md`
-- 差距矩阵：`memory/artifacts/2026-09-09-gap-matrix-org-first.md`（产物 C）
-- 能力普查：`memory/artifacts/2026-09-09-org-capability-census.md`
-- 现状审计：`memory/artifacts/2026-09-09-org-state-audit.md`
+- 差距矩阵：`memory/artifacts/2026-09-09-gap-matrix-org-first.md`（产物 C，相对路径，公开读者可从仓库根访问）
+- 能力普查：`memory/artifacts/2026-09-09-org-capability-census.md`（相对路径）
+- 现状审计：`memory/artifacts/2026-09-09-org-state-audit.md`（相对路径）
+
+**注**：`memory/` 目录在 .gitignore 中（memory-hook 产物，公开仓禁止提交），但上述路径为相对路径，便于内部引用。公开读者如需查阅，请参考 docs/governance/ 下的治理规范与 playbook。
 
 ---
 

@@ -27,7 +27,7 @@
 
 | 层 | 覆盖范围 | 内容 | 条目数 |
 |---|---|---|---|
-| **Layer 1：org 级最大化** | 全部 9 仓库（含 6 辅助仓）自动继承 | 普查 §7.1 第 1–9 组命令对应的 org 级 API 变更 | ~20 项 |
+| **Layer 1：org 级最大化** | 全部 9 仓库（含 6 辅助仓）自动继承 | 普查 §7.1 第 1–9 组命令对应的 org 级 API 变更 | 16 项 |
 | **Layer 2：残余面最小集** | 仅 3 主仓（infra-core/memory/mencbo） | org 规则在 Free plan 覆盖不到的仓库级变更 | ~5 项 |
 | **Layer 3：仅 UI 层** | 全部 9 仓库自动继承 | 普查 §7.2 仅 UI 可配项（2FA/OAuth/fgPAT） | 3 项 |
 | **升级 Team 评估** | 需升级 plan 的能力 | 普查 §7.3 不可用能力逐项给升级依据与解锁收益 | 独立章节 |
@@ -90,13 +90,12 @@
 | dependency_graph enable_all | 新仓默认=false | 新仓默认=true + enable_all | 可用（公私皆生效） | `POST /orgs/{org}/dependency_graph/enable_all` |
 | dependabot_alerts enable_all | 新仓默认=false | 新仓默认=true + enable_all | 可用（公私皆生效） | `POST /orgs/{org}/dependabot_alerts/enable_all` |
 | dependabot_security_updates enable_all | 新仓默认=false | 新仓默认=true + enable_all | 可用 | `POST /orgs/{org}/dependabot_security_updates/enable_all` |
-| secret_scanning（公库侧） | 新仓默认=false | 公库侧 enable_all + 新仓默认=true | 公库可用；**私库需 Team+** | `POST /orgs/{org}/secret_scanning/enable_all` |
-| secret_scanning_push_protection（公库侧） | 新仓默认=false | 公库侧 enable_all + 新仓默认=true | 公库可用；**私库需 Team+** | `POST /orgs/{org}/secret_scanning_push_protection/enable_all` |
 
 **覆盖语义**：
 - 对 3 主仓（public）：enable_all = 配置统一（公库免费自动）
-- 对 5 辅助仓（private）：dependency_graph / dependabot_alerts / dependabot_security_updates 免费可用；secret_scanning 需 Team+
-- secret_scanning 私库侧进「升级 Team 评估」
+- 对 5 辅助仓（private）：dependency_graph / dependabot_alerts / dependabot_security_updates 免费可用
+
+**注**：secret_scanning / secret_scanning_push_protection 的 org 级 enable_all 端点不在普查 §7.1 十组白名单内（census §7.3 标记为 Free 不可用/需 Team），不在 Layer 1 可执行范围内。3 主仓（public）已自动享有 secret scanning + push protection（公库免费特性），私库侧进「升级 Team 评估」（§5）。
 
 ### 2.3 成员特权收紧
 
