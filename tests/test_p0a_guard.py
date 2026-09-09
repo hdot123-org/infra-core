@@ -1,7 +1,6 @@
 """P0-A 源感知守卫测试 — 验证三查逻辑（sentinel/runner/autofix 降级）"""
 
 import subprocess
-import tempfile
 from pathlib import Path
 
 
