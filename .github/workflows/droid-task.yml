@@ -64,16 +64,23 @@ jobs:
 
           echo "✓ Payload validated: kind=$KIND task_id=$TASK_ID repo=$REPO"
 
-      - name: Checkout target repo
+      - name: Checkout executor host repo (self)
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          repository: ${{ github.event.client_payload.repo }}
+          repository: ${{ github.repository }}
           token: ${{ secrets.DISPATCH_TOKEN }}
 
       - name: Setup Droid BYOK
         uses: ./.github/actions/setup-droid-byok
         with:
           bailian-api-key: ${{ secrets.BAILIAN_API_KEY }}
+
+      - name: Checkout target repo
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: ${{ github.event.client_payload.repo }}
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          path: target-repo
 
       - name: Build prompt (error-gateway)
         if: github.event.client_payload.kind == 'error-gateway'
@@ -170,6 +177,7 @@ jobs:
 
       - name: Execute droid
         id: execute
+        working-directory: target-repo
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
           P_KIND: ${{ github.event.client_payload.kind }}
