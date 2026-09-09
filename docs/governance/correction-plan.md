@@ -55,7 +55,7 @@
 
 | 要素 | 值 |
 |---|---|
-| **现状值** | 部分 workflow 使用 `actions/checkout@v4`（SHA: `fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09`，注释 `# v5`） |
+| **现状值** | 部分 workflow 使用 `actions/checkout@v5-pin`（SHA: `fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09`） |
 | **目标值** | 统一为 `actions/checkout@<SHA>`（v7 最新 SHA） |
 | **操作** | 1. 查询 checkout v7 最新 SHA：`gh api /repos/actions/checkout/releases/latest --jq '.tag_name'` 获取 tag，再从 commit 获取 SHA<br>2. 替换全部 `uses: actions/checkout@<old-sha>` 为 `uses: actions/checkout@<new-sha> # v7`<br>3. `git add .github/workflows/`<br>4. `git commit -m "chore: upgrade actions/checkout to v7"`<br>5. `git push` |
 | **验证** | `grep -rn 'actions/checkout@' .github/workflows/ \| grep -vE '@[0-9a-f]{40}'`（应返回空）<br>`grep -rn 'actions/checkout@' .github/workflows/ \| grep '# v7'`（应全命中） |
@@ -96,7 +96,7 @@
 |---|---|
 | **现状值** | 使用 classic branch protection（`main` 分支：required_status_checks=[ci-ok, Block non-owner governance modifications, droid-review]；enforce_admins=true；required_linear_history=true；allow_force_pushes=false；allow_deletions=false） |
 | **目标值** | 迁移到 repo 级 rulesets（同构复制 infra-core 的 `main-branch-protection` 模板，适配 memory 的 CI check 名） |
-| **操作** | 参见 playbook `change-playbook.md` **PB-15**<br><br>1. 复制模板：`cp docs/governance/templates/ruleset.json memory-ruleset.json`<br>2. 修改 `rules[0].parameters.required_status_checks[].context` 为 memory 的实际 check 名：<br>   - `ci-ok`<br>   - `Block non-owner governance modifications`<br>   - `droid-review`<br>3. 删除 `integration_id` 字段（按仓自适应）<br>4. 创建 ruleset：`gh api -X POST /repos/hdot123-org/memory/rulesets --input memory-ruleset.json`<br>5. 验证后删除 classic protection（UI：Settings > Branches > main > Delete）<br>6. `rm memory-ruleset.json` |
+| **操作** | 参见 playbook `change-playbook.md` **PB-13**<br><br>1. 复制模板：`cp docs/governance/templates/ruleset.json memory-ruleset.json`<br>2. 修改 `rules[0].parameters.required_status_checks[].context` 为 memory 的实际 check 名：<br>   - `ci-ok`<br>   - `Block non-owner governance modifications`<br>   - `droid-review`<br>3. 删除 `integration_id` 字段（按仓自适应）<br>4. 创建 ruleset：`gh api -X POST /repos/hdot123-org/memory/rulesets --input memory-ruleset.json`<br>5. 验证后删除 classic protection（UI：Settings > Branches > main > Delete）<br>6. `rm memory-ruleset.json` |
 | **验证** | `gh api /repos/hdot123-org/memory/rulesets --jq '.[].name'`（应输出 `main-branch-protection`）<br>`gh api /repos/hdot123-org/memory/branches/main/protection`（应返回 404 "Branch not protected"——保护走 rulesets） |
 | **回滚** | `gh api -X DELETE /repos/hdot123-org/memory/rulesets/<ID>`（删 ruleset）<br>classic protection 需手动重建（UI：Settings > Branches > Add rule） |
 
@@ -111,7 +111,7 @@
 
 | 要素 | 值 |
 |---|---|
-| **现状值** | 部分 workflow 使用 `actions/checkout@v4` / `actions/checkout@v5`（SHA pin 形式） |
+| **现状值** | 部分 workflow 使用 `actions/checkout@v5-pin`（SHA pin 形式） |
 | **目标值** | 统一为 `actions/checkout@<SHA>`（v7 最新 SHA） |
 | **操作** | 同 infra-core 1.4 |
 | **验证** | `gh api /repos/hdot123-org/memory/contents/.github/workflows --jq '.[].name'` 列出 workflow，逐个读取并 `grep 'actions/checkout@' \| grep -vE '@[0-9a-f]{40}'`（应返回空） |
@@ -129,7 +129,7 @@
 |---|---|
 | **现状值** | `allow_squash_merge=true, allow_merge_commit=true, allow_rebase_merge=true, delete_branch_on_merge=false`（三种合并方式全开） |
 | **目标值** | `allow_squash_merge=true, allow_merge_commit=false, allow_rebase_merge=false, delete_branch_on_merge=true`（统一为 squash-only + 自动删分支） |
-| **操作** | 参见 playbook `change-playbook.md` **PB-18**<br><br>1. 盘点当前 open PR：`gh pr list -R hdot123-org/mencbo --state open --json number,title,mergeable`<br>2. 执行变更：`gh api -X PATCH /repos/hdot123-org/mencbo -F allow_merge_commit=false -F allow_rebase_merge=false -F delete_branch_on_merge=true`<br>3. 通知 open PR 作者：合并方式仅剩 squash |
+| **操作** | 参见 playbook `change-playbook.md` **PB-16**<br><br>1. 盘点当前 open PR：`gh pr list -R hdot123-org/mencbo --state open --json number,title,mergeable`<br>2. 执行变更：`gh api -X PATCH /repos/hdot123-org/mencbo -F allow_merge_commit=false -F allow_rebase_merge=false -F delete_branch_on_merge=true`<br>3. 通知 open PR 作者：合并方式仅剩 squash |
 | **验证** | `gh api /repos/hdot123-org/mencbo --jq '{allow_squash_merge, allow_merge_commit, allow_rebase_merge, delete_branch_on_merge}'`（应输出 squash=true, merge=false, rebase=false, delete=true） |
 | **回滚** | `gh api -X PATCH /repos/hdot123-org/mencbo -F allow_merge_commit=true -F allow_rebase_merge=true -F delete_branch_on_merge=false` |
 
@@ -138,7 +138,7 @@
 - **对运行中 CI**：无影响
 - **对引擎管线**：无影响（mencbo 无引擎管线）
 
-**org 覆盖不到论证**：合并策略为 repo 级设置（`PATCH /repos/{owner}/{repo}`），org 级无统一端点（org 级 rulesets 可覆盖但需 Team——产物 A §8.1）。参见差距矩阵产物 C `LR-05`。
+**org 覆盖不到论证**：合并策略为 repo 级设置（`PATCH /repos/{owner}/{repo}`），org 级无统一端点（org 级 rulesets 可覆盖但需 Team——产物 A §8.1）。参见差距矩阵产物 C `LR-04`。
 
 ### 3.2 POSTHOG_INGESTION_KEY
 
@@ -146,7 +146,7 @@
 |---|---|
 | **现状值** | `POSTHOG_INGESTION_KEY` 明文存于 mencbo Actions variables（13 个 variables 之一） |
 | **目标值** | 迁移到 mencbo Actions secrets |
-| **操作** | 参见 playbook `change-playbook.md` **PB-17**<br><br>**并行期四步设计**：<br>1. **建 secret**：`gh secret set POSTHOG_INGESTION_KEY --repo hdot123-org/mencbo --body "<VALUE>"`（从 variables 读取当前值）<br>2. **改 workflow 引用**：mencbo 仓内 workflow 文件中 `${{ variables.POSTHOG_INGESTION_KEY }}` → `${{ secrets.POSTHOG_INGESTION_KEY }}`<br>3. **验证**：`gh api /repos/hdot123-org/mencbo/actions/secrets --jq '.secrets[] \| select(.name=="POSTHOG_INGESTION_KEY")'`（应返回存在）<br>4. **末步删 variable**：`gh api -X DELETE /repos/hdot123-org/mencbo/actions/variables/POSTHOG_INGESTION_KEY` |
+| **操作** | 参见 playbook `change-playbook.md` **PB-15**<br><br>**并行期四步设计**：<br>1. **建 secret**：`gh secret set POSTHOG_INGESTION_KEY --repo hdot123-org/mencbo --body "<VALUE>"`（从 variables 读取当前值）<br>2. **改 workflow 引用**：mencbo 仓内 workflow 文件中 `${{ variables.POSTHOG_INGESTION_KEY }}` → `${{ secrets.POSTHOG_INGESTION_KEY }}`<br>3. **验证**：`gh api /repos/hdot123-org/mencbo/actions/secrets --jq '.secrets[] \| select(.name=="POSTHOG_INGESTION_KEY")'`（应返回存在）<br>4. **末步删 variable**：`gh api -X DELETE /repos/hdot123-org/mencbo/actions/variables/POSTHOG_INGESTION_KEY` |
 | **验证** | `gh api /repos/hdot123-org/mencbo/actions/secrets --jq '.secrets[] \| select(.name=="POSTHOG_INGESTION_KEY")'`（应返回存在）<br>`gh api /repos/hdot123-org/mencbo/actions/variables --jq '.variables[] \| select(.name=="POSTHOG_INGESTION_KEY")'`（应返回空） |
 | **回滚** | 并行期内：改回读 variables（`variables.POSTHOG_INGESTION_KEY`）<br>并行期结束后：`gh api -X DELETE /repos/hdot123-org/mencbo/actions/secrets/POSTHOG_INGESTION_KEY` + 重新创建 variable |
 
@@ -163,7 +163,7 @@
 |---|---|
 | **现状值** | 使用 classic branch protection（`main` 分支：required_status_checks=[Test (Node 22/24), Test (Daemon), Block non-owner governance modifications, droid-review, Desktop / Detect, Desktop / Client, Desktop / Tauri]；enforce_admins=true；required_linear_history=false；allow_force_pushes=false；allow_deletions=false） |
 | **目标值** | 迁移到 repo 级 rulesets（同构复制 infra-core 的 `main-branch-protection` 模板，适配 mencbo 的 CI check 名） |
-| **操作** | 参见 playbook `change-playbook.md` **PB-15**<br><br>1. 复制模板：`cp docs/governance/templates/ruleset.json mencbo-ruleset.json`<br>2. 修改 `rules[0].parameters.required_status_checks[].context` 为 mencbo 的实际 check 名：<br>   - `Test (Node 22/24)`<br>   - `Test (Daemon)`<br>   - `Block non-owner governance modifications`<br>   - `droid-review`<br>   - `Desktop / Detect`<br>   - `Desktop / Client`<br>   - `Desktop / Tauri`<br>3. 删除 `integration_id` 字段（按仓自适应）<br>4. 创建 ruleset：`gh api -X POST /repos/hdot123-org/mencbo/rulesets --input mencbo-ruleset.json`<br>5. 验证后删除 classic protection（UI：Settings > Branches > main > Delete）<br>6. `rm mencbo-ruleset.json` |
+| **操作** | 参见 playbook `change-playbook.md` **PB-13**<br><br>1. 复制模板：`cp docs/governance/templates/ruleset.json mencbo-ruleset.json`<br>2. 修改 `rules[0].parameters.required_status_checks[].context` 为 mencbo 的实际 check 名：<br>   - `Test (Node 22/24)`<br>   - `Test (Daemon)`<br>   - `Block non-owner governance modifications`<br>   - `droid-review`<br>   - `Desktop / Detect`<br>   - `Desktop / Client`<br>   - `Desktop / Tauri`<br>3. 删除 `integration_id` 字段（按仓自适应）<br>4. 创建 ruleset：`gh api -X POST /repos/hdot123-org/mencbo/rulesets --input mencbo-ruleset.json`<br>5. 验证后删除 classic protection（UI：Settings > Branches > main > Delete）<br>6. `rm mencbo-ruleset.json` |
 | **验证** | `gh api /repos/hdot123-org/mencbo/rulesets --jq '.[].name'`（应输出 `main-branch-protection`）<br>`gh api /repos/hdot123-org/mencbo/branches/main/protection`（应返回 404 "Branch not protected"——保护走 rulesets） |
 | **回滚** | `gh api -X DELETE /repos/hdot123-org/mencbo/rulesets/<ID>`（删 ruleset）<br>classic protection 需手动重建（UI：Settings > Branches > Add rule） |
 
@@ -175,7 +175,7 @@
 
 | 要素 | 值 |
 |---|---|
-| **现状值** | 部分 workflow 使用 `actions/checkout@v4` / `actions/checkout@v5`（SHA pin 形式） |
+| **现状值** | 部分 workflow 使用 `actions/checkout@v5-pin`（SHA pin 形式） |
 | **目标值** | 统一为 `actions/checkout@<SHA>`（v7 最新 SHA） |
 | **操作** | 同 infra-core 1.4 |
 | **验证** | `gh api /repos/hdot123-org/mencbo/contents/.github/workflows --jq '.[].name'` 列出 workflow，逐个读取并 `grep 'actions/checkout@' \| grep -vE '@[0-9a-f]{40}'`（应返回空） |
@@ -203,6 +203,7 @@
 2. `droid-review-watchdog.yml`
 3. `droid-review.yml`
 4. `evolution-governance.yml`
+5. `ci.yml`（仅注释提及 pull_request_target，按注释含括政策计入）
 
 ### 4.3 mencbo 使用 `pull_request_target` 的 workflow
 
@@ -228,9 +229,9 @@ done
 
 | 整改项 | Playbook 条目 | 模板文件 | 差距矩阵条目 |
 |---|---|---|---|
-| mencbo 合并策略 | `change-playbook.md` **PB-18** | — | 产物 C `LR-05` |
-| POSTHOG 迁移 | `change-playbook.md` **PB-17** | — | 产物 C `LR-03` |
-| memory/mencbo rulesets 化 | `change-playbook.md` **PB-15** | `templates/ruleset.json` | 产物 C `LR-01` |
+| mencbo 合并策略 | `change-playbook.md` **PB-16** | — | 产物 C `LR-04` |
+| POSTHOG 迁移 | `change-playbook.md` **PB-15** | — | 产物 C `LR-03` |
+| memory/mencbo rulesets 化 | `change-playbook.md` **PB-13** | `templates/ruleset.json` | 产物 C `LR-01` |
 | checkout v7 升级 | — | — | — |
 
 ---
