@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.17.0](https://github.com/hdot123-org/infra-core/compare/v0.16.1...v0.17.0) (2026-09-09)
+
+
+### Features
+
+* **autofix:** add notify-only failure filter ([#270](https://github.com/hdot123-org/infra-core/issues/270)) ([3f70da4](https://github.com/hdot123-org/infra-core/commit/3f70da4ac27382b77212ac48207658fd989b11dc))
+* **executor:** 执行器宿主仓自检出 + 目标仓子目录检出 ([#271](https://github.com/hdot123-org/infra-core/issues/271)) ([bcdcb8f](https://github.com/hdot123-org/infra-core/commit/bcdcb8fbe2f386078bdd12d052d3b4d063b051f6))
+* **executor:** 统一执行器 — droid-task.yml + setup-droid-byok composite + 契约测试 ([#268](https://github.com/hdot123-org/infra-core/issues/268)) ([e37cef4](https://github.com/hdot123-org/infra-core/commit/e37cef4b7b2e1ff82548f137f83d9e42f3635f5a))
+* P0-A watchdog source awareness ([#269](https://github.com/hdot123-org/infra-core/issues/269)) ([996922b](https://github.com/hdot123-org/infra-core/commit/996922b0cd6df8c18615ec437e5ba7e234e693d7))
+
 ## [0.16.1](https://github.com/hdot123-org/infra-core/compare/v0.16.0...v0.16.1) (2026-09-08)
 
 
