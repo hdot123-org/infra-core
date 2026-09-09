@@ -95,7 +95,7 @@ infra-core 发版时，通过两条触发面（推送 + 轮询）自动广播升
 
 **消费仓接入**：在 `~/.factory/config/repositories.yml` 中添加 `engineConsumer: true` 标记即可自动接收升级公告。
 
-详细架构：[`docs/architecture.md` §7 发版公告链路](docs/architecture.md) § C9 轮询触发面；消费仓接入指南：[`docs/onboarding/consumer-onboarding.md`](docs/onboarding/consumer-onboarding.md)。
+详细架构：[`docs/architecture.md` §7 发版公告链路](docs/architecture.md) § C9 轮询触发面；消费仓接入指南：[`docs/onboarding/consumer-onboarding.md`](docs/onboarding/consumer-onboarding.md)。组织治理规范与「批准即执行」变更 playbook：[`docs/governance/`](docs/governance/)（org-governance-spec.md / change-playbook.md / templates/ / correction-plan.md），供下一个 mission 执行。
 
 ## 架构
 
