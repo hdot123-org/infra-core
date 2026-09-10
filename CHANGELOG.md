@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/hdot123-org/infra-core/compare/v0.18.0...v0.18.1) (2026-09-10)
+
+
+### Documentation
+
+* **readme:** add governance deliverables visibility ([#282](https://github.com/hdot123-org/infra-core/issues/282)) ([1d7d491](https://github.com/hdot123-org/infra-core/commit/1d7d49141f21a35f89710dce7550b1c0464dbed8))
+
 ## [0.18.0](https://github.com/hdot123-org/infra-core/compare/v0.17.0...v0.18.0) (2026-09-09)
 
 
