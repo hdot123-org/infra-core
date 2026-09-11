@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034
 # CI failed webhook handler
-# DEPRECATED: This script was used for a specific CI failure event (memory-core MR #41).
-# The linear issue reference has been parameterized. In production usage, CI failures
-# should be handled by the main droid-task pipeline via the Linear gateway, not direct
-# webhook calls. This script exists for reference but should not be actively used.
+# In production, this script is routed via hooks.json (line 216) when ISSUE_ID is not set.
+# The Linear issue reference is parameterized via ISSUE_ID env var; when unset, it falls back
+# to legacy hardcoded INFRA-5. UseISSUE_ID when calling to avoid the legacy fallback.
+# For CI failures, the primary route should be through the main droid-task pipeline via Linear gateway.
 set -uo pipefail
 
 LOG_DIR="/Users/busiji/.factory/webhook/logs"
