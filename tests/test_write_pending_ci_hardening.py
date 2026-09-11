@@ -483,7 +483,17 @@ class TestProdSync:
         """受管副本与 ~/.factory 生产脚本一致（PR #978 回填基线）。
 
         生产脚本在 CI runner 上不存在 → skip（本地/mission 环境执行）。
+        CI runner（自建 pve-linux 持久共享 HOME）上，droid mission 会按
+        「创建 PR → 注册路由」纪律调用/重建 ~/.factory/webhook/scripts/
+        下的脚本（2026-09-11 事故：mission 装入 pre-M5 旧版副本，导致
+        main 与 PR #288 全量 CI 红）。runner 的 ~/.factory 是 mission
+        沙箱而非生产 webhook 环境，漂移门禁只应作用于本地开发机；
+        GITHUB_ACTIONS 在 GitHub Actions（含 self-hosted）恒为 true。
         """
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            pytest.skip(
+                "drift gate targets local dev machines; CI runner HOME is a droid mission sandbox"
+            )
         if not self.PROD_SCRIPT.exists():
             pytest.skip("production script not present on this machine")
         assert SCRIPT_PATH.read_bytes() == self.PROD_SCRIPT.read_bytes(), (
