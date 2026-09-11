@@ -87,8 +87,12 @@ class TestConcurrencyGuard:
         conc = data.get("concurrency")
         assert conc is not None, "droid-task.yml must have top-level concurrency"
         group = conc.get("group", "")
-        assert "droid-team-" in group, f"workflow concurrency group must contain 'droid-team-', got: {group}"
-        assert "team_key" in group, f"workflow concurrency group must reference team_key, got: {group}"
+        assert "droid-team-" in group, (
+            f"workflow concurrency group must contain 'droid-team-', got: {group}"
+        )
+        assert "team_key" in group, (
+            f"workflow concurrency group must reference team_key, got: {group}"
+        )
 
     def test_workflow_concurrency_team_group_has_fallback_chain(self):
         """team 组表达式含内联回退链（kind → default）：error-gateway payload 无 team_key。
@@ -110,7 +114,9 @@ class TestConcurrencyGuard:
         conc = job.get("concurrency")
         assert conc is not None, "execute job must have job-level concurrency (task 单飞)"
         group = conc.get("group", "")
-        assert "droid-task-" in group, f"job concurrency group must contain 'droid-task-', got: {group}"
+        assert "droid-task-" in group, (
+            f"job concurrency group must contain 'droid-task-', got: {group}"
+        )
         assert "task_id" in group, f"job concurrency group must reference task_id, got: {group}"
 
     def test_cancel_in_progress_is_false(self):
@@ -376,7 +382,7 @@ class TestFailureFallback:
         step = fallback[0]
         run = step["run"]
         assert "infra-failed" in run, "failure fallback Issue must have infra-failed label"
-        create_section = run[run.index("gh issue create"):]
+        create_section = run[run.index("gh issue create") :]
         assert "--label" in create_section and "infra-failed" in create_section, (
             "gh issue create must pass --label infra-failed"
         )
@@ -403,7 +409,9 @@ class TestFailureFallback:
             "failure fallback must check for existing Issues before creating (idempotent)"
         )
         assert "--state all" in run, "failure fallback idempotent check must use --state all"
-        code_lines = [ln for ln in run.splitlines() if ln.strip() and not ln.strip().startswith("#")]
+        code_lines = [
+            ln for ln in run.splitlines() if ln.strip() and not ln.strip().startswith("#")
+        ]
         search_lines = [ln for ln in code_lines if "--search" in ln]
         title_lines = [ln for ln in code_lines if "--title" in ln]
         assert len(search_lines) == 1 and len(title_lines) == 1, (
@@ -411,7 +419,9 @@ class TestFailureFallback:
         )
         # 搜索串与标题共用同一中文指纹短语 + task_id（保证能命中）
         for ln in (search_lines[0], title_lines[0]):
-            assert "droid-task 执行失败" in ln, f"search/title must share the Chinese phrase, got: {ln}"
+            assert "droid-task 执行失败" in ln, (
+                f"search/title must share the Chinese phrase, got: {ln}"
+            )
             assert "$P_TASK_ID" in ln, f"search/title must include task_id, got: {ln}"
         # 旧英文搜索串不得残留在可执行代码中（注释里的历史说明除外）
         assert all("droid-task failed for" not in ln for ln in code_lines), (
