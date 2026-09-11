@@ -16,7 +16,14 @@ permissions:
   issues: write
 
 concurrency:
-  group: droid-task-${{ github.event.client_payload.task_id }}
+  # 二级并发护栏（R1 设计 §3.2）：workflow 级 team 组（准入闸）+ job 级 task 组（单飞）。
+  # team 组：同 team 最多 1 running + 1 pending，更早的 pending run 被 drop（不排队、不自动
+  # 重试，依赖 Worker Outbox 重发兜底）；被 drop 的 run 未启动任何 job，不会触发
+  # if:failure() 兜底建 Issue。一个挂 60min 的任务会堵住同 team 后续（drop 而非排队）。
+  # team_key 来源：linear-gateway payload 的 context.team_key；error-gateway payload 无
+  # team_key → 回退 kind；两者皆空 → default。concurrency 表达式在步骤运行前求值，
+  # 因此默认值必须内联（不能依赖 Validate 步骤补默认值）。
+  group: droid-team-${{ github.event.client_payload.context.team_key || github.event.client_payload.kind || 'default' }}
   cancel-in-progress: false
 
 jobs:
@@ -24,6 +31,11 @@ jobs:
     name: Execute droid task
     runs-on: [self-hosted, pve-linux]
     timeout-minutes: 60
+    # task 级二级分组（原 workflow 级单飞语义下沉到 job 级）：同 task_id 的执行不并发，
+    # 溢出同样为 drop。task 组与 team 组为包含关系（task 属于单一 team），不会互相死锁。
+    concurrency:
+      group: droid-task-${{ github.event.client_payload.task_id }}
+      cancel-in-progress: false
 
     steps:
       - name: Validate payload
@@ -218,16 +230,42 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 幂等检查：避免重复创建 Issue
-          EXISTING=$(gh issue list --repo "$P_REPO" --label needs-triage \
-            --state all --search "droid-task failed for $P_TASK_ID" --limit 1 2>/dev/null || echo "")
+          # 幂等检查：按创建标题的中文指纹短语 + task_id 搜索。
+          # 历史英文搜索串 "droid-task failed for ..." 与中文标题「droid-task 执行失败: ...」
+          # 从未匹配（INFRA-913 被重复建 3 次即证据），必须与下方 --title 字串一致。
+          # 不带 label 过滤：兼容存量（风暴期 needs-triage 标记）同类 Issue。
+          EXISTING=$(gh issue list --repo "$P_REPO" \
+            --state all --search "\"droid-task 执行失败\" \"$P_TASK_ID\"" --limit 1 2>/dev/null || echo "")
 
           if [ -n "$EXISTING" ]; then
             echo "SKIP: Failure Issue already exists for $P_TASK_ID"
             exit 0
           fi
 
-          # 创建失败 Issue
+          # 频控：近 1h 同类失败 Issue ≥2 条时只评论不新建（防风暴期繁殖放大）
+          CUTOFF=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)
+          RECENT_COUNT=$(gh issue list --repo "$P_REPO" --label infra-failed --state all --limit 30 \
+            --json createdAt --jq "[.[] | select(.createdAt > \"$CUTOFF\")] | length" 2>/dev/null || echo 0)
+          if [ "${RECENT_COUNT:-0}" -ge 2 ]; then
+            LATEST=$(gh issue list --repo "$P_REPO" --label infra-failed --state all --limit 1 \
+              --json number --jq '.[0].number' 2>/dev/null || echo "")
+            if [ -n "$LATEST" ]; then
+              printf '%s\n' \
+                "droid-task 再次失败（频控生效，只评论不新建）：" \
+                "" \
+                "**Task ID**: \`$P_TASK_ID\`" \
+                "**Kind**: $P_KIND" \
+                "**Repo**: $P_REPO" \
+                "**Workflow Run**: $P_RUN_URL" \
+                > /tmp/comment-body.txt
+              gh issue comment "$LATEST" --repo "$P_REPO" --body-file /tmp/comment-body.txt \
+                || echo "::warning::Failed to comment on Issue #$LATEST"
+            fi
+            exit 0
+          fi
+
+          # 创建失败 Issue（label 用 infra-failed：官方 Linear GitHub App 按同名映射同步
+          # label，Worker label 闸可识别；同时不污染人工分诊队列 needs-triage）
           printf '%s\n' \
             "## droid-task 执行失败" \
             "" \
@@ -247,6 +285,6 @@ jobs:
             --repo "$P_REPO" \
             --title "droid-task 执行失败: $P_TASK_ID ($P_KIND)" \
             --body-file /tmp/issue-body.txt \
-            --label "needs-triage" || {
+            --label "infra-failed" || {
             echo "::warning::Failed to create failure Issue (gh may not be authenticated)"
           }
