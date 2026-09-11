@@ -114,6 +114,7 @@ except:
     
     # Debounce 2: Check if last commit is recent (< 30 min)
     # Fix: pushedAt doesn't exist, use commits[-1].committedDate instead
+    # Defense: trim and take first line to prevent multi-line integer comparison error
     local last_commit_at
     last_commit_at=$(gh pr view "$pr_number" --repo "$REPO" --json commits --jq '.commits[-1].committedDate' 2>/dev/null || echo "")
     if [ -n "$last_commit_at" ]; then
@@ -127,7 +128,7 @@ try:
     print(age_min)
 except:
     print(9999)
-" 2>/dev/null || echo "9999")
+" 2>/dev/null | tr -d '\n\t ' | head -n 1)
         
         if [ "$commit_age_minutes" -lt "$SWEEP_NEW_COMMIT_WINDOW_MINUTES" ]; then
             log "  [SWEEP] PR #${pr_number}: last commit ${commit_age_minutes}min ago (< ${SWEEP_NEW_COMMIT_WINDOW_MINUTES}min), skip (debounce)"
