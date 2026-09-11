@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034
 # CI failed webhook handler
+# DEPRECATED: This script was used for a specific CI failure event (memory-core MR #41).
+# The linear issue reference has been parameterized. In production usage, CI failures
+# should be handled by the main droid-task pipeline via the Linear gateway, not direct
+# webhook calls. This script exists for reference but should not be actively used.
 set -uo pipefail
 
 LOG_DIR="/Users/busiji/.factory/webhook/logs"
@@ -32,28 +36,26 @@ if [ -z "$LINEAR_API_KEY" ]; then
     exit 1
 fi
 
-# Get issue ID from Linear
-ISSUE_ID=$(curl -s -X POST https://api.linear.app/graphql \
-  -H "Authorization: $LINEAR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "{ issue(id: \"f023acdf-71d9-4121-8edf-a9ed8c7c05f7\") { id } }"}' 2>/dev/null | \
-  python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',{}).get('issue',{}).get('id',''))" 2>/dev/null)
-
+# Get issue ID from Linear - parameterized via environment variable, with legacy fallback
+# IN Momentum: Use ISSUE_ID env var from caller; otherwise use legacy hardcoded fallback
+ISSUE_ID="${ISSUE_ID:-}"
 if [ -z "$ISSUE_ID" ]; then
-    log "ERROR: Could not find Linear issue"
-    exit 1
+    # Legacy fallback for backward compatibility (legacy event: memory-core MR #41)
+    ISSUE_ID="f023acdf-71d9-4121-8edf-a9ed8c7c05f7"
+    log "WARNING: ISSUE_ID not provided, using legacy fallback (INFRA-5)"
 fi
 
-log "Found Linear issue ID: $ISSUE_ID"
+log "Using Linear issue ID: $ISSUE_ID"
 
 # Write comment to Linear (this triggers the Linear webhook -> trigger-droid.sh -> Droid)
-COMMENT_BODY="⚠️ CI 流水线失败，请修复。\n\nPipeline: $CI_PIPELINE_ID\n分支: $CI_BRANCH\nMR: https://gitlab.exa.edu.kg/infra/memory-core/-/merge_requests/41"
+# Note: COMMENT_BODY is intentionally left generic; callers should provide via env var
+COMMENT_BODY="${COMMENT_BODY:-CI 流水线失败，请修复。Pipeline: $CI_PIPELINE_ID, Branch: $CI_BRANCH}"
 
 curl -s -X POST https://api.linear.app/graphql \
   -H "Authorization: $LINEAR_API_KEY" \
   -H "Content-Type: application/json" \
   -d "{\"query\": \"mutation { commentCreate(input: { issueId: \\\"$ISSUE_ID\\\", body: \\\"$COMMENT_BODY\\\" }) { success } }\"}" >> "$LOG_FILE" 2>&1
 
-log "Comment posted to Linear issue INFRA-5"
+log "Comment posted to Linear issue via webhook"
 
 log "CI failed hook completed"
