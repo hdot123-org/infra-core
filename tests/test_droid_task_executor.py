@@ -2,7 +2,7 @@
 
 覆盖 unified-executor feature 的全部验证断言：
 - VAL-EX-001: droid-task.yml 触发类型/runs-on/timeout
-- VAL-EX-002: 单飞并发护栏（concurrency group + cancel-in-progress: false）
+- VAL-EX-002: 二级并发护栏（workflow 级 team 组 + job 级 task 组，cancel-in-progress: false）
 - VAL-EX-003: composite setup-droid-byok 存在且 BYOK-only
 - VAL-EX-004: prompt 模板移植完整（error-gateway Issue-first + linear-gateway Fixes REF）
 - VAL-EX-005: if:failure() 兜底建 Issue
@@ -79,23 +79,50 @@ class TestTriggerAndRunSurface:
 
 
 class TestConcurrencyGuard:
-    """VAL-EX-002: 单飞并发护栏在位。"""
+    """VAL-EX-002: 二级并发护栏在位（R1 设计 §3.2：team 组 + task 组）。"""
 
-    def test_concurrency_group_uses_task_id(self):
-        """concurrency.group: droid-task-${{ github.event.client_payload.task_id }}"""
+    def test_workflow_concurrency_group_uses_team_key(self):
+        """workflow 级 concurrency.group: droid-team-{team_key}（准入闸）"""
         data = _load(WORKFLOW)
         conc = data.get("concurrency")
         assert conc is not None, "droid-task.yml must have top-level concurrency"
         group = conc.get("group", "")
-        assert "droid-task-" in group, f"concurrency group must contain 'droid-task-', got: {group}"
-        assert "task_id" in group, f"concurrency group must reference task_id, got: {group}"
+        assert "droid-team-" in group, f"workflow concurrency group must contain 'droid-team-', got: {group}"
+        assert "team_key" in group, f"workflow concurrency group must reference team_key, got: {group}"
+
+    def test_workflow_concurrency_team_group_has_fallback_chain(self):
+        """team 组表达式含内联回退链（kind → default）：error-gateway payload 无 team_key。
+
+        concurrency 表达式在步骤运行前求值，不能依赖 Validate 步骤补默认值，
+        必须内联 `|| kind || 'default'` 回退链。
+        """
+        data = _load(WORKFLOW)
+        group = data["concurrency"]["group"]
+        assert "github.event.client_payload.kind" in group, (
+            f"team group must fall back to payload kind for team-less kinds, got: {group}"
+        )
+        assert "'default'" in group, f"team group must have final 'default' fallback, got: {group}"
+
+    def test_job_concurrency_group_uses_task_id(self):
+        """job 级 concurrency.group: droid-task-{task_id}（单飞语义下沉到 execute job）"""
+        data = _load(WORKFLOW)
+        job = data["jobs"]["execute"]
+        conc = job.get("concurrency")
+        assert conc is not None, "execute job must have job-level concurrency (task 单飞)"
+        group = conc.get("group", "")
+        assert "droid-task-" in group, f"job concurrency group must contain 'droid-task-', got: {group}"
+        assert "task_id" in group, f"job concurrency group must reference task_id, got: {group}"
 
     def test_cancel_in_progress_is_false(self):
-        """cancel-in-progress: false（不取消正在运行的同 task）"""
+        """cancel-in-progress: false（workflow 级与 job 级均不取消正在运行的同组任务）"""
         data = _load(WORKFLOW)
         conc = data["concurrency"]
         assert conc.get("cancel-in-progress") is False, (
-            f"cancel-in-progress must be false, got {conc.get('cancel-in-progress')}"
+            f"workflow cancel-in-progress must be false, got: {conc.get('cancel-in-progress')}"
+        )
+        job_conc = data["jobs"]["execute"]["concurrency"]
+        assert job_conc.get("cancel-in-progress") is False, (
+            f"job cancel-in-progress must be false, got: {job_conc.get('cancel-in-progress')}"
         )
 
 
@@ -337,8 +364,8 @@ class TestFailureFallback:
         run = step["run"]
         assert "gh issue create" in run, "failure fallback must create GitHub Issue via gh CLI"
 
-    def test_failure_fallback_has_needs_triage_label(self):
-        """failure fallback 创建的 Issue 带 needs-triage label"""
+    def test_failure_fallback_uses_infra_failed_label(self):
+        """failure fallback 创建的 Issue 带 infra-failed label（不污染 needs-triage 人工分诊队列）"""
         data = _load(WORKFLOW)
         steps = data["jobs"]["execute"]["steps"]
         fallback = [
@@ -348,7 +375,68 @@ class TestFailureFallback:
         ]
         step = fallback[0]
         run = step["run"]
-        assert "needs-triage" in run, "failure fallback Issue must have needs-triage label"
+        assert "infra-failed" in run, "failure fallback Issue must have infra-failed label"
+        create_section = run[run.index("gh issue create"):]
+        assert "--label" in create_section and "infra-failed" in create_section, (
+            "gh issue create must pass --label infra-failed"
+        )
+        assert '--label "needs-triage"' not in run and "--label needs-triage" not in run, (
+            "failure fallback must NOT label issues needs-triage (reserved for human triage queue)"
+        )
+
+    def test_failure_fallback_idempotent_search_matches_title_phrase(self):
+        """幂等搜索串与创建标题的中文指纹短语一致（历史英文搜索串从未命中）。
+
+        事故证据：INFRA-913 兜底 Issue 被重复创建 3 次（#1150/#1155/#1169），
+        因搜索串 "droid-task failed for ..." 与标题「droid-task 执行失败: ...」不匹配。
+        """
+        data = _load(WORKFLOW)
+        steps = data["jobs"]["execute"]["steps"]
+        fallback = [
+            s
+            for s in steps
+            if "failure" in s.get("name", "").lower() or "fallback" in s.get("name", "").lower()
+        ]
+        step = fallback[0]
+        run = step["run"]
+        assert "gh issue list" in run, (
+            "failure fallback must check for existing Issues before creating (idempotent)"
+        )
+        assert "--state all" in run, "failure fallback idempotent check must use --state all"
+        code_lines = [ln for ln in run.splitlines() if ln.strip() and not ln.strip().startswith("#")]
+        search_lines = [ln for ln in code_lines if "--search" in ln]
+        title_lines = [ln for ln in code_lines if "--title" in ln]
+        assert len(search_lines) == 1 and len(title_lines) == 1, (
+            "fallback must have exactly one idempotent search and one create title"
+        )
+        # 搜索串与标题共用同一中文指纹短语 + task_id（保证能命中）
+        for ln in (search_lines[0], title_lines[0]):
+            assert "droid-task 执行失败" in ln, f"search/title must share the Chinese phrase, got: {ln}"
+            assert "$P_TASK_ID" in ln, f"search/title must include task_id, got: {ln}"
+        # 旧英文搜索串不得残留在可执行代码中（注释里的历史说明除外）
+        assert all("droid-task failed for" not in ln for ln in code_lines), (
+            "stale English search phrase must be removed from executable lines"
+        )
+
+    def test_failure_fallback_has_storm_frequency_cap(self):
+        """频控：近 1h 同类失败 Issue ≥2 条时只评论不新建（防风暴繁殖）"""
+        data = _load(WORKFLOW)
+        steps = data["jobs"]["execute"]["steps"]
+        fallback = [
+            s
+            for s in steps
+            if "failure" in s.get("name", "").lower() or "fallback" in s.get("name", "").lower()
+        ]
+        step = fallback[0]
+        run = step["run"]
+        assert "RECENT_COUNT" in run and "-ge 2" in run, (
+            "frequency cap must count recent infra-failed issues and trigger at >= 2"
+        )
+        assert "gh issue comment" in run, (
+            "frequency cap branch must comment on the latest issue instead of creating"
+        )
+        # 频控分支必须短路退出（不落到 gh issue create）
+        assert "exit 0" in run
 
     def test_failure_fallback_has_idempotent_check(self):
         """failure fallback 有幂等检查（避免重复创建 Issue）"""
