@@ -64,12 +64,27 @@ jobs:
           fi
 
           # 按 autorelease: pending 标签定位当前 Release PR 分支；无
-          # Release PR 开着（如纯 tag 发版轮）时本步无事可做
-          BRANCH="$(gh pr list -R "${GITHUB_REPOSITORY}" --state open \
-            --label "autorelease: pending" --limit 1 \
-            --json headRefName --jq '.[0].headRefName // empty' 2>/dev/null || true)"
+          # Release PR 开着（如纯 tag 发版轮）时本步无事可做。
+          # 探测必须退避重试：action 同 run 刚创建的 Release PR 在标签
+          # 过滤列表里可能尚不可见（PR #288 实证——创建后 4s 查询落空，
+          # 首轮漏 relock 致 CI 红，漂移拖到下一轮 sweep 才自愈）。
+          # 5 次 × 15s 覆盖 GitHub API 最终一致性窗口；重试穷尽仍无 PR
+          # 才按「无事可做」跳过。
+          BRANCH=""
+          for attempt in 1 2 3 4 5; do
+            BRANCH="$(gh pr list -R "${GITHUB_REPOSITORY}" --state open \
+              --label "autorelease: pending" --limit 1 \
+              --json headRefName --jq '.[0].headRefName // empty' 2>/dev/null || true)"
+            if [ -n "$BRANCH" ]; then
+              break
+            fi
+            echo "Release PR not visible yet (attempt ${attempt}/5)"
+            if [ "$attempt" -lt 5 ]; then
+              sleep 15
+            fi
+          done
           if [ -z "$BRANCH" ]; then
-            echo "No open Release PR this run; nothing to relock"
+            echo "No open Release PR visible after 5 attempts; nothing to relock"
             exit 0
           fi
           echo "Release PR branch: $BRANCH"
