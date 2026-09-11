@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.3](https://github.com/hdot123-org/infra-core/compare/v0.18.2...v0.18.3) (2026-09-11)
+
+
+### Bug Fixes
+
+* **ci:** 漂移门禁跳过 CI runner，mission 沙箱 HOME 不作比对基准 ([#290](https://github.com/hdot123-org/infra-core/issues/290)) ([f702b2b](https://github.com/hdot123-org/infra-core/commit/f702b2b72a53173f12b9db0243e6d9e3c67a4032))
+* droid-task 执行器兜底修复与 team 级并发护栏 ([#285](https://github.com/hdot123-org/infra-core/issues/285)) ([01ff273](https://github.com/hdot123-org/infra-core/commit/01ff2739f586335f1a174ac15b259d5885c767ad))
+
 ## [0.18.2](https://github.com/hdot123-org/infra-core/compare/v0.18.1...v0.18.2) (2026-09-11)
 
 
