@@ -15,9 +15,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
-
 REPO_ROOT = Path(__file__).parent.parent
 SCRIPT_PATH = REPO_ROOT / "webhook-scripts" / "reconcile-evolution.sh"
 
@@ -36,7 +33,7 @@ def _run_age_calculation_mock(input_value: str) -> tuple[int, str, str]:
     # The Python script outputs the input_value, then shell handles it
     python_code = f'''
 import sys
-print(f"""{input_value.replace(chr(10), '\\n')}""")
+print(f"""{input_value.replace(chr(10), "\\n")}""")
 '''
     # Simulate: python() | head -n 1 | tr -d '[:space:]' | ${var:-9999}
     result = subprocess.run(
@@ -45,16 +42,16 @@ print(f"""{input_value.replace(chr(10), '\\n')}""")
         text=True,
     )
     stdout = result.stdout
-    
+
     # Simulate head -n 1 | tr -d '[:space:]'
-    lines = stdout.split('\n')
+    lines = stdout.split("\n")
     first_line = lines[0] if lines else ""
-    cleaned = ''.join(c for c in first_line if c not in ' \t\n\r')
-    
+    cleaned = "".join(c for c in first_line if c not in " \t\n\r")
+
     # Simulate ${var:-9999}
-    if not cleaned or not cleaned.replace('-', '', 1).isdigit():
+    if not cleaned or not cleaned.replace("-", "", 1).isdigit():
         cleaned = "9999"
-    
+
     return 0, cleaned, result.stderr
 
 
@@ -93,20 +90,20 @@ class TestAdversarialMatrix:
 
 def test_pipeline_order_anchor_line_128():
     """N3: Verify head -n 1 | tr -d '[:space:]' pipeline order at line ~128.
-    
+
     Anchor to specific code section: reconcile-evolution.sh line 125-130 range
     checks that the pipeline is 'head first, then trim' not 'trim first then head'.
     """
     script_content = SCRIPT_PATH.read_text()
-    
+
     # Check for HEAD FIRST order in the entire file
     # The pattern should have 'head -n 1' BEFORE 'tr -d' in the age calculation
-    if 'head -n 1 | tr -d' in script_content:
+    if "head -n 1 | tr -d" in script_content:
         # Pattern found with correct order
         pass
     else:
         # Check that the wrong pattern (tr -d ... | head -n 1) does NOT exist
-        assert 'tr -d' not in script_content or 'head -n 1 | tr -d' in script_content, (
+        assert "tr -d" not in script_content or "head -n 1 | tr -d" in script_content, (
             "Pipeline order must be 'head first, then trim' (head -n 1 | tr -d)"
         )
 
@@ -114,7 +111,7 @@ def test_pipeline_order_anchor_line_128():
 def test_fallback_9999_anchor_near_line_125():
     """N3: Verify pr_age_minutes has 9999 fallback around line ~105-110."""
     script_content = SCRIPT_PATH.read_text()
-    
+
     # Find the pr_age_minutes section with fallback guard
     assert 'pr_age_minutes="${pr_age_minutes:-9999}"' in script_content, (
         "pr_age_minutes fallback guard not found"
@@ -124,22 +121,20 @@ def test_fallback_9999_anchor_near_line_125():
 def test_python_except_uses_9999():
     """N3: Verify Python except block prints 9999 instead of 0."""
     script_content = SCRIPT_PATH.read_text()
-    
+
     # Find all Python blocks related to age calculation
-    lines = script_content.split('\n')
+    lines = script_content.split("\n")
     found = False
     for i, line in enumerate(lines):
-        if 'try:' in line and i + 5 < len(lines):
-            block = '\n'.join(lines[i : i + 10])
-            if 'age_min' in block and 'print(9999)' in block:
+        if "try:" in line and i + 5 < len(lines):
+            block = "\n".join(lines[i : i + 10])
+            if "age_min" in block and "print(9999)" in block:
                 # Verify it's in an except block
-                if 'except:' in block and 'print(9999)' in block.split('except:')[1]:
+                if "except:" in block and "print(9999)" in block.split("except:")[1]:
                     found = True
                     break
-    
-    assert found, (
-        "Python except block should print 9999 for age calculation variables"
-    )
+
+    assert found, "Python except block should print 9999 for age calculation variables"
 
 
 # ============================================================================
@@ -154,9 +149,7 @@ def test_script_syntax():
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, (
-        f"Script syntax error in reconcile-evolution.sh: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Script syntax error in reconcile-evolution.sh: {result.stderr}"
 
 
 def test_ci_failed_script_syntax():
@@ -167,7 +160,4 @@ def test_ci_failed_script_syntax():
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, (
-        f"Script syntax error in ci-failed.sh: {result.stderr}"
-    )
-
+    assert result.returncode == 0, f"Script syntax error in ci-failed.sh: {result.stderr}"
