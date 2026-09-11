@@ -215,7 +215,7 @@ source "${SCRIPT_DIR}/lib/op-mcp.sh"
 
 LINEAR_API_KEY="${LINEAR_API_KEY:-}"
 if [ -z "$LINEAR_API_KEY" ]; then
-    LINEAR_API_KEY=$(op_get_field "$OP_VAULT_SEVER" "elgcm2nzfza2hjb3yffpkijj7y" "凭据" || true)
+    LINEAR_API_KEY=$(op_get_field "$OP_VAULT_SEVER" "uxsq45aoumghdysj3r5fe2fvqm" "凭据" || true)
 fi
 
 if [ -z "$LINEAR_API_KEY" ]; then
