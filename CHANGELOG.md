@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.2](https://github.com/hdot123-org/infra-core/compare/v0.18.1...v0.18.2) (2026-09-11)
+
+
+### Bug Fixes
+
+* 修复 webhook 脚本 1Password Linear 凭据死引用（404） ([#284](https://github.com/hdot123-org/infra-core/issues/284)) ([d93a3f6](https://github.com/hdot123-org/infra-core/commit/d93a3f69dcb99af14f523820d9a4a04594548ae9))
+
 ## [0.18.1](https://github.com/hdot123-org/infra-core/compare/v0.18.0...v0.18.1) (2026-09-10)
 
 
