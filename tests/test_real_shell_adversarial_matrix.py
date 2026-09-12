@@ -35,13 +35,17 @@ GUARDED_VARS = ["pr_age_minutes", "commit_age_minutes"]
 def _extract_pipeline(script: str) -> str:
     """Extract the actual pipeline tail (head first, then trim) from the script.
 
-    The regex only matches the fixed order `head -n 1 | tr -d '[:space:]'`;
-    if the order is ever flipped back to trim-first, extraction fails.
+    The regex only matches the fixed order `head -n 1 | tr -d '[:space:]'`
+    followed by `|| true`; the order anchors head-first (flipping back to
+    trim-first fails extraction), and `|| true` anchors the SIGPIPE defense:
+    under `set -euo pipefail`, a multiline producer can get SIGPIPE(141) after
+    `head -n 1` exits early (proven flaky in CI run 34666062333).
     """
-    m = re.search(r"head -n 1 \| tr -d '\[:space:\]'", script)
+    m = re.search(r"head -n 1 \| tr -d '\[:space:\]' \|\| true", script)
     assert m, (
-        "pipeline 'head -n 1 | tr -d '[:space:]' not found in "
-        f"{SCRIPT_PATH} — pipeline order must be head first, then trim"
+        "pipeline 'head -n 1 | tr -d '[:space:]' || true' not found in "
+        f"{SCRIPT_PATH} — pipeline must be head first, then trim, and end with "
+        "'|| true' (SIGPIPE(141) defense under pipefail)"
     )
     return m.group(0)
 
