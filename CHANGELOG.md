@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.18.4](https://github.com/hdot123-org/infra-core/compare/v0.18.3...v0.18.4) (2026-09-12)
+
+
+### Bug Fixes
+
+* SWEEP 防抖多行值单行化防御 + CI 失败脚本工单号参数化 ([#292](https://github.com/hdot123-org/infra-core/issues/292)) ([0049f2a](https://github.com/hdot123-org/infra-core/commit/0049f2a831cb554e64f4f7dd858b68f72a2d9c08))
+* SWEEP多行值防御 + ci-failed.sh头部更正 ([#293](https://github.com/hdot123-org/infra-core/issues/293)) ([8c2bbd1](https://github.com/hdot123-org/infra-core/commit/8c2bbd12ffac4105cc8fbb2dd95c2aedeeab33a4))
+* 统一 garbage age 默认值为 9999，修复死锁出口触发失败 ([#296](https://github.com/hdot123-org/infra-core/issues/296)) ([2b41857](https://github.com/hdot123-org/infra-core/commit/2b418576c31badefd5516704a5b0e38b8a6e6602))
+
 ## [0.18.3](https://github.com/hdot123-org/infra-core/compare/v0.18.2...v0.18.3) (2026-09-11)
 
 
