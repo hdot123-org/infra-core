@@ -869,8 +869,9 @@ try:
     age_min = int((now - updated).total_seconds() / 60)
     print(age_min)
 except:
-    print(0)
-" 2>/dev/null || echo "0")
+    # Defensive default: garbage/unparseable dates should trigger stale check
+    print(9999)
+" 2>/dev/null || echo "9999")
 
                 if [ "$LINEAR_AGE_MIN" -ge "$DEADLOCK_STALE_THRESHOLD_MIN" ]; then
                     # 检查幂等 sentinel（是否已执行过出口）
