@@ -95,6 +95,8 @@ sweep_red_pr() {
     fi
     
     local pr_age_minutes
+    # || true: head -n 1 early exit can SIGPIPE(141) the upstream producer under
+    # pipefail; swallow the pipeline error and let the case guard map garbage to 9999
     pr_age_minutes=$("${PYTHON_BIN:-/opt/homebrew/bin/python3}" -c "
 from datetime import datetime, timezone
 try:
@@ -104,7 +106,7 @@ try:
     print(age_min)
 except:
     print(9999)
-" 2>/dev/null | head -n 1 | tr -d '[:space:]')
+" 2>/dev/null | head -n 1 | tr -d '[:space:]' || true)
     # Guard against empty or non-numeric values (prevents integer expression expected)
     case "${pr_age_minutes}" in
         ''|*[!0-9]*) pr_age_minutes=9999;;
@@ -123,6 +125,8 @@ except:
     last_commit_at=$(gh pr view "$pr_number" --repo "$REPO" --json commits --jq '.commits[-1].committedDate' 2>/dev/null || echo "")
     if [ -n "$last_commit_at" ]; then
         local commit_age_minutes
+        # || true: head -n 1 early exit can SIGPIPE(141) the upstream producer under
+        # pipefail; swallow the pipeline error and let the case guard map garbage to 9999
         commit_age_minutes=$("${PYTHON_BIN:-/opt/homebrew/bin/python3}" -c "
 from datetime import datetime, timezone
 try:
@@ -132,7 +136,7 @@ try:
     print(age_min)
 except:
     print(9999)
-" 2>/dev/null | head -n 1 | tr -d '[:space:]')
+" 2>/dev/null | head -n 1 | tr -d '[:space:]' || true)
         # Guard against empty or non-numeric values (prevents integer expression expected)
         case "${commit_age_minutes}" in
             ''|*[!0-9]*) commit_age_minutes=9999;;
