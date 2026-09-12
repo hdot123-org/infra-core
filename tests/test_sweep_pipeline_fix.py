@@ -7,145 +7,162 @@ B4: Two variables (commit_age_minutes / pr_age_minutes) need non-numeric→9999 
 N3: Vacuous tests should anchor to specific code sections (e.g., line ~128),
     not full-file grep matching unrelated strings.
 
-Test approach: Simulate Python output and verify shell guard logic handles
-multi-line values, garbage values, and empty values correctly.
+Test approach (source-extraction adversarial matrix): at runtime, extract the
+actual pipeline tail and case-guard blocks from reconcile-evolution.sh and drive
+them with adversarial inputs via subprocess. If a guard is removed or reordered
+in the script, extraction fails and these tests turn red — no transcription drift.
 """
 
+import os
+import re
 import subprocess
+import tempfile
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 SCRIPT_PATH = REPO_ROOT / "webhook-scripts" / "reconcile-evolution.sh"
 
+# B4 four adversarial categories: multi-line numeric, number followed by
+# warning text, empty string, pure garbage. Expected values per the guards.
+ADVERSARIAL_CASES = [
+    ("multiline_numeric", "12\n34", "12"),
+    ("number_with_warning", "42\nwarning: some issue", "42"),
+    ("empty_string", "", "9999"),
+    ("pure_garbage", "warning:somethingbad", "9999"),
+]
+
+GUARDED_VARS = ["pr_age_minutes", "commit_age_minutes"]
+
+
+def _extract_pipeline(script: str) -> str:
+    """Extract the actual pipeline tail (head first, then trim) from the script.
+
+    The regex only matches the fixed order `head -n 1 | tr -d '[:space:]'`;
+    if the order is ever flipped back to trim-first, extraction fails.
+    """
+    m = re.search(r"head -n 1 \| tr -d '\[:space:\]'", script)
+    assert m, (
+        "pipeline 'head -n 1 | tr -d '[:space:]' not found in "
+        f"{SCRIPT_PATH} — pipeline order must be head first, then trim"
+    )
+    return m.group(0)
+
+
+def _extract_case_guard(script: str, var: str) -> str:
+    """Extract the actual non-numeric→9999 case guard block for `var`.
+
+    Raises AssertionError if the guard is absent — deleting the guard from the
+    script must turn every matrix test red (anchoring requirement).
+    """
+    guard_re = (
+        r'case "\$\{' + re.escape(var) + r'\}" in\s*'
+        r"''\|\*\[!0-9\]\*\) " + re.escape(var) + r"=9999;;\s*esac"
+    )
+    m = re.search(guard_re, script)
+    assert m, (
+        f"case guard for {var} not found in {SCRIPT_PATH} — guard has been removed from the script!"
+    )
+    return m.group(0)
+
+
+def _run_extracted_guard(var_name: str, input_value: str) -> tuple[int, str, str]:
+    """Build a harness from source-extracted pieces and run it against input."""
+    script = SCRIPT_PATH.read_text()
+    pipeline = _extract_pipeline(script)
+    guard = _extract_case_guard(script, var_name)
+
+    harness = (
+        "#!/bin/bash\n"
+        "set -euo pipefail\n"
+        'input_value="$1"\n'
+        f"{var_name}=$(printf '%s' \"$input_value\" | {pipeline})\n"
+        f"{guard}\n"
+        f'echo "${var_name}"\n'
+    )
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False, encoding="utf-8") as f:
+        f.write(harness)
+        temp_script_path = f.name
+    try:
+        os.chmod(temp_script_path, 0o755)
+        result = subprocess.run(
+            ["bash", temp_script_path, input_value], capture_output=True, text=True
+        )
+        return result.returncode, result.stdout, result.stderr
+    finally:
+        os.unlink(temp_script_path)
+
 
 # ============================================================================
-# B4:对抗性验证 (Adversarial Input Matrix) — VAL-MSC-001
+# B4: 对抗性验证 (Adversarial Input Matrix, source-extracted) — VAL-MSC-001
+# 4 categories × 2 guarded variables = 8 checks
 # ============================================================================
 
 
 class TestRealShellIntegration:
-    """B4: Integration tests that execute actual shell code from reconcile-evolution.sh"""
+    """B4: drive the source-extracted guard logic with adversarial inputs."""
 
-    def test_shell_guard_handles_multiline_numeric(self):
-        """Validate real shell handles `12\\n34` → 12 using subprocess"""
-        # Execute the real shell logic to test multiline handling
-        script_content = """
-#!/bin/bash
-input_value=$1
-raw_age=$(echo "$input_value" | head -n 1 | tr -d '[:space:]')
-case "${raw_age}" in
-    ''|*[!0-9]*) raw_age=9999;;
-esac
-echo "$raw_age"
-"""
-        import os
-        import subprocess
-        import tempfile
+    @pytest.mark.parametrize("var_name", GUARDED_VARS)
+    @pytest.mark.parametrize(
+        "case_name,input_value,expected",
+        ADVERSARIAL_CASES,
+        ids=[c[0] for c in ADVERSARIAL_CASES],
+    )
+    def test_extracted_guard_adversarial_matrix(self, var_name, case_name, input_value, expected):
+        """Run the real guard (extracted from reconcile-evolution.sh) on adversarial input."""
+        returncode, stdout, stderr = _run_extracted_guard(var_name, input_value)
+        assert returncode == 0, (
+            f"[{var_name}/{case_name}] should not error on input {input_value!r}: {stderr}"
+        )
+        assert "integer expression expected" not in stderr, (
+            f"[{var_name}/{case_name}] guard failed: integer expression error resurfaced"
+        )
+        assert stdout.strip() == expected, (
+            f"[{var_name}/{case_name}] expected {expected!r}, got {stdout.strip()!r}"
+        )
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
-            f.write(script_content)
-            temp_script_path = f.name
 
-        try:
-            os.chmod(temp_script_path, 0o755)
-            result = subprocess.run(
-                ["bash", temp_script_path, "12\n34"], capture_output=True, text=True
-            )
-            assert result.returncode == 0
-            assert result.stdout.strip() == "12", f"Expected '12', got {result.stdout.strip()!r}"
-        finally:
-            os.unlink(temp_script_path)
+# ============================================================================
+# Additional test for commit_age guard (NB1 requirement)
+# ============================================================================
 
-    def test_shell_guard_handles_number_with_warning(self):
-        """Validate real shell handles `42\\nwarning: ...` → 42 using subprocess"""
-        script_content = """
-#!/bin/bash
-input_value=$1
-raw_age=$(echo "$input_value" | head -n 1 | tr -d '[:space:]')
-case "${raw_age}" in
-    ''|*[!0-9]*) raw_age=9999;;
-esac
-echo "$raw_age"
-"""
-        import os
-        import subprocess
-        import tempfile
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
-            f.write(script_content)
-            temp_script_path = f.name
+def test_commit_age_guard_essential_verification():
+    """NB1: Verify deleting the commit_age guard causes test failure.
 
-        try:
-            os.chmod(temp_script_path, 0o755)
-            result = subprocess.run(
-                ["bash", temp_script_path, "42\nwarning: some issue"],
-                capture_output=True,
-                text=True,
-            )
-            assert result.returncode == 0
-            assert result.stdout.strip() == "42", f"Expected '42', got {result.stdout.strip()!r}"
-        finally:
-            os.unlink(temp_script_path)
+    This test validates that the commit_age guard in reconcile-evolution.sh
+    is properly anchored in our tests - if the guard is removed from the script,
+    this test should fail, ensuring our test coverage is complete.
+    """
+    script_content = SCRIPT_PATH.read_text()
 
-    def test_shell_guard_handles_empty_string(self):
-        """Validate real shell handles empty string → 9999 using subprocess"""
-        script_content = """
-#!/bin/bash
-input_value=$1
-raw_age=$(echo "$input_value" | head -n 1 | tr -d '[:space:]')
-case "${raw_age}" in
-    ''|*[!0-9]*) raw_age=9999;;
-esac
-echo "$raw_age"
-"""
-        import os
-        import subprocess
-        import tempfile
+    # Check that the commit_age guard exists near line ~135-138
+    # Find where commit_age_minutes is calculated and guarded
+    assert 'case "${commit_age_minutes}" in' in script_content, (
+        "commit_age_minutes case statement guard not found - guard has been removed!"
+    )
+    assert "commit_age_minutes=9999" in script_content, (
+        "commit_age_minutes 9999 fallback not found - guard has been removed!"
+    )
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
-            f.write(script_content)
-            temp_script_path = f.name
+    # Also verify the commit_age section exists with the proper defense
+    # Find where commit_age_minutes is calculated
+    calc_pattern = 'commit_age_minutes=$("${PYTHON_BIN:-/opt/homebrew/bin/python3}" -c'
+    assert calc_pattern in script_content, "commit_age calculation not found"
 
-        try:
-            os.chmod(temp_script_path, 0o755)
-            result = subprocess.run(["bash", temp_script_path, ""], capture_output=True, text=True)
-            assert result.returncode == 0
-            assert result.stdout.strip() == "9999", (
-                f"Expected '9999', got {result.stdout.strip()!r}"
-            )
-        finally:
-            os.unlink(temp_script_path)
+    # Verify the guard comes after the calculation
+    calc_pos = script_content.find(calc_pattern)
+    guard_pos = script_content.find('case "${commit_age_minutes}" in', calc_pos)
+    assert guard_pos > calc_pos, "commit_age guard must follow the calculation"
 
-    def test_shell_guard_handles_pure_garbage_no_error(self):
-        """Validate real shell handles `warning:somethingbad` → 9999 with no integer error"""
-        script_content = """
-#!/bin/bash
-input_value=$1
-raw_age=$(echo "$input_value" | head -n 1 | tr -d '[:space:]')
-case "${raw_age}" in
-    ''|*[!0-9]*) raw_age=9999;;
-esac
-echo "$raw_age"
-"""
-        import os
-        import subprocess
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
-            f.write(script_content)
-            temp_script_path = f.name
-
-        try:
-            os.chmod(temp_script_path, 0o755)
-            result = subprocess.run(
-                ["bash", temp_script_path, "warning:somethingbad"], capture_output=True, text=True
-            )
-            assert result.returncode == 0, f"Should not error on garbage: {result.stderr}"
-            assert result.stdout.strip() == "9999", (
-                f"Expected '9999', got {result.stdout.strip()!r}"
-            )
-        finally:
-            os.unlink(temp_script_path)
+    # Check that the guard pattern exists in the script
+    guard_start = script_content.find('case "${commit_age_minutes}" in')
+    guard_block = script_content[guard_start : guard_start + 100]
+    assert (
+        "*) commit_age_minutes=9999;;" in guard_block or "commit_age_minutes=9999" in guard_block
+    ), "commit_age guard action (setting to 9999) not found!"
 
 
 # ============================================================================
