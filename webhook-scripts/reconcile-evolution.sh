@@ -103,8 +103,10 @@ try:
     age_min = int((now - created).total_seconds() / 60)
     print(age_min)
 except:
-    print(0)
-" 2>/dev/null || echo "0")
+    print(9999)
+" 2>/dev/null | head -n 1 | tr -d '[:space:]')
+    # Default to 9999 if variable is empty or non-numeric (prevents integer expression expected)
+    pr_age_minutes="${pr_age_minutes:-9999}"
     
     # Check if PR age exceeds threshold
     if [ "$pr_age_minutes" -lt "$SWEEP_RED_PR_THRESHOLD_MINUTES" ]; then
@@ -128,7 +130,9 @@ try:
     print(age_min)
 except:
     print(9999)
-" 2>/dev/null | tr -d '\n\t ' | head -n 1)
+" 2>/dev/null | head -n 1 | tr -d '[:space:]')
+        # Default to 9999 if variable is empty or non-numeric (prevents integer expression expected)
+        commit_age_minutes="${commit_age_minutes:-9999}"
         
         if [ "$commit_age_minutes" -lt "$SWEEP_NEW_COMMIT_WINDOW_MINUTES" ]; then
             log "  [SWEEP] PR #${pr_number}: last commit ${commit_age_minutes}min ago (< ${SWEEP_NEW_COMMIT_WINDOW_MINUTES}min), skip (debounce)"
