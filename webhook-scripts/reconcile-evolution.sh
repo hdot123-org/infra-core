@@ -105,8 +105,10 @@ try:
 except:
     print(9999)
 " 2>/dev/null | head -n 1 | tr -d '[:space:]')
-    # Default to 9999 if variable is empty or non-numeric (prevents integer expression expected)
-    pr_age_minutes="${pr_age_minutes:-9999}"
+    # Guard against empty or non-numeric values (prevents integer expression expected)
+    case "${pr_age_minutes}" in
+        ''|*[!0-9]*) pr_age_minutes=9999;;
+    esac
     
     # Check if PR age exceeds threshold
     if [ "$pr_age_minutes" -lt "$SWEEP_RED_PR_THRESHOLD_MINUTES" ]; then
@@ -131,8 +133,10 @@ try:
 except:
     print(9999)
 " 2>/dev/null | head -n 1 | tr -d '[:space:]')
-        # Default to 9999 if variable is empty or non-numeric (prevents integer expression expected)
-        commit_age_minutes="${commit_age_minutes:-9999}"
+        # Guard against empty or non-numeric values (prevents integer expression expected)
+        case "${commit_age_minutes}" in
+            ''|*[!0-9]*) commit_age_minutes=9999;;
+        esac
         
         if [ "$commit_age_minutes" -lt "$SWEEP_NEW_COMMIT_WINDOW_MINUTES" ]; then
             log "  [SWEEP] PR #${pr_number}: last commit ${commit_age_minutes}min ago (< ${SWEEP_NEW_COMMIT_WINDOW_MINUTES}min), skip (debounce)"
