@@ -12,7 +12,6 @@ multi-line values, garbage values, and empty values correctly.
 """
 
 import subprocess
-import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -30,7 +29,7 @@ class TestRealShellIntegration:
     def test_shell_guard_handles_multiline_numeric(self):
         """Validate real shell handles `12\\n34` → 12 using subprocess"""
         # Execute the real shell logic to test multiline handling
-        script_content = '''
+        script_content = """
 #!/bin/bash
 input_value=$1
 raw_age=$(echo "$input_value" | head -n 1 | tr -d '[:space:]')
@@ -38,19 +37,20 @@ case "${raw_age}" in
     ''|*[!0-9]*) raw_age=9999;;
 esac
 echo "$raw_age"
-'''
+"""
+        import os
         import subprocess
         import tempfile
-        import os
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as f:
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
             f.write(script_content)
             temp_script_path = f.name
-            
+
         try:
             os.chmod(temp_script_path, 0o755)
-            result = subprocess.run(['bash', temp_script_path, '12\n34'], 
-                                  capture_output=True, text=True)
+            result = subprocess.run(
+                ["bash", temp_script_path, "12\n34"], capture_output=True, text=True
+            )
             assert result.returncode == 0
             assert result.stdout.strip() == "12", f"Expected '12', got {result.stdout.strip()!r}"
         finally:
@@ -58,7 +58,7 @@ echo "$raw_age"
 
     def test_shell_guard_handles_number_with_warning(self):
         """Validate real shell handles `42\\nwarning: ...` → 42 using subprocess"""
-        script_content = '''
+        script_content = """
 #!/bin/bash
 input_value=$1
 raw_age=$(echo "$input_value" | head -n 1 | tr -d '[:space:]')
@@ -66,19 +66,22 @@ case "${raw_age}" in
     ''|*[!0-9]*) raw_age=9999;;
 esac
 echo "$raw_age"
-'''
+"""
+        import os
         import subprocess
         import tempfile
-        import os
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as f:
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
             f.write(script_content)
             temp_script_path = f.name
-            
+
         try:
             os.chmod(temp_script_path, 0o755)
-            result = subprocess.run(['bash', temp_script_path, '42\nwarning: some issue'], 
-                                  capture_output=True, text=True)
+            result = subprocess.run(
+                ["bash", temp_script_path, "42\nwarning: some issue"],
+                capture_output=True,
+                text=True,
+            )
             assert result.returncode == 0
             assert result.stdout.strip() == "42", f"Expected '42', got {result.stdout.strip()!r}"
         finally:
@@ -86,7 +89,7 @@ echo "$raw_age"
 
     def test_shell_guard_handles_empty_string(self):
         """Validate real shell handles empty string → 9999 using subprocess"""
-        script_content = '''
+        script_content = """
 #!/bin/bash
 input_value=$1
 raw_age=$(echo "$input_value" | head -n 1 | tr -d '[:space:]')
@@ -94,27 +97,28 @@ case "${raw_age}" in
     ''|*[!0-9]*) raw_age=9999;;
 esac
 echo "$raw_age"
-'''
+"""
+        import os
         import subprocess
         import tempfile
-        import os
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as f:
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
             f.write(script_content)
             temp_script_path = f.name
-            
+
         try:
             os.chmod(temp_script_path, 0o755)
-            result = subprocess.run(['bash', temp_script_path, ''], 
-                                  capture_output=True, text=True)
+            result = subprocess.run(["bash", temp_script_path, ""], capture_output=True, text=True)
             assert result.returncode == 0
-            assert result.stdout.strip() == "9999", f"Expected '9999', got {result.stdout.strip()!r}"
+            assert result.stdout.strip() == "9999", (
+                f"Expected '9999', got {result.stdout.strip()!r}"
+            )
         finally:
             os.unlink(temp_script_path)
 
     def test_shell_guard_handles_pure_garbage_no_error(self):
         """Validate real shell handles `warning:somethingbad` → 9999 with no integer error"""
-        script_content = '''
+        script_content = """
 #!/bin/bash
 input_value=$1
 raw_age=$(echo "$input_value" | head -n 1 | tr -d '[:space:]')
@@ -122,21 +126,24 @@ case "${raw_age}" in
     ''|*[!0-9]*) raw_age=9999;;
 esac
 echo "$raw_age"
-'''
+"""
+        import os
         import subprocess
         import tempfile
-        import os
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as f:
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
             f.write(script_content)
             temp_script_path = f.name
-            
+
         try:
             os.chmod(temp_script_path, 0o755)
-            result = subprocess.run(['bash', temp_script_path, 'warning:somethingbad'], 
-                                  capture_output=True, text=True)
+            result = subprocess.run(
+                ["bash", temp_script_path, "warning:somethingbad"], capture_output=True, text=True
+            )
             assert result.returncode == 0, f"Should not error on garbage: {result.stderr}"
-            assert result.stdout.strip() == "9999", f"Expected '9999', got {result.stdout.strip()!r}"
+            assert result.stdout.strip() == "9999", (
+                f"Expected '9999', got {result.stdout.strip()!r}"
+            )
         finally:
             os.unlink(temp_script_path)
 
@@ -170,10 +177,11 @@ def test_fallback_9999_anchor_near_line_125():
     """N3: Verify pr_age_minutes has 9999 fallback around line ~105-110."""
     script_content = SCRIPT_PATH.read_text()
 
-    # Find the pr_age_minutes section with fallback guard
-    assert 'pr_age_minutes="${pr_age_minutes:-9999}"' in script_content, (
-        "pr_age_minutes fallback guard not found"
+    # Find the pr_age_minutes section with case statement guard
+    assert 'case "${pr_age_minutes}" in' in script_content, (
+        "pr_age_minutes case statement guard not found"
     )
+    assert "pr_age_minutes=9999" in script_content, "pr_age_minutes 9999 fallback not found"
 
 
 def test_python_except_uses_9999():

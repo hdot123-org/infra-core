@@ -4,7 +4,7 @@
 echo "Testing shell guards with adversarial inputs..."
 
 echo
-echo "Test 1: Multiline numeric '12\\n34' -> should return '12'"
+printf '%s\n' "Test 1: Multiline numeric '12\\n34' -> should return '12'"
 input_val=$'12\n34'
 raw_age=$(echo "$input_val" | head -n 1 | tr -d '[:space:]')
 case "${raw_age}" in
@@ -19,7 +19,7 @@ else
 fi
 
 echo
-echo "Test 2: Number with warning '42\\nwarning: ...' -> should return '42'"
+printf '%s\n' "Test 2: Number with warning '42\\nwarning: ...' -> should return '42'"
 input_val=$'42\nwarning: something'
 raw_age=$(echo "$input_val" | head -n 1 | tr -d '[:space:]')
 case "${raw_age}" in
